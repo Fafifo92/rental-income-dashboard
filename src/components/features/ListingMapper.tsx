@@ -22,13 +22,14 @@ export default function ListingMapper({ uniqueNames, onConfirm, onBack }: Props)
   }, []);
 
   const isDemo = !loading && properties.length === 0;
-  const allMapped = uniqueNames.every(name => !!map[name]);
+  const anyMapped = Object.values(map).some(v => !!v);
 
   const handleConfirm = () => {
     if (isDemo) {
       const demoMap = Object.fromEntries(uniqueNames.map(n => [n, 'demo']));
       onConfirm(demoMap, true);
     } else {
+      // Only pass entries that have been assigned; unmapped will be skipped
       onConfirm(map, false);
     }
   };
@@ -46,7 +47,7 @@ export default function ListingMapper({ uniqueNames, onConfirm, onBack }: Props)
         <p className={`text-xs mt-1 ${isDemo ? 'text-amber-700' : 'text-blue-700'}`}>
           {isDemo
             ? 'No hay propiedades en la base de datos. Las reservas se guardarán localmente en el navegador.'
-            : `Encontramos ${uniqueNames.length} anuncio(s) único(s). Asigna cada uno a una propiedad.`}
+            : `Encontramos ${uniqueNames.length} anuncio(s) único(s). Asigna los que quieras importar — los que dejes sin seleccionar serán omitidos.`}
         </p>
       </div>
 
@@ -83,7 +84,7 @@ export default function ListingMapper({ uniqueNames, onConfirm, onBack }: Props)
                       onChange={e => setMap(prev => ({ ...prev, [name]: e.target.value }))}
                       className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     >
-                      <option value="">Seleccionar propiedad…</option>
+                      <option value="">— Omitir este anuncio</option>
                       {properties.map(p => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
@@ -107,7 +108,7 @@ export default function ListingMapper({ uniqueNames, onConfirm, onBack }: Props)
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.97 }}
           onClick={handleConfirm}
-          disabled={!isDemo && !allMapped}
+          disabled={!isDemo && !anyMapped}
           className="flex-1 py-2.5 text-sm font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {isDemo ? '💾 Guardar en modo demo →' : `Confirmar y persistir →`}

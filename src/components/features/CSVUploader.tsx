@@ -300,7 +300,7 @@ export default function CSVUploader({ onClose, onImport }: Props) {
                   <p className="text-xl font-bold text-slate-900">¡Importación exitosa!</p>
                   <p className="text-slate-500 mt-1 text-sm">Las reservas han sido guardadas correctamente.</p>
                 </div>
-                <div className="grid grid-cols-2 gap-4 w-full max-w-xs">
+                <div className="grid grid-cols-2 gap-4 w-full max-w-xs mx-auto">
                   <div className="p-4 bg-green-50 rounded-xl border border-green-200 text-center">
                     <p className="text-xs font-medium text-green-700">Reservas guardadas</p>
                     <p className="text-2xl font-bold text-green-800 mt-0.5">{result.upserted}</p>
@@ -311,14 +311,14 @@ export default function CSVUploader({ onClose, onImport }: Props) {
                   </div>
                 </div>
                 {result.errors.length > 0 && (
-                  <div className="text-left bg-red-50 border border-red-200 rounded-xl p-4 w-full max-w-xs">
+                  <div className="text-left bg-red-50 border border-red-200 rounded-xl p-4 w-full max-w-xs mx-auto">
                     <p className="text-xs font-semibold text-red-700 mb-2">Errores ({result.errors.length})</p>
                     {result.errors.map((e, i) => <p key={i} className="text-xs text-red-600">{e}</p>)}
                   </div>
                 )}
                 <a
                   href="/bookings"
-                  className="w-full max-w-xs flex items-center justify-center gap-2 px-6 py-3 text-sm font-semibold bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors shadow-sm"
+                  className="w-full max-w-xs mx-auto flex items-center justify-center gap-2 px-6 py-3 text-sm font-semibold bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors shadow-sm"
                 >
                   Ver Reservas →
                 </a>

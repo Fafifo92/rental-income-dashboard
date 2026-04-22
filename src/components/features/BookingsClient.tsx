@@ -11,6 +11,7 @@ import type { ParsedBooking } from '@/services/etl';
 import { formatCurrency } from '@/lib/utils';
 import { useAuth } from '@/lib/useAuth';
 import DataTable from './DataTable';
+import CSVUploader from './CSVUploader';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -89,11 +90,12 @@ export default function BookingsClient() {
   const [isDemo, setIsDemo]         = useState(false);
   const [filters, setFilters]       = useState<BookingFilters>(EMPTY_FILTERS);
   const [search, setSearch]         = useState('');
-  const [showModal, setShowModal]   = useState(false);
-  const [form, setForm]             = useState<BookingForm>(EMPTY_FORM);
+  const [showModal, setShowModal]     = useState(false);
+  const [showImporter, setShowImporter] = useState(false);
+  const [form, setForm]               = useState<BookingForm>(EMPTY_FORM);
   const [formLoading, setFormLoading] = useState(false);
-  const [formError, setFormError]   = useState('');
-  const [properties, setProperties] = useState<PropertyRow[]>([]);
+  const [formError, setFormError]     = useState('');
+  const [properties, setProperties]   = useState<PropertyRow[]>([]);
 
   const load = useCallback(async (f: BookingFilters) => {
     setLoading(true);
@@ -293,12 +295,13 @@ export default function BookingsClient() {
           >
             + Nueva reserva
           </motion.button>
-          <motion.a
-            href="/dashboard" whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+          <motion.button
+            whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+            onClick={() => setShowImporter(true)}
             className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
           >
             ↑ Importar CSV / XLSX
-          </motion.a>
+          </motion.button>
         </div>
       </motion.div>
 
@@ -394,6 +397,16 @@ export default function BookingsClient() {
         }}
       />
 
+      {/* ── CSVUploader modal ───────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showImporter && (
+          <CSVUploader
+            onClose={() => setShowImporter(false)}
+            onImport={() => { setShowImporter(false); load(filters); }}
+          />
+        )}
+      </AnimatePresence>
+
       {/* ── Nueva Reserva Modal ─────────────────────────────────────────────── */}
       <AnimatePresence>
         {showModal && (
@@ -485,8 +498,8 @@ export default function BookingsClient() {
                   />
                 </div>
 
-                {/* Property picker — only in auth mode with multiple properties */}
-                {authStatus === 'authed' && properties.length > 1 && (
+                {/* Property picker — only in auth mode */}
+                {authStatus === 'authed' && properties.length > 0 && (
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Propiedad (Supabase)</label>
                     <select value={form.property_id} onChange={e => handleFormChange('property_id', e.target.value)}
