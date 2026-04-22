@@ -8,9 +8,9 @@ export interface RawAirbnbRow {
   'Nombre del huésped': string;
   'Fecha de inicio': string;
   'Hasta': string;
-  'Número de noches': string;
+  'Número de noches': string | number;
   'Anuncio': string;
-  'Ingresos': string;
+  'Ingresos': string | number;
 }
 
 export interface ParsedBooking {
@@ -24,8 +24,44 @@ export interface ParsedBooking {
   revenue: number;
 }
 
-export const cleanCurrency = (val: string): number => {
-  return parseFloat(val.replace(/[$,\s]/g, '').replace(/\./g, '').replace(',', '.')) || 0;
+export const cleanCurrency = (val: string | number): number => {
+  if (typeof val === 'number') return val;
+  if (!val) return 0;
+
+  // Strip currency symbols and whitespace
+  const s = String(val).replace(/[$\s]/g, '').trim();
+  if (!s || !/\d/.test(s)) return 0;
+
+  const dotCount   = (s.match(/\./g) ?? []).length;
+  const commaCount = (s.match(/,/g) ?? []).length;
+
+  // Multiple dots → Colombian/EU: "1.520.000" or "1.520.000,50"
+  if (dotCount > 1) {
+    return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0;
+  }
+
+  // Multiple commas → US with cents: "1,520,000.50"
+  if (commaCount > 1) {
+    return parseFloat(s.replace(/,/g, '')) || 0;
+  }
+
+  // Single separator — use digit-count heuristic to decide if it's thousands or decimal
+  const lastDot   = s.lastIndexOf('.');
+  const lastComma = s.lastIndexOf(',');
+  const lastSep   = Math.max(lastDot, lastComma);
+  const afterSep  = s.substring(lastSep + 1);
+
+  if (afterSep.length === 3) {
+    // Exactly 3 digits after separator → thousands ("380,000" or "380.000")
+    return parseFloat(s.replace(/[.,]/g, '')) || 0;
+  }
+
+  // 0, 1, 2, or other digit count → treat last separator as decimal
+  const isCommaDec = lastComma > lastDot;
+  if (isCommaDec) {
+    return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0;
+  }
+  return parseFloat(s.replace(/,/g, '')) || 0;
 };
 
 export const parseCSVDate = (dateStr: string): string => {
@@ -46,9 +82,11 @@ export const transformRow = (row: RawAirbnbRow): ParsedBooking => ({
   confirmation_code: row['Código de confirmación'] ?? '',
   status: row['Estado'] ?? '',
   guest_name: row['Nombre del huésped'] ?? '',
-  start_date: parseCSVDate(row['Fecha de inicio'] ?? ''),
-  end_date: parseCSVDate(row['Hasta'] ?? ''),
-  num_nights: parseInt(row['Número de noches'] ?? '0') || 0,
+  start_date: parseCSVDate(String(row['Fecha de inicio'] ?? '')),
+  end_date: parseCSVDate(String(row['Hasta'] ?? '')),
+  num_nights: typeof row['Número de noches'] === 'number'
+    ? row['Número de noches']
+    : parseInt(String(row['Número de noches'] ?? '0')) || 0,
   listing_name: row['Anuncio'] ?? '',
   revenue: cleanCurrency(row['Ingresos'] ?? '0'),
 });
@@ -68,9 +106,12 @@ export const parseXLSXFile = async (file: File): Promise<ParsedBooking[]> => {
   if (rows.length < 2) return [];
   const headers = rows[0].map(h => String(h ?? ''));
   return rows.slice(1).map(row => {
-    const obj: Record<string, string> = {};
+    // Keep numbers as numbers so cleanCurrency can handle them correctly.
+    // String-convert only for fields that are always text (codes, names, dates, listing).
+    const obj: Record<string, string | number> = {};
     headers.forEach((h, i) => {
-      obj[h] = row[i] !== null && row[i] !== undefined ? String(row[i]) : '';
+      const v = row[i];
+      obj[h] = v !== null && v !== undefined ? (typeof v === 'number' ? v : String(v)) : '';
     });
     return transformRow(obj as RawAirbnbRow);
   });
