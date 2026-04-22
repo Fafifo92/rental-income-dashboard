@@ -1,0 +1,33 @@
+{
+  "name": "str-management-pro",
+  "type": "module",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/react": "^4.2.1",
+    "@astrojs/tailwind": "^6.0.0",
+    "@supabase/supabase-js": "^2.49.1",
+    "astro": "^5.4.2",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "framer-motion": "^12.4.7",
+    "lucide-react": "^0.479.0",
+    "papaparse": "^5.5.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^3.8.1",
+    "tailwind-merge": "^3.0.2",
+    "tailwindcss": "^4.0.12"
+  },
+  "devDependencies": {
+    "@types/papaparse": "^5.3.15",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1"
+  }
+}

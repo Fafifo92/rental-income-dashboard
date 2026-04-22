@@ -1,0 +1,66 @@
+---
+import Layout from '../layouts/Layout.astro';
+import DashboardSummary from '../components/features/DashboardSummary';
+import RevenueChart from '../components/features/RevenueChart';
+
+const metrics = {
+  grossRevenue: 25000000,
+  totalExpenses: 8000000,
+  netProfit: 17000000,
+  occupancyRate: 0.75,
+  adr: 350000,
+  revpar: 262500
+};
+
+const chartData = [
+  { name: 'Ene', revenue: 18000000, expenses: 5000000 },
+  { name: 'Feb', revenue: 22000000, expenses: 6500000 },
+  { name: 'Mar', revenue: 25000000, expenses: 8000000 },
+];
+---
+
+<Layout title="Dashboard - STR Management">
+	<div class="min-h-screen bg-slate-50">
+		<nav class="sticky top-0 z-10 border-b bg-white/80 backdrop-blur-md px-8 py-4 flex justify-between items-center">
+			<div class="flex items-center gap-2">
+				<div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">A</div>
+				<h1 class="text-xl font-bold text-slate-800">STR Analytics</h1>
+			</div>
+			<div class="flex items-center gap-6">
+				<a href="/expenses" class="text-sm font-medium text-slate-600 hover:text-blue-600 transition-colors">Gastos</a>
+				<a href="/properties" class="text-sm font-medium text-slate-600 hover:text-blue-600 transition-colors">Propiedades</a>
+				<div class="w-8 h-8 bg-slate-200 rounded-full border border-slate-300"></div>
+			</div>
+		</nav>
+
+		<main class="p-8 max-w-7xl mx-auto space-y-10">
+			<header>
+				<h2 class="text-3xl font-extrabold text-slate-900 tracking-tight">Panel de Control</h2>
+				<p class="text-slate-500 mt-1">Análisis detallado de tus rentas de corta estancia.</p>
+			</header>
+
+			<section>
+				<DashboardSummary metrics={metrics} client:load />
+			</section>
+
+			<section class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+				<div class="lg:col-span-2">
+					<RevenueChart data={chartData} client:load />
+				</div>
+				<aside class="space-y-8">
+					<div class="p-6 bg-white border rounded-xl shadow-sm">
+						<h3 class="font-bold text-slate-800 mb-4">Acciones Rápidas</h3>
+						<div class="grid gap-3">
+							<button class="w-full text-left px-4 py-3 text-sm font-medium rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
+								+ Registrar Gasto
+							</button>
+							<button class="w-full text-left px-4 py-3 text-sm font-medium rounded-lg bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors">
+								Importar CSV de Airbnb
+							</button>
+						</div>
+					</div>
+				</aside>
+			</section>
+		</main>
+	</div>
+</Layout>
