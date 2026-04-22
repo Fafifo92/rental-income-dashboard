@@ -187,7 +187,39 @@ export const getBookingKPIs = async (): Promise<ServiceResult<BookingKPIs>> => {
   };
 };
 
-/** Compute KPIs from demo (localStorage) bookings. */
+export const insertBooking = async (
+  listingId: string,
+  data: {
+    confirmation_code: string;
+    guest_name?: string;
+    start_date: string;
+    end_date: string;
+    num_nights: number;
+    total_revenue: number;
+    status?: string;
+  },
+): Promise<ServiceResult<BookingRow>> => {
+  const { data: row, error } = await supabase
+    .from('bookings')
+    .insert({
+      listing_id: listingId,
+      confirmation_code: data.confirmation_code,
+      guest_name: data.guest_name ?? null,
+      start_date: data.start_date,
+      end_date: data.end_date,
+      booked_at: null,
+      num_nights: data.num_nights,
+      num_adults: 1,
+      num_children: 0,
+      total_revenue: data.total_revenue,
+      status: data.status ?? null,
+      raw_data: null,
+    })
+    .select()
+    .single();
+  if (error) return { data: null, error: error.message };
+  return { data: row, error: null };
+};
 export const getDemoKPIs = (bookings: ParsedBooking[]): BookingKPIs => {
   const completed = bookings.filter(b => !b.status.toLowerCase().includes('cancel'));
   const cancelled = bookings.filter(b => b.status.toLowerCase().includes('cancel'));
