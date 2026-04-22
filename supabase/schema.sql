@@ -1,7 +1,7 @@
 -- TABLES
 
 -- Profiles
-CREATE TABLE profiles (
+CREATE TABLE IF NOT EXISTS profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   full_name TEXT,
@@ -10,17 +10,17 @@ CREATE TABLE profiles (
 );
 
 -- Properties
-CREATE TABLE properties (
+CREATE TABLE IF NOT EXISTS properties (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  owner_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  owner_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   name TEXT NOT NULL,
   address TEXT,
   base_currency TEXT DEFAULT 'COP' NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Listings (Maps CSV names to properties)
-CREATE TABLE listings (
+-- Listings (Maps CSV external names to properties)
+CREATE TABLE IF NOT EXISTS listings (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   property_id UUID REFERENCES properties(id) ON DELETE CASCADE NOT NULL,
   external_name TEXT NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE listings (
 );
 
 -- Bookings
-CREATE TABLE bookings (
+CREATE TABLE IF NOT EXISTS bookings (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   listing_id UUID REFERENCES listings(id) ON DELETE CASCADE NOT NULL,
   confirmation_code TEXT UNIQUE NOT NULL,
@@ -47,25 +47,20 @@ CREATE TABLE bookings (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Expense Categories
-CREATE TABLE expense_categories (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  name TEXT NOT NULL,
-  type TEXT CHECK (type IN ('fixed', 'variable')) NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-
--- Expenses
-CREATE TABLE expenses (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  property_id UUID REFERENCES properties(id) ON DELETE CASCADE NOT NULL,
-  category_id UUID REFERENCES expense_categories(id) ON DELETE SET NULL,
-  amount NUMERIC(12, 2) NOT NULL,
-  currency TEXT DEFAULT 'COP',
-  date DATE NOT NULL,
+-- Expenses (denormalized per ARCHITECTURE.md — category as text, type inline)
+-- owner_id: direct user link for RLS; property_id: optional FK
+CREATE TABLE IF NOT EXISTS expenses (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  owner_id    UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL DEFAULT auth.uid(),
+  property_id UUID REFERENCES properties(id) ON DELETE SET NULL,
+  category    TEXT NOT NULL,
+  type        TEXT CHECK (type IN ('fixed', 'variable')) NOT NULL DEFAULT 'variable',
+  amount      NUMERIC(12, 2) NOT NULL,
+  currency    TEXT DEFAULT 'COP',
+  date        DATE NOT NULL,
   description TEXT,
-  status TEXT DEFAULT 'paid' CHECK (status IN ('pending', 'paid', 'partial')),
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+  status      TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'partial')),
+  created_at  TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 -- RLS POLICIES
@@ -76,29 +71,33 @@ ALTER TABLE listings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users can view own profile" ON profiles FOR SELECT USING (auth.uid() = id);
-CREATE POLICY "Owners can manage own properties" ON properties FOR ALL USING (auth.uid() = owner_id);
+CREATE POLICY "Users can view own profile"
+  ON profiles FOR SELECT USING (auth.uid() = id);
 
-CREATE POLICY "Access listings by property" ON listings FOR ALL USING (
-  EXISTS (SELECT 1 FROM properties WHERE properties.id = listings.property_id AND properties.owner_id = auth.uid())
-);
+CREATE POLICY "Users can update own profile"
+  ON profiles FOR UPDATE USING (auth.uid() = id);
 
-CREATE POLICY "Access bookings by listing" ON bookings FOR ALL USING (
-  EXISTS (
-    SELECT 1 FROM listings
-    JOIN properties ON listings.property_id = properties.id
-    WHERE listings.id = bookings.listing_id AND properties.owner_id = auth.uid()
-  )
-);
+CREATE POLICY "Owners can manage own properties"
+  ON properties FOR ALL USING (auth.uid() = owner_id);
 
-CREATE POLICY "Access expenses by property" ON expenses FOR ALL USING (
-  EXISTS (SELECT 1 FROM properties WHERE properties.id = expenses.property_id AND properties.owner_id = auth.uid())
-);
+CREATE POLICY "Access listings by property"
+  ON listings FOR ALL USING (
+    EXISTS (SELECT 1 FROM properties WHERE properties.id = listings.property_id AND properties.owner_id = auth.uid())
+  );
 
--- SEED DATA
-INSERT INTO expense_categories (name, type) VALUES
-('Limpieza', 'variable'),
-('Mantenimiento', 'variable'),
-('Internet', 'fixed'),
-('Servicios', 'fixed'),
-('Administración', 'fixed');
+CREATE POLICY "Access bookings by listing"
+  ON bookings FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM listings
+      JOIN properties ON listings.property_id = properties.id
+      WHERE listings.id = bookings.listing_id AND properties.owner_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Users manage own expenses"
+  ON expenses FOR ALL USING (auth.uid() = owner_id);
+
+-- SEED: Default expense categories as reference (not a table — just a comment for the UI)
+-- Categories: Limpieza, Lavandería, Internet, Servicios Públicos, Mantenimiento,
+--             Administración, Welcome Kit, Seguros, Impuestos, Otro
+

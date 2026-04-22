@@ -1,0 +1,12 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import BookingsClient from '../components/features/BookingsClient';
+---
+
+<Layout title="Reservas - STR Management">
+  <div class="min-h-screen bg-slate-50">
+    <Nav />
+    <BookingsClient client:load />
+  </div>
+</Layout>

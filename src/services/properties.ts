@@ -1,0 +1,30 @@
+import { supabase } from '@/lib/supabase/client';
+import type { ServiceResult } from './expenses';
+import type { PropertyRow } from '@/types/database';
+
+export const listProperties = async (): Promise<ServiceResult<PropertyRow[]>> => {
+  const { data, error } = await supabase
+    .from('properties')
+    .select('*')
+    .order('name');
+  if (error) return { data: null, error: error.message };
+  return { data, error: null };
+};
+
+export const createProperty = async (
+  name: string,
+  address?: string,
+  baseCurrency = 'COP',
+): Promise<ServiceResult<PropertyRow>> => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: null, error: 'No autenticado — inicia sesión primero' };
+
+  const { data, error } = await supabase
+    .from('properties')
+    .insert({ owner_id: user.id, name, address: address ?? null, base_currency: baseCurrency })
+    .select()
+    .single();
+
+  if (error) return { data: null, error: error.message };
+  return { data, error: null };
+};
