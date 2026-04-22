@@ -1,0 +1,316 @@
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import DashboardSummary, { KPISkeleton } from './DashboardSummary';
+import RevenueChart from './RevenueChart';
+import OccupancyChart from './OccupancyChart';
+import PeriodSelector from './PeriodSelector';
+import CSVUploader from './CSVUploader';
+import ExportMenu from './ExportMenu';
+import AlertsPanel from './AlertsPanel';
+import { computeFinancials } from '@/services/financial';
+import type { Period, FinancialKPIs, MonthlyPnL } from '@/services/financial';
+import type { ParsedBooking } from '@/services/etl';
+import { useAuth } from '@/lib/useAuth';
+import { formatCurrency } from '@/lib/utils';
+
+// ─── Break-even Alert ─────────────────────────────────────────────────────────
+
+// ─── P&L Waterfall panel ──────────────────────────────────────────────────────
+
+function PLPanel({ kpis }: { kpis: FinancialKPIs }) {
+  const rows: Array<{ label: string; value: number; variant: 'revenue' | 'expense' | 'total' }> = [
+    { label: 'Ingreso Bruto',       value: kpis.grossRevenue,           variant: 'revenue' },
+    { label: 'Gastos Fijos',        value: -kpis.totalFixedExpenses,    variant: 'expense' },
+    { label: 'Margen Contribución', value: kpis.contributionMargin,     variant: 'total' },
+    { label: 'Gastos Variables',    value: -kpis.totalVariableExpenses, variant: 'expense' },
+    { label: 'Utilidad Neta',       value: kpis.netProfit,              variant: 'total' },
+  ];
+  return (
+    <div className="p-6 bg-white border rounded-xl shadow-sm">
+      <h3 className="font-bold text-slate-800 mb-4">Análisis de Rentabilidad</h3>
+      <div className="space-y-2">
+        {rows.map((row, i) => (
+          <motion.div
+            key={row.label}
+            initial={{ opacity: 0, x: 8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.1 + i * 0.07 }}
+            className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm ${
+              row.variant === 'total'
+                ? row.value >= 0
+                  ? 'bg-green-50 font-bold text-green-800'
+                  : 'bg-red-50 font-bold text-red-800'
+                : row.variant === 'expense'
+                  ? 'text-red-700'
+                  : 'text-blue-700 font-medium'
+            }`}
+          >
+            <span>{row.label}</span>
+            <span className={row.variant === 'expense' ? 'text-red-600' : undefined}>
+              {row.variant === 'expense' ? '−' : ''}{formatCurrency(Math.abs(row.value))}
+            </span>
+          </motion.div>
+        ))}
+      </div>
+      <div className="mt-4 pt-4 border-t text-xs text-slate-400 space-y-1">
+        <p>Break-even: <strong className="text-slate-500">{kpis.breakEvenNights} noches / {kpis.breakEvenOccupancy}%</strong></p>
+        <p>ADR: <strong className="text-slate-500">{formatCurrency(kpis.adr)}</strong> · RevPAR: <strong className="text-slate-500">{formatCurrency(kpis.revpar)}</strong></p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+export default function DashboardClient() {
+  const authStatus = useAuth();
+  const [period, setPeriod]               = useState<Period>('last-3-months');
+  const [kpis, setKpis]                   = useState<FinancialKPIs | null>(null);
+  const [monthlyPnL, setMonthlyPnL]       = useState<MonthlyPnL[]>([]);
+  const [exportMonthly, setExportMonthly] = useState<MonthlyPnL[]>([]);
+  const [loading, setLoading]             = useState(true);
+  const [showUploader, setShowUploader]   = useState(false);
+  const [importedBookings, setImportedBookings] = useState<ParsedBooking[]>([]);
+
+  useEffect(() => {
+    if (authStatus === 'checking') return;
+    let cancelled = false;
+    setLoading(true);
+    computeFinancials(period, authStatus === 'authed').then(result => {
+      if (cancelled) return;
+      setKpis(result.kpis);
+      setMonthlyPnL(result.monthlyPnL);
+      setExportMonthly(result.exportMonthly);
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [period, authStatus]);
+
+  if (authStatus === 'checking') {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+          className="w-8 h-8 border-2 border-blue-200 border-t-blue-600 rounded-full" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <main className="p-8 max-w-7xl mx-auto space-y-8">
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: -12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+        >
+          <div>
+            <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Panel de Control</h2>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-slate-500">Análisis de tus rentas de corta estancia.</p>
+              {kpis?.isDemo && (
+                <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-medium">
+                  Modo demo
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <PeriodSelector value={period} onChange={setPeriod} />
+            {!loading && kpis && (
+              <ExportMenu kpis={kpis} monthly={exportMonthly} period={period} />
+            )}
+          </div>
+        </motion.div>
+
+        {/* KPI Grid */}
+        <section>
+          {loading || !kpis ? <KPISkeleton /> : <DashboardSummary kpis={kpis} />}
+        </section>
+
+        {/* Alerts */}
+        {!loading && kpis && <AlertsPanel kpis={kpis} monthly={monthlyPnL} />}
+
+        {/* Empty state for new authenticated users */}
+        {!loading && authStatus === 'authed' && kpis && kpis.totalBookings === 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-10 text-center"
+          >
+            <div className="text-5xl mb-4">🏠</div>
+            <h3 className="text-xl font-bold text-slate-800 mb-2">¡Bienvenido a STR Analytics!</h3>
+            <p className="text-slate-500 mb-8 max-w-md mx-auto">
+              Tu cuenta está lista. Comienza importando tus reservas de Airbnb para ver tus métricas financieras en tiempo real.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <button
+                onClick={() => setShowUploader(true)}
+                className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors shadow-sm"
+              >
+                📊 Importar reservas de Airbnb
+              </button>
+              <a
+                href="/properties"
+                className="px-6 py-3 bg-white text-blue-600 font-semibold rounded-xl border border-blue-200 hover:bg-blue-50 transition-colors"
+              >
+                🏠 Crear propiedad
+              </a>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Charts + Sidebar */}
+        <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 space-y-6">
+            <RevenueChart data={monthlyPnL} />
+            <OccupancyChart
+              data={monthlyPnL}
+              breakEvenOccupancy={kpis?.breakEvenOccupancy ?? 0}
+            />
+          </div>
+
+          <motion.aside
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.3, duration: 0.4 }}
+            className="space-y-6"
+          >
+            {/* Quick Actions */}
+            <div className="p-6 bg-white border rounded-xl shadow-sm">
+              <h3 className="font-bold text-slate-800 mb-4">Acciones Rápidas</h3>
+              <div className="grid gap-3">
+                {[
+                  { icon: '📊', label: 'Importar CSV / XLSX de Airbnb', onClick: () => setShowUploader(true) },
+                  { icon: '📋', label: 'Ver Reservas', href: '/bookings' },
+                  { icon: '💸', label: 'Registrar Gasto', href: '/expenses' },
+                  { icon: '🏠', label: 'Ver Propiedades', href: '/properties' },
+                ].map(item => (
+                  item.href ? (
+                    <motion.a
+                      key={item.label}
+                      href={item.href}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="w-full text-left px-4 py-3 text-sm font-medium rounded-lg bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors flex items-center gap-2"
+                    >
+                      <span>{item.icon}</span> {item.label}
+                    </motion.a>
+                  ) : (
+                    <motion.button
+                      key={item.label}
+                      type="button"
+                      onClick={item.onClick}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="w-full text-left px-4 py-3 text-sm font-medium rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors flex items-center gap-2"
+                    >
+                      <span>{item.icon}</span> {item.label}
+                    </motion.button>
+                  )
+                ))}
+              </div>
+            </div>
+
+            {/* P&L Waterfall */}
+            {!loading && kpis && <PLPanel kpis={kpis} />}
+
+            {/* Import summary */}
+            {importedBookings.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-6 bg-green-50 border border-green-200 rounded-xl"
+              >
+                <p className="text-sm font-semibold text-green-800 mb-3">✅ Datos importados</p>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-green-700">Reservas</span>
+                    <span className="font-bold text-green-900">{importedBookings.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-green-700">Ingresos</span>
+                    <span className="font-bold text-green-900">
+                      {formatCurrency(importedBookings.reduce((s, b) => s + b.revenue, 0))}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-green-700">Noches</span>
+                    <span className="font-bold text-green-900">
+                      {importedBookings.reduce((s, b) => s + b.num_nights, 0)}
+                    </span>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </motion.aside>
+        </section>
+
+        {/* Imported bookings table */}
+        <AnimatePresence>
+          {importedBookings.length > 0 && (
+            <motion.section
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-slate-900">Reservas Importadas</h3>
+                <span className="text-sm text-slate-500">{importedBookings.length} reservas</span>
+              </div>
+              <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+                <div className="overflow-x-auto max-h-[400px]">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-slate-50 border-b">
+                      <tr>
+                        {['Código', 'Estado', 'Huésped', 'Check-in', 'Check-out', 'Noches', 'Anuncio', 'Ingresos'].map(h => (
+                          <th key={h} className="text-left px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {importedBookings.map((b, i) => (
+                        <motion.tr
+                          key={b.confirmation_code || i}
+                          initial={{ opacity: 0, x: -8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: Math.min(i * 0.02, 0.8) }}
+                          className="hover:bg-slate-50 transition-colors"
+                        >
+                          <td className="px-4 py-3 font-mono text-xs text-slate-500">{b.confirmation_code}</td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                              b.status.toLowerCase().includes('complet') ? 'bg-green-100 text-green-700' :
+                              b.status.toLowerCase().includes('cancel') ? 'bg-red-100 text-red-700' :
+                              'bg-yellow-100 text-yellow-700'
+                            }`}>{b.status}</span>
+                          </td>
+                          <td className="px-4 py-3 font-medium text-slate-800">{b.guest_name}</td>
+                          <td className="px-4 py-3 text-slate-500">{b.start_date}</td>
+                          <td className="px-4 py-3 text-slate-500">{b.end_date}</td>
+                          <td className="px-4 py-3 text-center">{b.num_nights}</td>
+                          <td className="px-4 py-3 text-slate-600 max-w-[160px] truncate">{b.listing_name}</td>
+                          <td className="px-4 py-3 text-right font-semibold text-slate-800">{formatCurrency(b.revenue)}</td>
+                        </motion.tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </motion.section>
+          )}
+        </AnimatePresence>
+      </main>
+
+      <AnimatePresence>
+        {showUploader && (
+          <CSVUploader
+            onClose={() => setShowUploader(false)}
+            onImport={setImportedBookings}
+          />
+        )}
+      </AnimatePresence>
+    </>
+  );
+}

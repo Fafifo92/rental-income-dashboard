@@ -1,0 +1,13 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import ExpensesClient from '../components/features/ExpensesClient';
+---
+
+<Layout title="Gastos - STR Management">
+  <div class="min-h-screen bg-slate-50">
+    <Nav />
+    <ExpensesClient client:load />
+  </div>
+</Layout>
+

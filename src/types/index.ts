@@ -27,8 +27,10 @@ export interface Booking {
 
 export interface Expense {
   id: string;
-  property_id: string;
-  category_id: string;
+  owner_id?: string;
+  property_id?: string | null;
+  category: string;
+  type: 'fixed' | 'variable';
   amount: number;
   date: string;
   description: string | null;
