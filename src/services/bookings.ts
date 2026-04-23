@@ -14,6 +14,7 @@ export interface ImportResult {
 
 export interface BookingFilters {
   listingId?: string;
+  propertyId?: string;
   status?: string;
   dateFrom?: string;
   dateTo?: string;
@@ -132,11 +133,24 @@ export const upsertBookings = async (
 export const listBookings = async (
   filters?: BookingFilters,
 ): Promise<ServiceResult<BookingRow[]>> => {
+  // If filtering by property, resolve listing IDs first
+  let allowedListingIds: string[] | undefined;
+  if (filters?.propertyId) {
+    const { data: listings, error } = await supabase
+      .from('listings')
+      .select('id')
+      .eq('property_id', filters.propertyId);
+    if (error) return { data: null, error: error.message };
+    if (!listings || listings.length === 0) return { data: [], error: null };
+    allowedListingIds = listings.map((l: { id: string }) => l.id);
+  }
+
   let query = supabase
     .from('bookings')
     .select('*')
     .order('start_date', { ascending: false });
 
+  if (allowedListingIds) query = query.in('listing_id', allowedListingIds);
   if (filters?.listingId) query = query.eq('listing_id', filters.listingId);
   if (filters?.status) query = query.eq('status', filters.status);
   if (filters?.dateFrom) query = query.gte('start_date', filters.dateFrom);

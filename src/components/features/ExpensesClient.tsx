@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ExpensesList from './ExpensesList';
 import ExpenseModal from './ExpenseModal';
 import FilterBar from './FilterBar';
+import PropertySelector from './PropertySelector';
 import {
   listExpenses,
   createExpense,
@@ -10,8 +11,10 @@ import {
   type ExpenseFilters,
 } from '@/services/expenses';
 import type { Expense } from '@/types';
+import type { PropertyRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { useAuth } from '@/lib/useAuth';
+import { usePropertyFilter } from '@/lib/usePropertyFilter';
 
 // Shown while Supabase isn't connected yet
 const DEMO_EXPENSES: Expense[] = [
@@ -27,6 +30,7 @@ const EMPTY_FILTERS: ExpenseFilters = {};
 
 export default function ExpensesClient() {
   const authStatus = useAuth();
+  const { properties, propertyId, setPropertyId } = usePropertyFilter();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [dbConnected, setDbConnected] = useState(false);
@@ -34,11 +38,10 @@ export default function ExpensesClient() {
   const [filters, setFilters] = useState<ExpenseFilters>(EMPTY_FILTERS);
   const [saveError, setSaveError] = useState('');
 
-  const loadExpenses = useCallback(async (f: ExpenseFilters) => {
+  const loadExpenses = useCallback(async (f: ExpenseFilters, propId?: string) => {
     setLoading(true);
-    const result = await listExpenses(undefined, f);
+    const result = await listExpenses(propId, f);
     if (result.error) {
-      // Supabase not connected — fall back to demo data with client-side filtering
       let demo = DEMO_EXPENSES;
       if (f.category) demo = demo.filter(e => e.category === f.category);
       if (f.type) demo = demo.filter(e => e.type === f.type);
@@ -58,7 +61,7 @@ export default function ExpensesClient() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { loadExpenses(filters); }, [filters, loadExpenses]);
+  useEffect(() => { loadExpenses(filters, propertyId); }, [filters, propertyId, loadExpenses]);
 
   // Auth guard (after all hooks)
   if (authStatus === 'checking') {
@@ -70,15 +73,14 @@ export default function ExpensesClient() {
     );
   }
 
-  const handleSave = async (data: Omit<Expense, 'id' | 'owner_id' | 'property_id'>) => {
+  const handleSave = async (data: Omit<Expense, 'id' | 'owner_id'>) => {
     setSaveError('');
-    const fullData: Omit<Expense, 'id' | 'owner_id'> = { ...data, property_id: null };
     if (dbConnected) {
-      const result = await createExpense(fullData);
+      const result = await createExpense(data);
       if (result.error) { setSaveError(result.error); return; }
       setExpenses(prev => [result.data, ...prev]);
     } else {
-      setExpenses(prev => [{ ...fullData, id: crypto.randomUUID() }, ...prev]);
+      setExpenses(prev => [{ ...data, id: crypto.randomUUID() }, ...prev]);
     }
     setShowModal(false);
   };
@@ -121,14 +123,17 @@ export default function ExpensesClient() {
             </div>
             <p className="text-slate-500 mt-1">Control de gastos fijos y variables por propiedad.</p>
           </div>
-          <motion.button
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.97 }}
-            onClick={() => setShowModal(true)}
-            className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
-          >
-            + Registrar Gasto
-          </motion.button>
+          <div className="flex items-center gap-3 flex-wrap">
+            <PropertySelector properties={properties} value={propertyId} onChange={setPropertyId} />
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => setShowModal(true)}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+            >
+              + Registrar Gasto
+            </motion.button>
+          </div>
         </motion.div>
 
         {/* KPI Cards */}
@@ -206,6 +211,7 @@ export default function ExpensesClient() {
       <AnimatePresence>
         {showModal && (
           <ExpenseModal
+            properties={properties}
             onClose={() => { setShowModal(false); setSaveError(''); }}
             onSave={handleSave}
             error={saveError}

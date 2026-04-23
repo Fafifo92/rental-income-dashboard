@@ -10,8 +10,10 @@ import type { BookingRow, PropertyRow } from '@/types/database';
 import type { ParsedBooking } from '@/services/etl';
 import { formatCurrency } from '@/lib/utils';
 import { useAuth } from '@/lib/useAuth';
+import { usePropertyFilter } from '@/lib/usePropertyFilter';
 import DataTable from './DataTable';
 import CSVUploader from './CSVUploader';
+import PropertySelector from './PropertySelector';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -85,6 +87,7 @@ const bookingHelper = createColumnHelper<DisplayBooking>();
 export default function BookingsClient() {
   // ── ALL HOOKS — must come before any conditional returns ──────────────────
   const authStatus = useAuth();
+  const { properties: allProperties, propertyId, setPropertyId } = usePropertyFilter();
   const [bookings, setBookings]     = useState<DisplayBooking[]>([]);
   const [loading, setLoading]       = useState(true);
   const [isDemo, setIsDemo]         = useState(false);
@@ -119,7 +122,7 @@ export default function BookingsClient() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(filters); }, [filters, load]);
+  useEffect(() => { load({ ...filters, propertyId }); }, [filters, propertyId, load]);
 
   useEffect(() => {
     if (authStatus === 'authed') {
@@ -287,7 +290,8 @@ export default function BookingsClient() {
           </div>
           <p className="text-slate-500 mt-1">Historial de reservas importadas desde Airbnb.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
+          <PropertySelector properties={allProperties} value={propertyId} onChange={setPropertyId} />
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
             onClick={() => { setForm(EMPTY_FORM); setFormError(''); setShowModal(true); }}
@@ -300,7 +304,7 @@ export default function BookingsClient() {
             onClick={() => setShowImporter(true)}
             className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
           >
-            ↑ Importar CSV / XLSX
+            Importar CSV / XLSX
           </motion.button>
         </div>
       </motion.div>

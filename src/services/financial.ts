@@ -288,13 +288,14 @@ const delta = (cur: number, prior: number): number | null =>
 export const computeFinancials = async (
   period: Period,
   isAuthenticated = false,
+  propertyId?: string,
 ): Promise<{ kpis: FinancialKPIs; monthlyPnL: MonthlyPnL[]; exportMonthly: MonthlyPnL[] }> => {
   let bookings: BookingData[] = [];
   let isDemo = false;
+  const bookingFilters = propertyId ? { propertyId } : undefined;
 
   if (isAuthenticated) {
-    // Authenticated: only use Supabase — never show demo seed
-    const bookingRes = await listBookings();
+    const bookingRes = await listBookings(bookingFilters);
     if (!bookingRes.error) {
       bookings = bookingRes.data.map(r => ({
         start_date: r.start_date,
@@ -305,8 +306,7 @@ export const computeFinancials = async (
       }));
     }
   } else {
-    // Demo mode: Supabase → localStorage → built-in seed
-    const bookingRes = await listBookings();
+    const bookingRes = await listBookings(bookingFilters);
     if (bookingRes.error || bookingRes.data.length === 0) {
       const stored = getDemoBookings();
       bookings = stored.length > 0
@@ -324,8 +324,8 @@ export const computeFinancials = async (
     }
   }
 
-  // Load expenses
-  const expenseRes = await listExpenses();
+  // Load expenses (filtered by property if set)
+  const expenseRes = await listExpenses(propertyId);
   let expenses: Expense[] = [];
   if (isAuthenticated) {
     expenses = expenseRes.error ? [] : expenseRes.data;

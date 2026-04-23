@@ -1,16 +1,18 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Expense } from '@/types';
+import type { PropertyRow } from '@/types/database';
 
-type FormData = Omit<Expense, 'id' | 'owner_id' | 'property_id'>;
+type FormData = Omit<Expense, 'id' | 'owner_id'>;
 
 interface Props {
+  properties?: PropertyRow[];
   onClose: () => void;
   onSave: (expense: FormData) => void;
   error?: string;
 }
 
-const CATEGORIES = ['Limpieza', 'Lavandería', 'Internet', 'Servicios Públicos', 'Mantenimiento', 'Administración', 'Welcome Kit', 'Seguros', 'Impuestos', 'Otro'];
+const CATEGORIES = ['Limpieza', 'Lavandería', 'Internet', 'Servicios Públicos', 'Mantenimiento', 'Administración', 'Welcome Kit', 'Seguros', 'Impuestos', 'Toallas y ropa de cama', 'Utensilios y enseres', 'Decoración', 'Otro'];
 
 const INITIAL: FormData = {
   category: '',
@@ -19,9 +21,10 @@ const INITIAL: FormData = {
   date: new Date().toISOString().split('T')[0],
   description: null,
   status: 'pending',
+  property_id: null,
 };
 
-export default function ExpenseModal({ onClose, onSave, error }: Props) {
+export default function ExpenseModal({ properties = [], onClose, onSave, error }: Props) {
   const [form, setForm] = useState<FormData>(INITIAL);
   const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>({});
 
@@ -111,6 +114,21 @@ export default function ExpenseModal({ onClose, onSave, error }: Props) {
                 </div>
               </div>
             </div>
+
+            {/* Propiedad */}
+            {properties.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Propiedad</label>
+                <select
+                  value={form.property_id ?? ''}
+                  onChange={e => set('property_id', e.target.value || null)}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                >
+                  <option value="">General / Sin propiedad específica</option>
+                  {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+            )}
 
             {/* Monto */}
             <div>

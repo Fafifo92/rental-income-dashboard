@@ -7,10 +7,12 @@ import PeriodSelector from './PeriodSelector';
 import CSVUploader from './CSVUploader';
 import ExportMenu from './ExportMenu';
 import AlertsPanel from './AlertsPanel';
+import PropertySelector from './PropertySelector';
 import { computeFinancials } from '@/services/financial';
 import type { Period, FinancialKPIs, MonthlyPnL } from '@/services/financial';
 import type { ParsedBooking } from '@/services/etl';
 import { useAuth } from '@/lib/useAuth';
+import { usePropertyFilter } from '@/lib/usePropertyFilter';
 import { formatCurrency } from '@/lib/utils';
 
 // ─── Break-even Alert ─────────────────────────────────────────────────────────
@@ -64,6 +66,7 @@ function PLPanel({ kpis }: { kpis: FinancialKPIs }) {
 
 export default function DashboardClient() {
   const authStatus = useAuth();
+  const { properties, propertyId, setPropertyId } = usePropertyFilter();
   const [period, setPeriod]               = useState<Period>('last-3-months');
   const [kpis, setKpis]                   = useState<FinancialKPIs | null>(null);
   const [monthlyPnL, setMonthlyPnL]       = useState<MonthlyPnL[]>([]);
@@ -76,7 +79,7 @@ export default function DashboardClient() {
     if (authStatus === 'checking') return;
     let cancelled = false;
     setLoading(true);
-    computeFinancials(period, authStatus === 'authed').then(result => {
+    computeFinancials(period, authStatus === 'authed', propertyId).then(result => {
       if (cancelled) return;
       setKpis(result.kpis);
       setMonthlyPnL(result.monthlyPnL);
@@ -84,7 +87,7 @@ export default function DashboardClient() {
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [period, authStatus]);
+  }, [period, authStatus, propertyId]);
 
   if (authStatus === 'checking') {
     return (
@@ -116,7 +119,8 @@ export default function DashboardClient() {
               )}
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <PropertySelector properties={properties} value={propertyId} onChange={setPropertyId} />
             <PeriodSelector value={period} onChange={setPeriod} />
             {!loading && kpis && (
               <ExportMenu kpis={kpis} monthly={exportMonthly} period={period} />
@@ -139,7 +143,11 @@ export default function DashboardClient() {
             animate={{ opacity: 1, y: 0 }}
             className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-10 text-center"
           >
-            <div className="text-5xl mb-4">🏠</div>
+          <div className="text-4xl mb-4 text-slate-300">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l9-9 9 9M5 10v10a1 1 0 001 1h4a1 1 0 001-1v-5h2v5a1 1 0 001 1h4a1 1 0 001-1V10" />
+            </svg>
+          </div>
             <h3 className="text-xl font-bold text-slate-800 mb-2">¡Bienvenido a STR Analytics!</h3>
             <p className="text-slate-500 mb-8 max-w-md mx-auto">
               Tu cuenta está lista. Comienza importando tus reservas de Airbnb para ver tus métricas financieras en tiempo real.
@@ -149,13 +157,13 @@ export default function DashboardClient() {
                 onClick={() => setShowUploader(true)}
                 className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors shadow-sm"
               >
-                📊 Importar reservas de Airbnb
+                Importar reservas de Airbnb
               </button>
               <a
                 href="/properties"
                 className="px-6 py-3 bg-white text-blue-600 font-semibold rounded-xl border border-blue-200 hover:bg-blue-50 transition-colors"
               >
-                🏠 Crear propiedad
+                Crear propiedad
               </a>
             </div>
           </motion.div>
@@ -182,10 +190,10 @@ export default function DashboardClient() {
               <h3 className="font-bold text-slate-800 mb-4">Acciones Rápidas</h3>
               <div className="grid gap-3">
                 {[
-                  { icon: '📊', label: 'Importar CSV / XLSX de Airbnb', onClick: () => setShowUploader(true) },
-                  { icon: '📋', label: 'Ver Reservas', href: '/bookings' },
-                  { icon: '💸', label: 'Registrar Gasto', href: '/expenses' },
-                  { icon: '🏠', label: 'Ver Propiedades', href: '/properties' },
+                  { label: 'Importar CSV / XLSX de Airbnb', onClick: () => setShowUploader(true) },
+                  { label: 'Ver Reservas', href: '/bookings' },
+                  { label: 'Registrar Gasto', href: '/expenses' },
+                  { label: 'Ver Propiedades', href: '/properties' },
                 ].map(item => (
                   item.href ? (
                     <motion.a
@@ -193,9 +201,9 @@ export default function DashboardClient() {
                       href={item.href}
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
-                      className="w-full text-left px-4 py-3 text-sm font-medium rounded-lg bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors flex items-center gap-2"
+                      className="w-full text-left px-4 py-3 text-sm font-medium rounded-lg bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors"
                     >
-                      <span>{item.icon}</span> {item.label}
+                      {item.label}
                     </motion.a>
                   ) : (
                     <motion.button
@@ -204,9 +212,9 @@ export default function DashboardClient() {
                       onClick={item.onClick}
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
-                      className="w-full text-left px-4 py-3 text-sm font-medium rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors flex items-center gap-2"
+                      className="w-full text-left px-4 py-3 text-sm font-medium rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
                     >
-                      <span>{item.icon}</span> {item.label}
+                      {item.label}
                     </motion.button>
                   )
                 ))}
