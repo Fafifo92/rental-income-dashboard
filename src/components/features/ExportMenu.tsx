@@ -33,25 +33,25 @@ export default function ExportMenu({ kpis, monthly, period }: Props) {
     {
       label: 'KPIs — CSV',
       description: 'Métricas principales del período',
-      icon: '📊',
+      icon: '',
       action: () => exportKpisToCsv(kpis, periodLabel),
     },
     {
       label: 'P&L Mensual — CSV',
       description: 'Ingresos / gastos mes a mes',
-      icon: '📈',
+      icon: '',
       action: () => exportMonthlyToCsv(monthly),
     },
     {
       label: 'Reporte Excel',
       description: 'KPIs + P&L en múltiples hojas',
-      icon: '📋',
+      icon: '',
       action: () => exportToExcel(kpis, monthly, periodLabel),
     },
     {
       label: 'Imprimir / PDF',
       description: 'Reporte para archivar o compartir',
-      icon: '🖨️',
+      icon: '',
       action: () => window.open('/report', '_blank'),
     },
   ];
@@ -111,10 +111,10 @@ export default function ExportMenu({ kpis, monthly, period }: Props) {
                   transition={{ delay: i * 0.05 }}
                   className="w-full flex items-start gap-3 px-4 py-3 hover:bg-slate-50 text-left transition-colors disabled:opacity-50 border-b border-slate-50 last:border-0"
                 >
-                  <span className="text-xl mt-0.5 shrink-0">{opt.icon}</span>
+                  {opt.icon && <span className="text-xl mt-0.5 shrink-0">{opt.icon}</span>}
                   <div>
                     <p className="text-sm font-semibold text-slate-700">
-                      {loading === opt.label ? '⏳ Generando...' : opt.label}
+                      {loading === opt.label ? 'Generando…' : opt.label}
                     </p>
                     <p className="text-xs text-slate-400">{opt.description}</p>
                   </div>

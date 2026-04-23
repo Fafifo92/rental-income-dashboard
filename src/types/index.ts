@@ -35,6 +35,11 @@ export interface Expense {
   date: string;
   description: string | null;
   status: 'pending' | 'paid' | 'partial';
+  bank_account_id?: string | null;
+  vendor?: string | null;
+  person_in_charge?: string | null;
+  booking_id?: string | null;
+  adjustment_id?: string | null;
 }
 
 export interface FinancialMetrics {

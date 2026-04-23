@@ -2,16 +2,23 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ExpensesList from './ExpensesList';
 import ExpenseModal from './ExpenseModal';
+import ExpenseDetailModal from './ExpenseDetailModal';
+import BookingDetailModal from './BookingDetailModal';
 import FilterBar from './FilterBar';
 import PropertySelector from './PropertySelector';
 import {
   listExpenses,
   createExpense,
+  updateExpense,
   deleteExpense,
   type ExpenseFilters,
 } from '@/services/expenses';
+import { listBankAccounts } from '@/services/bankAccounts';
+import { listListings } from '@/services/listings';
+import { deleteBookingAdjustment } from '@/services/bookingAdjustments';
+import { supabase } from '@/lib/supabase/client';
 import type { Expense } from '@/types';
-import type { PropertyRow } from '@/types/database';
+import type { PropertyRow, BankAccountRow, BookingRow, ListingRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { useAuth } from '@/lib/useAuth';
 import { usePropertyFilter } from '@/lib/usePropertyFilter';
@@ -35,8 +42,15 @@ export default function ExpensesClient() {
   const [loading, setLoading] = useState(true);
   const [dbConnected, setDbConnected] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState<Expense | null>(null);
+  const [viewing, setViewing] = useState<Expense | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
   const [filters, setFilters] = useState<ExpenseFilters>(EMPTY_FILTERS);
   const [saveError, setSaveError] = useState('');
+  const [bankAccounts, setBankAccounts] = useState<BankAccountRow[]>([]);
+  const [listings, setListings] = useState<ListingRow[]>([]);
+  const [viewingBooking, setViewingBooking] = useState<BookingRow | null>(null);
+  const [tab, setTab] = useState<'all' | 'real' | 'recurring' | 'fees'>('all');
 
   const loadExpenses = useCallback(async (f: ExpenseFilters, propId?: string) => {
     setLoading(true);
@@ -63,6 +77,23 @@ export default function ExpensesClient() {
 
   useEffect(() => { loadExpenses(filters, propertyId); }, [filters, propertyId, loadExpenses]);
 
+  useEffect(() => {
+    if (authStatus === 'authed') {
+      listBankAccounts().then(res => {
+        if (!res.error) setBankAccounts(res.data.filter(a => a.is_active));
+      });
+      listListings().then(res => { if (!res.error) setListings(res.data); });
+    }
+  }, [authStatus]);
+
+  const handleViewBooking = useCallback(async (bookingId: string) => {
+    const { data, error } = await supabase.from('bookings').select('*').eq('id', bookingId).single();
+    if (!error && data) {
+      setViewing(null);
+      setViewingBooking(data as BookingRow);
+    }
+  }, []);
+
   // Auth guard (after all hooks)
   if (authStatus === 'checking') {
     return (
@@ -75,6 +106,20 @@ export default function ExpensesClient() {
 
   const handleSave = async (data: Omit<Expense, 'id' | 'owner_id'>) => {
     setSaveError('');
+    if (editing) {
+      // EDITAR
+      if (dbConnected) {
+        const result = await updateExpense(editing.id, data);
+        if (result.error) { setSaveError(result.error); return; }
+        setExpenses(prev => prev.map(e => e.id === editing.id ? result.data : e));
+      } else {
+        setExpenses(prev => prev.map(e => e.id === editing.id ? { ...e, ...data } : e));
+      }
+      setEditing(null);
+      setShowModal(false);
+      return;
+    }
+    // CREAR
     if (dbConnected) {
       const result = await createExpense(data);
       if (result.error) { setSaveError(result.error); return; }
@@ -85,18 +130,64 @@ export default function ExpensesClient() {
     setShowModal(false);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleEdit = (expense: Expense) => {
+    setViewing(null);
+    setEditing(expense);
+    setShowModal(true);
+  };
+
+  // Descarta un gasto pendiente JUNTO con su ajuste de reserva vinculado (si aplica).
+  // Pensado para "Cobro por daño" cuando el usuario decide no proceder con la reparación.
+  // No usa deleteTarget para evitar UX ambigua — muestra su propio flow dentro del ExpenseModal.
+  const handleDiscardWithAdjustment = async (expense: Expense) => {
+    setSaveError('');
+    if (expense.adjustment_id) {
+      const resAdj = await deleteBookingAdjustment(expense.adjustment_id);
+      if (resAdj.error) { setSaveError(`No se pudo eliminar el ajuste: ${resAdj.error}`); return; }
+    }
     if (dbConnected) {
-      const result = await deleteExpense(id);
+      const res = await deleteExpense(expense.id);
+      if (res.error) { setSaveError(res.error); return; }
+    }
+    setExpenses(prev => prev.filter(e => e.id !== expense.id));
+    setEditing(null);
+    setShowModal(false);
+  };
+
+  const handleDeleteRequest = (id: string) => {
+    const target = expenses.find(e => e.id === id);
+    if (target) setDeleteTarget(target);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    if (dbConnected) {
+      const result = await deleteExpense(deleteTarget.id);
       if (result.error) return;
     }
-    setExpenses(prev => prev.filter(e => e.id !== id));
+    setExpenses(prev => prev.filter(e => e.id !== deleteTarget.id));
+    setDeleteTarget(null);
   };
 
   const totalFixed = expenses.filter(e => e.type === 'fixed').reduce((s, e) => s + e.amount, 0);
   const totalVariable = expenses.filter(e => e.type === 'variable').reduce((s, e) => s + e.amount, 0);
   const pendingExpenses = expenses.filter(e => e.status === 'pending');
   const totalPending = pendingExpenses.reduce((s, e) => s + e.amount, 0);
+
+  // Clasificación por origen
+  const kindOf = (e: Expense): 'real' | 'recurring' | 'fees' => {
+    if (e.id.startsWith('rec-')) return 'recurring';
+    if (e.id.startsWith('fee-')) return 'fees';
+    return 'real';
+  };
+  const tabCounts = {
+    all: expenses.length,
+    real: expenses.filter(e => kindOf(e) === 'real').length,
+    recurring: expenses.filter(e => kindOf(e) === 'recurring').length,
+    fees: expenses.filter(e => kindOf(e) === 'fees').length,
+  };
+  const visibleExpenses = tab === 'all' ? expenses : expenses.filter(e => kindOf(e) === tab);
+  const visibleTotal = visibleExpenses.reduce((s, e) => s + e.amount, 0);
 
   const kpis = [
     { label: 'Gastos Fijos', value: formatCurrency(totalFixed), color: 'text-blue-600', bg: 'bg-blue-50' },
@@ -164,7 +255,7 @@ export default function ExpensesClient() {
               <div className="border border-yellow-200 bg-yellow-50 rounded-xl p-5">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-bold text-yellow-900 flex items-center gap-2">
-                    <span>⏳</span> Cuentas por Pagar
+                    <span className="inline-block w-2 h-2 rounded-full bg-amber-500"></span> Cuentas por Pagar
                     <span className="text-xs font-semibold px-2 py-0.5 bg-yellow-200 text-yellow-800 rounded-full">
                       {pendingExpenses.length}
                     </span>
@@ -173,19 +264,37 @@ export default function ExpensesClient() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {pendingExpenses.map((e, i) => (
-                    <motion.div
+                    <motion.button
                       key={e.id}
+                      type="button"
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: i * 0.06 }}
-                      className="bg-white rounded-lg p-4 border border-yellow-100 shadow-sm flex items-center justify-between"
+                      onClick={() => handleEdit(e)}
+                      title="Clic para completar, pagar o descartar este gasto pendiente"
+                      className="bg-white rounded-lg p-4 border border-yellow-100 shadow-sm text-left hover:border-yellow-300 hover:shadow transition focus:outline-none focus:ring-2 focus:ring-yellow-400"
                     >
-                      <div>
-                        <p className="font-semibold text-slate-800 text-sm">{e.category}</p>
-                        <p className="text-xs text-slate-400 mt-0.5">{e.date}</p>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="font-semibold text-slate-800 text-sm truncate">{e.category}</p>
+                            {e.adjustment_id && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-red-50 text-red-700 border-red-200 whitespace-nowrap">
+                                🔗 DAÑO
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-400 mt-0.5">{e.date}</p>
+                          {e.description && (
+                            <p className="text-xs text-slate-600 mt-1 line-clamp-2">{e.description}</p>
+                          )}
+                        </div>
+                        <p className="font-bold text-yellow-700 text-sm whitespace-nowrap">{formatCurrency(e.amount)}</p>
                       </div>
-                      <p className="font-bold text-yellow-700 text-sm">{formatCurrency(e.amount)}</p>
-                    </motion.div>
+                      <p className="text-[10px] text-yellow-700/70 mt-2 font-medium uppercase tracking-wide">
+                        Clic para resolver →
+                      </p>
+                    </motion.button>
                   ))}
                 </div>
               </div>
@@ -198,13 +307,53 @@ export default function ExpensesClient() {
           filters={filters}
           onChange={setFilters}
           onReset={() => setFilters(EMPTY_FILTERS)}
+          bankAccounts={bankAccounts}
         />
+
+        {/* Tabs por origen — con total por tab */}
+        <div>
+          <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto">
+            {([
+              { key: 'all',       label: 'Todos',            color: 'text-slate-700',  hint: 'Vista consolidada' },
+              { key: 'real',      label: 'Registrados',      color: 'text-blue-700',   hint: 'Gastos cargados manualmente o por CSV' },
+              { key: 'recurring', label: 'Recurrentes',      color: 'text-purple-700', hint: 'Expansión mensual de gastos fijos por propiedad' },
+              { key: 'fees',      label: 'Comisiones canal', color: 'text-rose-700',   hint: 'Fees de Airbnb/Booking derivados de reservas' },
+            ] as const).map(t => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                title={t.hint}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                  tab === t.key
+                    ? `${t.color} border-current`
+                    : 'text-slate-500 border-transparent hover:text-slate-700'
+                }`}
+              >
+                {t.label} <span className="ml-1 text-xs text-slate-400">({tabCounts[t.key]})</span>
+              </button>
+            ))}
+          </div>
+          {/* Resumen del tab activo */}
+          <div className="flex items-center justify-between mt-3 px-1 text-sm">
+            <p className="text-slate-500">
+              {tab === 'all' && 'Mostrando todas las fuentes de gasto combinadas.'}
+              {tab === 'real' && 'Gastos reales cargados por ti. Editables y eliminables.'}
+              {tab === 'recurring' && 'Valores generados automáticamente según los rubros recurrentes por propiedad. Para modificar, ve a Propiedades → Config.'}
+              {tab === 'fees' && 'Comisiones descontadas por el canal en cada reserva. Editables desde el modal "Payout" de la reserva.'}
+            </p>
+            <p className="font-semibold text-slate-800">
+              Total tab: <span className="text-slate-900">{formatCurrency(visibleTotal)}</span>
+            </p>
+          </div>
+        </div>
 
         {/* Table */}
         <ExpensesList
-          expenses={expenses}
+          expenses={visibleExpenses}
           loading={loading}
-          onDelete={handleDelete}
+          onDelete={handleDeleteRequest}
+          onEdit={handleEdit}
+          onView={setViewing}
         />
       </main>
 
@@ -212,10 +361,102 @@ export default function ExpensesClient() {
         {showModal && (
           <ExpenseModal
             properties={properties}
-            onClose={() => { setShowModal(false); setSaveError(''); }}
+            bankAccounts={bankAccounts}
+            initial={editing ? {
+              category: editing.category,
+              type: editing.type,
+              amount: editing.amount,
+              date: editing.date,
+              description: editing.description,
+              status: editing.status,
+              property_id: editing.property_id,
+              bank_account_id: editing.bank_account_id ?? null,
+              vendor: editing.vendor ?? null,
+              person_in_charge: editing.person_in_charge ?? null,
+              booking_id: editing.booking_id ?? null,
+              adjustment_id: editing.adjustment_id ?? null,
+            } : null}
+            onClose={() => { setShowModal(false); setEditing(null); setSaveError(''); }}
             onSave={handleSave}
             error={saveError}
+            onDiscardLinked={editing?.adjustment_id ? () => handleDiscardWithAdjustment(editing) : undefined}
           />
+        )}
+
+        {viewing && (
+          <ExpenseDetailModal
+            expense={viewing}
+            properties={properties}
+            bankAccounts={bankAccounts}
+            onClose={() => setViewing(null)}
+            onEdit={handleEdit}
+            onViewBooking={handleViewBooking}
+          />
+        )}
+
+        {viewingBooking && (
+          <BookingDetailModal
+            booking={{
+              id: viewingBooking.id,
+              confirmation_code: viewingBooking.confirmation_code,
+              guest_name: viewingBooking.guest_name ?? '—',
+              start_date: viewingBooking.start_date,
+              end_date: viewingBooking.end_date,
+              num_nights: viewingBooking.num_nights,
+              total_revenue: Number(viewingBooking.total_revenue),
+              status: viewingBooking.status ?? '',
+              channel: viewingBooking.channel ?? null,
+              gross_revenue: viewingBooking.gross_revenue !== null && viewingBooking.gross_revenue !== undefined ? Number(viewingBooking.gross_revenue) : null,
+              channel_fees: viewingBooking.channel_fees !== null && viewingBooking.channel_fees !== undefined ? Number(viewingBooking.channel_fees) : null,
+              net_payout: viewingBooking.net_payout !== null && viewingBooking.net_payout !== undefined ? Number(viewingBooking.net_payout) : null,
+              payout_date: viewingBooking.payout_date ?? null,
+              listing_id: viewingBooking.listing_id ?? null,
+              notes: viewingBooking.notes ?? null,
+            }}
+            properties={properties}
+            bankAccounts={bankAccounts}
+            onClose={() => setViewingBooking(null)}
+            resolvePropertyId={(lid) => {
+              if (!lid) return null;
+              return listings.find(l => l.id === lid)?.property_id ?? null;
+            }}
+          />
+        )}
+
+        {deleteTarget && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={e => e.target === e.currentTarget && setDeleteTarget(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto"
+            >
+              <h3 className="text-xl font-bold text-slate-900 mb-2">¿Eliminar gasto?</h3>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+                <p className="text-sm text-red-800">
+                  <span className="font-semibold">{deleteTarget.category}</span> — {formatCurrency(deleteTarget.amount)}
+                </p>
+                <p className="text-xs text-red-600 mt-1">{deleteTarget.date}{deleteTarget.description ? ` · ${deleteTarget.description}` : ''}</p>
+              </div>
+              <p className="text-sm text-slate-500 mb-5">Esta acción es irreversible.</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteTarget(null)}
+                  className="flex-1 py-2.5 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleConfirmDelete}
+                  className="flex-1 py-2.5 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700"
+                >
+                  Eliminar
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </>

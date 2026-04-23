@@ -109,6 +109,16 @@ export const upsertBookings = async (
       total_revenue: b.revenue,
       status: b.status || null,
       raw_data: null,
+      channel: 'airbnb',
+      gross_revenue: b.revenue,
+      channel_fees: null,
+      taxes_withheld: null,
+      net_payout: null,
+      payout_bank_account_id: null,
+      payout_date: null,
+      currency: 'COP',
+      exchange_rate: null,
+      notes: null,
     });
   }
 
@@ -211,6 +221,10 @@ export const insertBooking = async (
     num_nights: number;
     total_revenue: number;
     status?: string;
+    channel?: string;
+    num_adults?: number;
+    num_children?: number;
+    notes?: string;
   },
 ): Promise<ServiceResult<BookingRow>> => {
   const { data: row, error } = await supabase
@@ -223,16 +237,94 @@ export const insertBooking = async (
       end_date: data.end_date,
       booked_at: null,
       num_nights: data.num_nights,
-      num_adults: 1,
-      num_children: 0,
+      num_adults: data.num_adults ?? 1,
+      num_children: data.num_children ?? 0,
       total_revenue: data.total_revenue,
+      gross_revenue: data.total_revenue,
       status: data.status ?? null,
+      channel: data.channel ?? 'airbnb',
+      notes: data.notes ?? null,
       raw_data: null,
     })
     .select()
     .single();
   if (error) return { data: null, error: error.message };
   return { data: row, error: null };
+};
+
+/** Update basic booking fields (edit flow). */
+export const updateBooking = async (
+  bookingId: string,
+  patch: {
+    guest_name?: string | null;
+    start_date?: string;
+    end_date?: string;
+    num_nights?: number;
+    total_revenue?: number;
+    gross_revenue?: number | null;
+    status?: string | null;
+    channel?: string | null;
+    num_adults?: number;
+    num_children?: number;
+    notes?: string | null;
+  },
+): Promise<ServiceResult<BookingRow>> => {
+  const dbPatch: Record<string, unknown> = { ...patch };
+  // mantener gross_revenue en sync con total_revenue
+  if (patch.total_revenue !== undefined && patch.gross_revenue === undefined) {
+    dbPatch.gross_revenue = patch.total_revenue;
+  }
+  const { data, error } = await supabase
+    .from('bookings')
+    .update(dbPatch)
+    .eq('id', bookingId)
+    .select()
+    .single();
+  if (error) return { data: null, error: error.message };
+  return { data, error: null };
+};
+
+export const deleteBooking = async (bookingId: string): Promise<ServiceResult<null>> => {
+  const { error } = await supabase.from('bookings').delete().eq('id', bookingId);
+  if (error) return { data: null, error: error.message };
+  return { data: null, error: null };
+};
+
+/** Update the real payout fields of a booking (what actually arrived in the bank). */
+export const updateBookingPayout = async (
+  bookingId: string,
+  patch: {
+    net_payout?: number | null;
+    channel_fees?: number | null;
+    taxes_withheld?: number | null;
+    payout_bank_account_id?: string | null;
+    payout_date?: string | null;
+    gross_revenue?: number | null;
+    exchange_rate?: number | null;
+    notes?: string | null;
+  },
+): Promise<ServiceResult<BookingRow>> => {
+  // Si se modifica el bruto, también sincronizamos total_revenue
+  // (campo legado que alimenta KPIs históricos).
+  const dbPatch: Record<string, unknown> = { ...patch };
+  if (patch.gross_revenue !== undefined && patch.gross_revenue !== null) {
+    dbPatch.total_revenue = patch.gross_revenue;
+  }
+  const { data, error } = await supabase
+    .from('bookings')
+    .update(dbPatch)
+    .eq('id', bookingId)
+    .select()
+    .single();
+  if (error) return { data: null, error: error.message };
+  return { data, error: null };
+};
+
+/** Generate a unique code for direct-channel bookings: DIR-YYYY-XXXXX */
+export const generateDirectBookingCode = (): string => {
+  const year = new Date().getFullYear();
+  const rand = Math.floor(Math.random() * 99999).toString().padStart(5, '0');
+  return `DIR-${year}-${rand}`;
 };
 export const getDemoKPIs = (bookings: ParsedBooking[]): BookingKPIs => {
   const completed = bookings.filter(b => !b.status.toLowerCase().includes('cancel'));

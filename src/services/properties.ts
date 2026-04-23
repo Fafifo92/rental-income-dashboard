@@ -11,6 +11,16 @@ export const listProperties = async (): Promise<ServiceResult<PropertyRow[]>> =>
   return { data, error: null };
 };
 
+export const getProperty = async (id: string): Promise<ServiceResult<PropertyRow>> => {
+  const { data, error } = await supabase
+    .from('properties')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) return { data: null, error: error.message };
+  return { data, error: null };
+};
+
 export const createProperty = async (
   name: string,
   address?: string,
@@ -28,3 +38,18 @@ export const createProperty = async (
   if (error) return { data: null, error: error.message };
   return { data, error: null };
 };
+
+export const updateProperty = async (
+  id: string,
+  patch: Partial<Omit<PropertyRow, 'id' | 'owner_id' | 'created_at'>>,
+): Promise<ServiceResult<PropertyRow>> => {
+  const { data, error } = await supabase
+    .from('properties')
+    .update(patch)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return { data: null, error: error.message };
+  return { data, error: null };
+};
+

@@ -42,7 +42,7 @@ export default function ListingMapper({ uniqueNames, onConfirm, onBack }: Props)
     >
       <div className={`rounded-xl p-4 border ${isDemo ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-200'}`}>
         <p className={`text-sm font-semibold ${isDemo ? 'text-amber-900' : 'text-blue-900'}`}>
-          {isDemo ? '⚠️ Sin propiedades — Modo demo' : '🔗 Vincula anuncios a propiedades'}
+          {isDemo ? 'Sin propiedades — Modo demo' : 'Vincula anuncios a propiedades'}
         </p>
         <p className={`text-xs mt-1 ${isDemo ? 'text-amber-700' : 'text-blue-700'}`}>
           {isDemo

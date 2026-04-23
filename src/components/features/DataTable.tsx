@@ -51,7 +51,7 @@ export default function DataTable<T extends object>({
   showSearch = true,
   searchPlaceholder = 'Buscar…',
   defaultPageSize = 10,
-  emptyIcon = '📋',
+  emptyIcon = '',
   emptyTitle = 'Sin datos',
   emptyDescription,
   renderFooter,
@@ -92,8 +92,10 @@ export default function DataTable<T extends object>({
       {showSearch && (
         <div className="px-5 py-3 border-b bg-slate-50 flex items-center gap-3 flex-wrap">
           <div className="relative flex-1 min-w-[180px] max-w-xs">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none">
-              🔍
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 100-15 7.5 7.5 0 000 15z" />
+              </svg>
             </span>
             <input
               type="text"
@@ -175,7 +177,7 @@ export default function DataTable<T extends object>({
               <tr>
                 <td colSpan={columns.length} className="text-center py-16 text-slate-400">
                   <div className="space-y-2">
-                    <div className="text-3xl">{emptyIcon}</div>
+                    {emptyIcon && <div className="text-3xl">{emptyIcon}</div>}
                     <p className="font-medium">{emptyTitle}</p>
                     {emptyDescription && <div className="text-sm">{emptyDescription}</div>}
                   </div>

@@ -1,6 +1,8 @@
 import { getDemoBookings, listBookings } from './bookings';
 import { listExpenses } from './expenses';
+import { listAllRecurringExpensesForOwner } from './recurringExpenses';
 import type { Expense } from '@/types';
+import type { PropertyRecurringExpenseRow } from '@/types/database';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -285,6 +287,44 @@ const buildMonthlyPnL = (
 const delta = (cur: number, prior: number): number | null =>
   prior === 0 ? null : (cur - prior) / Math.abs(prior);
 
+/**
+ * Expand active recurring expenses into synthetic monthly Expense entries
+ * covering [from, to]. One entry per recurring row per month, dated to its
+ * `day_of_month` (clamped to the month length).
+ */
+const expandRecurringExpenses = (
+  recurring: PropertyRecurringExpenseRow[],
+  from: Date,
+  to: Date,
+): Expense[] => {
+  if (recurring.length === 0) return [];
+  const out: Expense[] = [];
+  const cur = new Date(from.getFullYear(), from.getMonth(), 1);
+  const end = new Date(to.getFullYear(), to.getMonth() + 1, 1);
+  while (cur < end) {
+    const daysInMo = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate();
+    for (const r of recurring) {
+      const day = Math.min(Math.max(Number(r.day_of_month) || 1, 1), daysInMo);
+      const date = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      // Respeta vigencia (SCD type 2)
+      if (r.valid_from && date < r.valid_from) continue;
+      if (r.valid_to && date > r.valid_to) continue;
+      out.push({
+        id: `rec-${r.id}-${date}`,
+        property_id: r.property_id,
+        category: r.category,
+        type: 'fixed',
+        amount: Number(r.amount),
+        date,
+        description: r.description ?? `Recurrente: ${r.category}`,
+        status: 'paid',
+      });
+    }
+    cur.setMonth(cur.getMonth() + 1);
+  }
+  return out;
+};
+
 export const computeFinancials = async (
   period: Period,
   isAuthenticated = false,
@@ -293,6 +333,9 @@ export const computeFinancials = async (
   let bookings: BookingData[] = [];
   let isDemo = false;
   const bookingFilters = propertyId ? { propertyId } : undefined;
+
+  // Channel fees → tratados como gasto sintético para que impacten netProfit
+  const channelFeeExpenses: Expense[] = [];
 
   if (isAuthenticated) {
     const bookingRes = await listBookings(bookingFilters);
@@ -304,6 +347,21 @@ export const computeFinancials = async (
         revenue:    Number(r.total_revenue),
         status:     r.status ?? '',
       }));
+      for (const r of bookingRes.data) {
+        const fees = Number(r.channel_fees ?? 0);
+        if (fees > 0) {
+          channelFeeExpenses.push({
+            id: `fee-${r.id}`,
+            property_id: null,
+            category: 'Comisiones de canal',
+            type: 'variable',
+            amount: fees,
+            date: r.start_date,
+            description: `Comisión ${r.channel ?? 'canal'} — ${r.confirmation_code}`,
+            status: 'paid',
+          });
+        }
+      }
     }
   } else {
     const bookingRes = await listBookings(bookingFilters);
@@ -324,8 +382,12 @@ export const computeFinancials = async (
     }
   }
 
-  // Load expenses (filtered by property if set)
-  const expenseRes = await listExpenses(propertyId);
+  // Load expenses (filtered by property if set).
+  // Disable synthetic injection here; computeFinancials does its own injection.
+  const expenseRes = await listExpenses(propertyId, {
+    includeRecurring: false,
+    includeChannelFees: false,
+  });
   let expenses: Expense[] = [];
   if (isAuthenticated) {
     expenses = expenseRes.error ? [] : expenseRes.data;
@@ -333,6 +395,34 @@ export const computeFinancials = async (
     expenses = (expenseRes.error || expenseRes.data.length === 0)
       ? DEMO_EXPENSES_SEED
       : expenseRes.data;
+  }
+
+  // Expand active recurring expenses into synthetic monthly entries.
+  // Only for authenticated users; demo data already includes fixed expenses.
+  if (isAuthenticated) {
+    const recRes = await listAllRecurringExpensesForOwner();
+    if (!recRes.error && recRes.data.length > 0) {
+      const filtered = propertyId
+        ? recRes.data.filter(r => r.property_id === propertyId)
+        : recRes.data;
+
+      // Expansion window: from earliest data point (or 24 months ago) to today.
+      const dates: number[] = [];
+      for (const b of bookings) if (b.start_date) dates.push(new Date(b.start_date).getTime());
+      for (const e of expenses) if (e.date) dates.push(new Date(e.date).getTime());
+      const now = new Date();
+      const twoYearsAgo = new Date(now.getFullYear() - 2, now.getMonth(), 1);
+      const earliest = dates.length > 0 ? new Date(Math.min(...dates)) : twoYearsAgo;
+      const fromDate = earliest < twoYearsAgo ? earliest : twoYearsAgo;
+
+      const synthetic = expandRecurringExpenses(filtered, fromDate, now);
+      expenses = [...expenses, ...synthetic];
+    }
+  }
+
+  // Add channel fee synthetic expenses (authenticated only)
+  if (channelFeeExpenses.length > 0) {
+    expenses = [...expenses, ...channelFeeExpenses];
   }
 
   // Compute KPIs for current + prior period
@@ -351,8 +441,27 @@ export const computeFinancials = async (
     },
   };
 
-  // Chart range: for single-month view, show last 3 months for context
-  const chartRange = period === 'current-month' ? getPeriodRange('last-3-months') : range;
+  // Chart range: acota al rango real de datos cuando se elige 'all',
+  // y amplía a last-3-months cuando es un solo mes (para contexto visual).
+  const chartRange: DateRange = (() => {
+    if (period === 'current-month') return getPeriodRange('last-3-months');
+    if (period === 'all') {
+      const dates = [
+        ...bookings.map(b => b.start_date),
+        ...expenses.map(e => e.date),
+      ].filter(Boolean).sort();
+      if (dates.length === 0) {
+        // Sin datos: últimos 12 meses
+        const today = new Date();
+        return { from: new Date(today.getFullYear(), today.getMonth() - 11, 1), to: today };
+      }
+      return {
+        from: new Date(dates[0] + 'T00:00:00'),
+        to: new Date(dates[dates.length - 1] + 'T00:00:00'),
+      };
+    }
+    return range;
+  })();
   const monthlyPnL = buildMonthlyPnL(bookings, expenses, chartRange);
 
   // Export range: always accurate to the selected period.

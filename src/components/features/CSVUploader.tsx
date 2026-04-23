@@ -167,13 +167,14 @@ export default function CSVUploader({ onClose, onImport }: Props) {
                 <input ref={inputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onFileChange} />
                 {step === 'error' ? (
                   <div className="space-y-2">
-                    <div className="text-4xl">⚠️</div>
                     <p className="font-semibold text-red-600">{error}</p>
                     <p className="text-sm text-slate-400">Haz clic o arrastra otro archivo</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <div className="text-5xl">📁</div>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12 mx-auto text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                    </svg>
                     <p className="font-semibold text-slate-700 text-lg">
                       {step === 'dragging' ? 'Suelta el archivo aquí' : 'Arrastra tu archivo aquí'}
                     </p>
@@ -292,9 +293,11 @@ export default function CSVUploader({ onClose, onImport }: Props) {
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
                   transition={{ type: 'spring', stiffness: 400, damping: 20, delay: 0.1 }}
-                  className="text-6xl"
+                  className="mx-auto w-16 h-16 rounded-full bg-green-100 flex items-center justify-center"
                 >
-                  ✅
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
                 </motion.div>
                 <div>
                   <p className="text-xl font-bold text-slate-900">¡Importación exitosa!</p>

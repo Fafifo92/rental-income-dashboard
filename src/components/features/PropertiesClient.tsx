@@ -29,13 +29,11 @@ const DEMO_PROPERTIES: Property[] = [
 ];
 
 const CATEGORY_COLORS = ['from-blue-500 to-indigo-600', 'from-emerald-500 to-teal-600', 'from-violet-500 to-purple-600', 'from-orange-500 to-amber-600'];
-const ICONS = ['🏠', '🏢', '🏡', '🏘️'];
 
 // ─── Property Card ─────────────────────────────────────────────────────────────
 
 function PropertyCard({ property, index, isDemo }: { property: Property; index: number; isDemo: boolean }) {
   const colorClass = CATEGORY_COLORS[index % CATEGORY_COLORS.length];
-  const icon = ICONS[index % ICONS.length];
 
   return (
     <motion.div
@@ -44,37 +42,41 @@ function PropertyCard({ property, index, isDemo }: { property: Property; index: 
       transition={{ delay: index * 0.08, duration: 0.35 }}
       className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow"
     >
-      {/* Header strip */}
       <div className={`h-2 bg-gradient-to-r ${colorClass}`} />
 
       <div className="p-6">
-        <div className="flex items-start gap-4">
-          <span className="text-3xl">{icon}</span>
-          <div className="flex-1 min-w-0">
-            <h3 className="font-bold text-slate-800 text-lg leading-tight truncate">{property.name}</h3>
-            {property.address && (
-              <p className="text-slate-500 text-sm mt-1 truncate">📍 {property.address}</p>
-            )}
-            {isDemo && (
-              <span className="inline-block mt-2 px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-medium rounded-full">
-                Datos demo
-              </span>
-            )}
-          </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-bold text-slate-800 text-lg leading-tight truncate">{property.name}</h3>
+          {property.address && (
+            <p className="text-slate-500 text-sm mt-1 truncate">{property.address}</p>
+          )}
+          {isDemo && (
+            <span className="inline-block mt-2 px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-medium rounded-full">
+              Datos demo
+            </span>
+          )}
         </div>
 
-        <div className="mt-4 pt-4 border-t border-slate-100 flex gap-3">
+        <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-3 gap-2">
+          {!isDemo && (
+            <a
+              href={`/property-detail?id=${property.id}`}
+              className="text-center text-xs font-medium text-blue-600 hover:text-blue-800 py-2 px-2 rounded-lg hover:bg-blue-50 transition-colors"
+            >
+              Config.
+            </a>
+          )}
           <a
             href="/bookings"
-            className="flex-1 text-center text-xs font-medium text-blue-600 hover:text-blue-800 py-2 px-3 rounded-lg hover:bg-blue-50 transition-colors"
+            className="text-center text-xs font-medium text-slate-600 hover:text-slate-800 py-2 px-2 rounded-lg hover:bg-slate-50 transition-colors"
           >
-            Ver reservas
+            Reservas
           </a>
           <a
             href="/expenses"
-            className="flex-1 text-center text-xs font-medium text-slate-600 hover:text-slate-800 py-2 px-3 rounded-lg hover:bg-slate-50 transition-colors"
+            className="text-center text-xs font-medium text-slate-600 hover:text-slate-800 py-2 px-2 rounded-lg hover:bg-slate-50 transition-colors"
           >
-            Ver gastos
+            Gastos
           </a>
         </div>
       </div>
@@ -114,7 +116,7 @@ function PropertyModal({ onClose, onCreated }: { onClose: () => void; onCreated:
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.95, opacity: 0, y: 12 }}
         transition={{ duration: 0.25 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 max-h-[90vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
         <h2 className="text-xl font-bold text-slate-800 mb-6">Nueva Propiedad</h2>
@@ -251,7 +253,11 @@ export default function PropertiesClient() {
           animate={{ opacity: 1, y: 0 }}
           className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-12 text-center"
         >
-          <div className="text-5xl mb-4">🏠</div>
+          <div className="text-4xl mb-4 text-slate-300">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l9-9 9 9M5 10v10a1 1 0 001 1h4a1 1 0 001-1v-5h2v5a1 1 0 001 1h4a1 1 0 001-1V10" />
+            </svg>
+          </div>
           <h3 className="text-xl font-bold text-slate-800 mb-2">Sin propiedades aún</h3>
           <p className="text-slate-500 mb-6 max-w-sm mx-auto">
             Agrega tu primera propiedad para comenzar a registrar reservas y gastos por unidad.

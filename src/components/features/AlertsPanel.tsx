@@ -22,7 +22,7 @@ function buildAlerts(kpis: FinancialKPIs, monthly: MonthlyPnL[]): Alert[] {
     alerts.push({
       id: 'break-even',
       level: currentOcc < kpis.breakEvenOccupancy * 0.7 ? 'error' : 'warning',
-      icon: '⚠️',
+      icon: '',
       title: 'Debajo del punto de equilibrio',
       body: `Ocupación actual ${currentOcc}% — necesitas ${kpis.breakEvenNights} noches (${kpis.breakEvenOccupancy}%) para cubrir costos fijos. Faltan ${shortfall} noches.`,
     });
@@ -36,7 +36,7 @@ function buildAlerts(kpis: FinancialKPIs, monthly: MonthlyPnL[]): Alert[] {
       alerts.push({
         id: 'maintenance',
         level: 'warning',
-        icon: '🔧',
+        icon: '',
         title: 'Gastos variables altos',
         body: `Los gastos variables representan el ${(kpis.totalVariableExpenses / kpis.grossRevenue * 100).toFixed(1)}% de tus ingresos. Considera revisar costos de limpieza y mantenimiento.`,
       });
@@ -48,7 +48,7 @@ function buildAlerts(kpis: FinancialKPIs, monthly: MonthlyPnL[]): Alert[] {
     alerts.push({
       id: 'net-loss',
       level: 'error',
-      icon: '🔴',
+      icon: '',
       title: 'Período en pérdida',
       body: `Utilidad neta negativa: ${formatCurrency(kpis.netProfit)}. Los gastos totales superan los ingresos por ${formatCurrency(Math.abs(kpis.netProfit))}.`,
     });
@@ -65,7 +65,7 @@ function buildAlerts(kpis: FinancialKPIs, monthly: MonthlyPnL[]): Alert[] {
         alerts.push({
           id: 'adr-drop',
           level: 'warning',
-          icon: '📉',
+          icon: '',
           title: 'Caída de tarifa diaria (ADR)',
           body: `La tarifa del mes ${last.month} (${formatCurrency(lastADR)}/noche) cayó más del 15% vs ${prev.month} (${formatCurrency(prevADR)}/noche).`,
         });
@@ -78,7 +78,7 @@ function buildAlerts(kpis: FinancialKPIs, monthly: MonthlyPnL[]): Alert[] {
     alerts.push({
       id: 'high-occ',
       level: 'info',
-      icon: '🌟',
+      icon: '',
       title: '¡Excelente ocupación!',
       body: `${currentOcc}% de ocupación — considera subir tarifas para maximizar RevPAR (actualmente ${formatCurrency(kpis.revpar)}/noche disponible).`,
     });
@@ -119,7 +119,10 @@ export default function AlertsPanel({ kpis, monthly }: Props) {
               transition={{ delay: i * 0.08 }}
               className={`flex items-start gap-3 p-4 rounded-xl border ${s.bg} ${s.border}`}
             >
-              <span className="text-xl shrink-0 mt-0.5">{alert.icon}</span>
+              {alert.icon && <span className="text-xl shrink-0 mt-0.5">{alert.icon}</span>}
+              <div className={`w-1 shrink-0 self-stretch rounded-full ${
+                alert.level === 'error' ? 'bg-red-400' : alert.level === 'warning' ? 'bg-amber-400' : 'bg-blue-400'
+              }`} />
               <div>
                 <p className={`text-sm font-bold ${s.title}`}>{alert.title}</p>
                 <p className={`text-xs mt-0.5 leading-relaxed ${s.body}`}>{alert.body}</p>

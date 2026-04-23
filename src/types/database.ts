@@ -28,6 +28,21 @@ export interface Database {
         Insert: Omit<ExpenseRow, 'id' | 'created_at'>;
         Update: Partial<Omit<ExpenseRow, 'id' | 'created_at'>>;
       };
+      property_recurring_expenses: {
+        Row: PropertyRecurringExpenseRow;
+        Insert: Omit<PropertyRecurringExpenseRow, 'id' | 'created_at'>;
+        Update: Partial<Omit<PropertyRecurringExpenseRow, 'id' | 'created_at'>>;
+      };
+      bank_accounts: {
+        Row: BankAccountRow;
+        Insert: Omit<BankAccountRow, 'id' | 'created_at'>;
+        Update: Partial<Omit<BankAccountRow, 'id' | 'created_at'>>;
+      };
+      booking_adjustments: {
+        Row: BookingAdjustmentRow;
+        Insert: Omit<BookingAdjustmentRow, 'id' | 'created_at'>;
+        Update: Partial<Omit<BookingAdjustmentRow, 'id' | 'created_at'>>;
+      };
     };
   };
 }
@@ -46,6 +61,53 @@ export interface PropertyRow {
   name: string;
   address: string | null;
   base_currency: string;
+  estrato: number | null;
+  bedrooms: number | null;
+  max_guests: number | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface PropertyRecurringExpenseRow {
+  id: string;
+  property_id: string;
+  category: string;
+  amount: number;
+  is_active: boolean;
+  day_of_month: number | null;
+  description: string | null;
+  created_at: string;
+  // Fase 8.1 — historial de precios
+  valid_from: string;       // YYYY-MM-DD
+  valid_to: string | null;  // NULL = vigente
+  // Fase 9.1 — metadata administrativa
+  vendor: string | null;
+  person_in_charge: string | null;
+}
+
+export interface BankAccountRow {
+  id: string;
+  owner_id: string;
+  name: string;
+  bank: string | null;
+  account_type: 'ahorros' | 'corriente' | 'billetera' | 'otro' | null;
+  account_number_mask: string | null;
+  currency: string;
+  opening_balance: number;
+  is_active: boolean;
+  notes: string | null;
+  created_at: string;
+}
+
+export type BookingAdjustmentKind = 'extra_income' | 'discount' | 'damage_charge';
+
+export interface BookingAdjustmentRow {
+  id: string;
+  booking_id: string;
+  kind: BookingAdjustmentKind;
+  amount: number;
+  description: string | null;
+  date: string;
   created_at: string;
 }
 
@@ -72,6 +134,17 @@ export interface BookingRow {
   status: string | null;
   raw_data: Record<string, unknown> | null;
   created_at: string;
+  // Fase 9
+  channel: string | null;
+  gross_revenue: number | null;
+  channel_fees: number | null;
+  taxes_withheld: number | null;
+  net_payout: number | null;
+  payout_bank_account_id: string | null;
+  payout_date: string | null;
+  currency: string | null;
+  exchange_rate: number | null;
+  notes: string | null;
 }
 
 export interface ExpenseRow {
@@ -86,4 +159,11 @@ export interface ExpenseRow {
   description: string | null;
   status: 'pending' | 'paid' | 'partial';
   created_at: string;
+  // Fase 9
+  bank_account_id: string | null;
+  booking_id: string | null;
+  vendor: string | null;
+  person_in_charge: string | null;
+  // Fase 10 — vínculo fuerte con ajuste de reserva
+  adjustment_id: string | null;
 }
