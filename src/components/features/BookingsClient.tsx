@@ -505,7 +505,7 @@ export default function BookingsClient() {
 
   // ── RENDER ────────────────────────────────────────────────────────────────
   return (
-    <main className="p-8 max-w-7xl mx-auto space-y-8">
+    <main className="px-4 sm:px-6 lg:px-8 py-5 sm:py-7 lg:py-8 max-w-7xl mx-auto space-y-6 sm:space-y-8">
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }}
@@ -658,7 +658,7 @@ export default function BookingsClient() {
             <motion.div
               initial={{ scale: 0.93, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.93, opacity: 0 }} transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto"
             >
               {/* Modal header */}
               <div className="flex items-center justify-between px-6 py-4 border-b">
@@ -724,7 +724,7 @@ export default function BookingsClient() {
                 {/* Stay section — fechas + noches sincronizadas */}
                 <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Estadía</p>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-xs font-semibold text-slate-600 mb-1">Check-in *</label>
                       <input type="date" value={form.start_date}

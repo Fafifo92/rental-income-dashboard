@@ -99,7 +99,7 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
         initial={{ scale: 0.93, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.93, opacity: 0 }}
         transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <div>

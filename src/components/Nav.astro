@@ -4,73 +4,165 @@ import NotificationsBell from './features/NotificationsBell';
 const currentPath = Astro.url.pathname;
 
 const navLinks = [
-  { href: '/dashboard',  label: 'Dashboard' },
-  { href: '/bookings',   label: 'Reservas' },
-  { href: '/expenses',   label: 'Gastos' },
+  { href: '/dashboard',  label: 'Dashboard', icon: '📊' },
+  { href: '/bookings',   label: 'Reservas',  icon: '📅' },
+  { href: '/expenses',   label: 'Gastos',    icon: '💸' },
 ];
 
 const adminLinks = [
-  { href: '/properties',    label: 'Propiedades',     desc: 'Inmuebles y datos básicos' },
-  { href: '/accounts',      label: 'Cuentas bancarias', desc: 'Bancos, saldos y pagos' },
-  { href: '/vendors',       label: 'Servicios y proveedores', desc: 'Facturas mensuales y reparto' },
-  { href: '/aseo',          label: 'Aseo',            desc: 'Personal y saldos adeudados' },
+  { href: '/properties',    label: 'Propiedades',     desc: 'Inmuebles y datos básicos',     icon: '🏠' },
+  { href: '/accounts',      label: 'Cuentas bancarias', desc: 'Bancos, saldos y pagos',       icon: '🏦' },
+  { href: '/vendors',       label: 'Servicios y proveedores', desc: 'Facturas mensuales',     icon: '🧾' },
+  { href: '/aseo',          label: 'Aseo',            desc: 'Personal y saldos',              icon: '🧹' },
 ];
 
 const adminActive = adminLinks.some(l => currentPath.startsWith(l.href));
 ---
 
-<nav class="sticky top-0 z-50 border-b border-slate-200 bg-white shadow-sm px-8 py-3 flex justify-between items-center">
-  <div class="flex items-center gap-2">
-    <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-sm">A</div>
-    <span class="text-xl font-bold text-slate-800">STR Analytics</span>
-  </div>
-  <div class="flex items-center gap-6">
-    {navLinks.map(link => (
-      <a
-        href={link.href}
-        class={`text-sm font-medium transition-colors ${
-          currentPath === link.href
-            ? 'text-blue-600 border-b-2 border-blue-500 pb-0.5'
-            : 'text-slate-600 hover:text-blue-600'
-        }`}
-      >
-        {link.label}
-      </a>
-    ))}
+<nav class="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur shadow-sm">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-3">
+    <!-- Logo -->
+    <a href="/dashboard" class="flex items-center gap-2 shrink-0">
+      <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-sm">A</div>
+      <span class="text-base sm:text-xl font-bold text-slate-800 hidden xs:block sm:block">STR Analytics</span>
+    </a>
 
-    <div class="relative group">
-      <button
-        class={`text-sm font-medium transition-colors inline-flex items-center gap-1 ${
-          adminActive
-            ? 'text-blue-600 border-b-2 border-blue-500 pb-0.5'
-            : 'text-slate-600 hover:text-blue-600'
-        }`}
-      >
-        Administración
-        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-          <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.08l3.71-3.85a.75.75 0 011.08 1.04l-4.25 4.4a.75.75 0 01-1.08 0l-4.25-4.4a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-        </svg>
-      </button>
-      <div class="invisible opacity-0 translate-y-1 group-hover:visible group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150 absolute right-0 top-full pt-2 w-72 z-50">
-        <div class="bg-white rounded-xl shadow-xl border border-slate-200 py-2">
-          {adminLinks.map(l => (
-            <a
-              href={l.href}
-              class={`block px-4 py-2.5 hover:bg-slate-50 ${
-                currentPath.startsWith(l.href) ? 'bg-blue-50' : ''
-              }`}
-            >
-              <div class={`text-sm font-semibold ${currentPath.startsWith(l.href) ? 'text-blue-700' : 'text-slate-800'}`}>
-                {l.label}
-              </div>
-              <div class="text-xs text-slate-500">{l.desc}</div>
-            </a>
-          ))}
+    <!-- Desktop nav -->
+    <div class="hidden lg:flex items-center gap-6">
+      {navLinks.map(link => (
+        <a
+          href={link.href}
+          class={`text-sm font-medium transition-colors ${
+            currentPath === link.href
+              ? 'text-blue-600 border-b-2 border-blue-500 pb-0.5'
+              : 'text-slate-600 hover:text-blue-600'
+          }`}
+        >
+          {link.label}
+        </a>
+      ))}
+
+      <div class="relative group">
+        <button
+          class={`text-sm font-medium transition-colors inline-flex items-center gap-1 ${
+            adminActive
+              ? 'text-blue-600 border-b-2 border-blue-500 pb-0.5'
+              : 'text-slate-600 hover:text-blue-600'
+          }`}
+        >
+          Administración
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.08l3.71-3.85a.75.75 0 011.08 1.04l-4.25 4.4a.75.75 0 01-1.08 0l-4.25-4.4a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+          </svg>
+        </button>
+        <div class="invisible opacity-0 translate-y-1 group-hover:visible group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150 absolute right-0 top-full pt-2 w-72 z-50">
+          <div class="bg-white rounded-xl shadow-xl border border-slate-200 py-2">
+            {adminLinks.map(l => (
+              <a
+                href={l.href}
+                class={`block px-4 py-2.5 hover:bg-slate-50 ${
+                  currentPath.startsWith(l.href) ? 'bg-blue-50' : ''
+                }`}
+              >
+                <div class={`text-sm font-semibold ${currentPath.startsWith(l.href) ? 'text-blue-700' : 'text-slate-800'}`}>
+                  {l.label}
+                </div>
+                <div class="text-xs text-slate-500">{l.desc}</div>
+              </a>
+            ))}
+          </div>
         </div>
       </div>
     </div>
 
-    <NotificationsBell client:load />
-    <NavActions client:load />
+    <!-- Right side actions -->
+    <div class="flex items-center gap-2 sm:gap-3">
+      <NotificationsBell client:load />
+      <NavActions client:load />
+
+      <!-- Mobile hamburger -->
+      <button
+        type="button"
+        id="mobile-menu-btn"
+        aria-label="Abrir menú"
+        aria-expanded="false"
+        class="lg:hidden inline-flex items-center justify-center w-10 h-10 -mr-1 text-slate-700 hover:bg-slate-100 active:bg-slate-200 rounded-lg transition"
+      >
+        <svg id="hamburger-icon" xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+        <svg id="close-icon" xmlns="http://www.w3.org/2000/svg" class="hidden w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Mobile drawer -->
+  <div
+    id="mobile-drawer"
+    class="lg:hidden hidden border-t border-slate-200 bg-white"
+  >
+    <div class="px-4 py-3 space-y-1 max-h-[calc(100dvh-3.5rem)] overflow-y-auto">
+      {navLinks.map(link => (
+        <a
+          href={link.href}
+          class={`flex items-center gap-3 px-3 py-3 rounded-lg text-base font-medium transition-colors ${
+            currentPath === link.href
+              ? 'bg-blue-50 text-blue-700'
+              : 'text-slate-700 active:bg-slate-100'
+          }`}
+        >
+          <span class="text-lg">{link.icon}</span>
+          {link.label}
+        </a>
+      ))}
+      <div class="pt-3 mt-2 border-t border-slate-100">
+        <p class="px-3 pb-2 text-[11px] uppercase tracking-wider font-semibold text-slate-400">Administración</p>
+        {adminLinks.map(l => (
+          <a
+            href={l.href}
+            class={`flex items-start gap-3 px-3 py-2.5 rounded-lg transition-colors ${
+              currentPath.startsWith(l.href) ? 'bg-blue-50' : 'active:bg-slate-100'
+            }`}
+          >
+            <span class="text-lg">{l.icon}</span>
+            <div class="min-w-0">
+              <div class={`text-sm font-semibold ${currentPath.startsWith(l.href) ? 'text-blue-700' : 'text-slate-800'}`}>
+                {l.label}
+              </div>
+              <div class="text-xs text-slate-500">{l.desc}</div>
+            </div>
+          </a>
+        ))}
+      </div>
+    </div>
   </div>
 </nav>
+
+<script is:inline>
+  (function () {
+    const btn = document.getElementById('mobile-menu-btn');
+    const drawer = document.getElementById('mobile-drawer');
+    const hambIcon = document.getElementById('hamburger-icon');
+    const closeIcon = document.getElementById('close-icon');
+    if (!btn || !drawer) return;
+    btn.addEventListener('click', () => {
+      const isOpen = !drawer.classList.contains('hidden');
+      drawer.classList.toggle('hidden');
+      btn.setAttribute('aria-expanded', String(!isOpen));
+      hambIcon?.classList.toggle('hidden');
+      closeIcon?.classList.toggle('hidden');
+      document.body.style.overflow = !isOpen ? 'hidden' : '';
+    });
+    // Cerrar al click en link interno
+    drawer.querySelectorAll('a').forEach(a => {
+      a.addEventListener('click', () => {
+        drawer.classList.add('hidden');
+        hambIcon?.classList.remove('hidden');
+        closeIcon?.classList.add('hidden');
+        document.body.style.overflow = '';
+      });
+    });
+  })();
+</script>

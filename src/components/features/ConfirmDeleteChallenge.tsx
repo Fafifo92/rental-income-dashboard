@@ -51,7 +51,7 @@ export default function ConfirmDeleteChallenge({
         onClick={e => e.stopPropagation()}
         onMouseDown={e => e.stopPropagation()}
         onMouseUp={e => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <div className="px-6 py-5 border-b">
           <h3 className="text-lg font-bold text-slate-900">{title}</h3>

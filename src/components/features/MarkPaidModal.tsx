@@ -62,7 +62,7 @@ export default function MarkPaidModal({
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
         onClick={e => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <h3 className="text-xl font-bold text-slate-800 mb-1">Registrar pago</h3>
         <p className="text-sm text-slate-500 mb-4">

@@ -117,7 +117,7 @@ function PropertyModal({ onClose, onCreated }: { onClose: () => void; onCreated:
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.95, opacity: 0, y: 12 }}
         transition={{ duration: 0.25 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 sm:p-8 max-h-[calc(100dvh-2rem)] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
         <h2 className="text-xl font-bold text-slate-800 mb-6">Nueva Propiedad</h2>

@@ -113,7 +113,7 @@ export default function CSVUploader({ onClose, onImport }: Props) {
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.95, opacity: 0, y: 20 }}
         transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[calc(100dvh-2rem)] overflow-hidden flex flex-col"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b">
@@ -208,7 +208,7 @@ export default function CSVUploader({ onClose, onImport }: Props) {
             {/* STEP: Preview */}
             {step === 'preview' && (
               <motion.div key="preview" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-3 gap-2 sm:gap-4">
                   {[
                     { label: 'Reservas', value: bookings.length.toString(), color: 'text-blue-600' },
                     { label: 'Ingresos brutos', value: formatCurrency(totalRevenue), color: 'text-green-600' },

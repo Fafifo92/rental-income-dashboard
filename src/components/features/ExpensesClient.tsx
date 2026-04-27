@@ -240,7 +240,7 @@ export default function ExpensesClient() {
 
   return (
     <>
-      <main className="p-8 max-w-7xl mx-auto space-y-8">
+      <main className="px-4 sm:px-6 lg:px-8 py-5 sm:py-7 lg:py-8 max-w-7xl mx-auto space-y-6 sm:space-y-8">
         <motion.div
           initial={{ opacity: 0, y: -12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -531,7 +531,7 @@ export default function ExpensesClient() {
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto"
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto"
             >
               <h3 className="text-xl font-bold text-slate-900 mb-2">¿Eliminar gasto?</h3>
               <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">

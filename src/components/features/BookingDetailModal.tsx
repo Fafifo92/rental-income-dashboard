@@ -266,10 +266,10 @@ export default function BookingDetailModal({
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.95, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-          className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
+          className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[calc(100dvh-2rem)] overflow-hidden flex flex-col"
         >
           {/* Header */}
-          <div className="px-7 py-5 bg-gradient-to-br from-indigo-600 to-blue-600 text-white flex items-start justify-between">
+          <div className="px-4 sm:px-7 py-4 sm:py-5 bg-gradient-to-br from-indigo-600 to-blue-600 text-white flex items-start justify-between">
             <div>
               <p className="text-xs uppercase tracking-widest opacity-80">Reserva</p>
               <h2 className="text-2xl font-bold mt-0.5">{booking.guest_name || 'Sin nombre'}</h2>
@@ -287,7 +287,7 @@ export default function BookingDetailModal({
           {/* Body */}
           <div className="overflow-y-auto flex-1">
             {/* Datos principales */}
-            <div className="px-7 py-5 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm border-b border-slate-100">
+            <div className="px-4 sm:px-7 py-4 sm:py-5 grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 text-sm border-b border-slate-100">
               <InfoRow label="Check-in" value={booking.start_date} />
               <InfoRow label="Check-out" value={booking.end_date} />
               <InfoRow label="Noches" value={String(booking.num_nights)} />
@@ -297,7 +297,7 @@ export default function BookingDetailModal({
             </div>
 
             {/* Resumen financiero */}
-            <div className="px-7 py-5 bg-slate-50 border-b border-slate-100">
+            <div className="px-4 sm:px-7 py-4 sm:py-5 bg-slate-50 border-b border-slate-100">
               <p className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-3">
                 Ganancia real de la estadía
               </p>
@@ -316,14 +316,14 @@ export default function BookingDetailModal({
 
             {/* Notas */}
             {booking.notes && (
-              <div className="px-7 py-4 border-b border-slate-100">
+              <div className="px-4 sm:px-7 py-3 sm:py-4 border-b border-slate-100">
                 <p className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1">Notas</p>
                 <p className="text-sm text-slate-700 whitespace-pre-line">{booking.notes}</p>
               </div>
             )}
 
             {/* Fase 11 — Operativo */}
-            <div className="px-7 py-5 border-b border-slate-100">
+            <div className="px-4 sm:px-7 py-4 sm:py-5 border-b border-slate-100">
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-800">Operativo de la estadía</h3>
@@ -409,7 +409,7 @@ export default function BookingDetailModal({
             </div>
 
             {/* Gastos vinculados */}
-            <div className="px-7 py-5">
+            <div className="px-4 sm:px-7 py-4 sm:py-5">
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-800">Gastos vinculados a esta reserva</h3>
@@ -499,7 +499,7 @@ export default function BookingDetailModal({
             </div>
 
             {/* Ajustes de reserva (Bloque C) */}
-            <div className="px-7 py-5 border-t border-slate-100">
+            <div className="px-4 sm:px-7 py-4 sm:py-5 border-t border-slate-100">
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-800">Ajustes de reserva</h3>
@@ -601,7 +601,7 @@ export default function BookingDetailModal({
           </div>
 
           {/* Footer */}
-          <div className="px-7 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
+          <div className="px-4 sm:px-7 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-2 sm:gap-3 flex-wrap">
             <div className="flex items-center gap-2">
               {isAlreadyCompleted ? (
                 <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-100 text-emerald-700 rounded-full">
@@ -787,7 +787,7 @@ function LinkExistingExpenseModal({
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[80vh] overflow-hidden flex flex-col"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[calc(100dvh-2rem)] overflow-hidden flex flex-col"
       >
         <div className="px-6 py-4 border-b border-slate-100">
           <h3 className="text-lg font-bold text-slate-800">Vincular gasto existente</h3>
@@ -879,7 +879,7 @@ function AdjustmentFormModal({
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <div className="px-6 py-4 border-b border-slate-100">
           <h3 className="text-lg font-bold text-slate-800">Nuevo ajuste</h3>
@@ -1049,7 +1049,7 @@ function CleaningFormModal({
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <div className="px-6 py-4 border-b border-slate-100">
           <h3 className="text-lg font-bold text-slate-800">🧹 Asignar aseo</h3>
@@ -1224,7 +1224,7 @@ function CompleteBookingModal({
         onClick={e => e.stopPropagation()}
         onMouseDown={e => e.stopPropagation()}
         onMouseUp={e => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <div className="px-6 py-5 border-b">
           <h3 className="text-lg font-bold text-slate-900">Marcar reserva como completada</h3>

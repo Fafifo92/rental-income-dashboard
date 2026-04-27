@@ -7,6 +7,62 @@
   --color-muted-foreground: hsl(215.4 16.3% 46.9%);
 }
 
+html {
+  /* Soporta el "notch" en iPhones */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
 body {
   @apply bg-background text-foreground;
+  /* Evita doble-tap zoom en iOS sobre botones */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  /* Mejor scroll en iOS */
+  -webkit-overflow-scrolling: touch;
+  /* Tipografía base más legible en mobile */
+  font-size: 15px;
 }
+
+@media (min-width: 768px) {
+  body { font-size: 16px; }
+}
+
+/* Inputs: evita zoom en iOS al focus (necesita >= 16px) */
+input, select, textarea {
+  font-size: 16px;
+}
+@media (min-width: 768px) {
+  input, select, textarea {
+    font-size: inherit;
+  }
+}
+
+/* Tablas con scroll horizontal en mobile sin romper layout */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Scrollbar más sutil */
+.thin-scroll::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.3);
+  border-radius: 3px;
+}
+.thin-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.5);
+}
+
+/* Modales en mobile: ocupan casi toda la altura */
+.modal-mobile {
+  max-height: calc(100dvh - 2rem);
+}
+
+/* Ocultar scrollbar manteniendo scroll (chips/tabs) */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+

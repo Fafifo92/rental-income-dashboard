@@ -134,7 +134,7 @@ export default function SharedBillPayModal({
         onClick={e => e.stopPropagation()}
         onMouseDown={e => e.stopPropagation()}
         onMouseUp={e => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <h3 className="text-xl font-bold text-slate-800 mb-1">Pagar factura {isVariable ? 'variable' : 'compartida'}</h3>
         <p className="text-sm text-slate-500 mb-4">

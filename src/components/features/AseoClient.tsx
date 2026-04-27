@@ -277,7 +277,7 @@ function NewCleanerModal({
         onClick={e => e.stopPropagation()}
         onMouseDown={e => e.stopPropagation()}
         onMouseUp={e => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <h3 className="text-xl font-bold text-slate-800 mb-4">Nueva persona de aseo</h3>
         {err && <p className="text-xs text-red-600 mb-3">{err}</p>}
@@ -337,7 +337,7 @@ function DetailModal({
         onClick={e => e.stopPropagation()}
         onMouseDown={e => e.stopPropagation()}
         onMouseUp={e => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <div className="p-6 border-b border-slate-100">
           <h3 className="text-xl font-bold text-slate-800">🧹 {cleaner.name}</h3>
@@ -430,7 +430,7 @@ function PayoutModal({
         onClick={e => e.stopPropagation()}
         onMouseDown={e => e.stopPropagation()}
         onMouseUp={e => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <div className="p-6 border-b">
           <h3 className="text-xl font-bold text-slate-800">💸 Liquidar a {cleaner.name}</h3>

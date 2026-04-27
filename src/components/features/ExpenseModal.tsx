@@ -134,7 +134,7 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.95, opacity: 0, y: 20 }}
           transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-          className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+          className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-5 border-b">
@@ -231,7 +231,7 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
 
             {/* Detalle específico según subcategoría + Tipo (variable/fijo) */}
             {form.subcategory && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">
                     Detalle <span className="text-slate-400 font-normal">(opcional)</span>
@@ -319,7 +319,7 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
             </div>
 
             {/* Fecha + Estado */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Fecha *</label>
                 <input
@@ -357,7 +357,7 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
             </div>
 
             {/* Proveedor + A cargo de */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">
                   Proveedor <span className="text-slate-400 font-normal">(opcional)</span>

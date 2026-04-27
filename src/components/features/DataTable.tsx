@@ -125,9 +125,9 @@ export default function DataTable<T extends object>({
         </div>
       )}
 
-      {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      {/* Table — overflow-x para que columnas sobrantes hagan scroll horizontal en mobile */}
+      <div className="overflow-x-auto thin-scroll">
+        <table className="w-full text-sm min-w-[640px] sm:min-w-0">
           <thead>
             {table.getHeaderGroups().map(headerGroup => (
               <tr key={headerGroup.id} className="border-b bg-slate-50">
@@ -217,7 +217,7 @@ export default function DataTable<T extends object>({
 
       {/* Pagination */}
       {!loading && pageCount > 1 && (
-        <div className="flex items-center justify-between px-5 py-3 border-t bg-slate-50 flex-wrap gap-2">
+        <div className="flex items-center justify-between px-3 sm:px-5 py-3 border-t bg-slate-50 flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-500">Mostrar</span>
             <select
