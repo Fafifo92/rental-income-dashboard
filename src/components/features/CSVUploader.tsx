@@ -4,6 +4,7 @@ import { parseAirbnbFile, type ParsedBooking } from '@/services/etl';
 import { upsertBookings, saveDemoBookings, type ImportResult } from '@/services/bookings';
 import ListingMapper from './ListingMapper';
 import { formatCurrency } from '@/lib/utils';
+import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 
 type Step = 'idle' | 'dragging' | 'parsing' | 'preview' | 'mapping' | 'importing' | 'complete' | 'error';
 
@@ -105,7 +106,7 @@ export default function CSVUploader({ onClose, onImport }: Props) {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      {...makeBackdropHandlers(onClose)}
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0, y: 20 }}

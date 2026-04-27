@@ -30,6 +30,7 @@ export interface Expense {
   owner_id?: string;
   property_id?: string | null;
   category: string;
+  subcategory?: string | null;
   type: 'fixed' | 'variable';
   amount: number;
   date: string;
@@ -40,6 +41,8 @@ export interface Expense {
   person_in_charge?: string | null;
   booking_id?: string | null;
   adjustment_id?: string | null;
+  vendor_id?: string | null;
+  shared_bill_id?: string | null;
 }
 
 export interface FinancialMetrics {

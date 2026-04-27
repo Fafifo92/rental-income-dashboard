@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/useAuth';
 import {
-  listBankAccounts,
   createBankAccount,
   updateBankAccount,
   deleteBankAccount,
@@ -11,6 +10,7 @@ import {
 } from '@/services/bankAccounts';
 import type { BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
+import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 
 const BANKS = ['Bancolombia', 'Caja Social', 'Davivienda', 'BBVA', 'Scotiabank Colpatria', 'Banco de Bogotá', 'Nequi', 'Daviplata', 'Otro'];
 
@@ -47,7 +47,7 @@ export default function BankAccountsClient() {
   const load = async () => {
     setLoading(true);
     const res = await computeBalances();
-    if (!res.error) setBalances(res.data);
+    if (!res.error) setBalances(res.data ?? []);
     setLoading(false);
   };
 
@@ -258,7 +258,7 @@ export default function BankAccountsClient() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-            onClick={() => !saving && setShowModal(false)}
+            {...makeBackdropHandlers(() => { if (!saving) setShowModal(false); })}
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}

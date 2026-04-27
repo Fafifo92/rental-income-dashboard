@@ -31,7 +31,17 @@ export const createProperty = async (
 
   const { data, error } = await supabase
     .from('properties')
-    .insert({ owner_id: user.id, name, address: address ?? null, base_currency: baseCurrency })
+    .insert({
+      owner_id: user.id,
+      name,
+      address: address ?? null,
+      base_currency: baseCurrency,
+      estrato: null,
+      bedrooms: null,
+      max_guests: null,
+      notes: null,
+      default_cleaning_fee: null,
+    })
     .select()
     .single();
 

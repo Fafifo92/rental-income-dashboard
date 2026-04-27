@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { updateBookingPayout } from '@/services/bookings';
 import type { BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
+import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 
 export interface PayoutTarget {
   id: string;
@@ -92,7 +93,7 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      {...makeBackdropHandlers(onClose)}
     >
       <motion.div
         initial={{ scale: 0.93, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}

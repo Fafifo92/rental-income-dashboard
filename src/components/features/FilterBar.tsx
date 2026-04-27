@@ -2,12 +2,9 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ExpenseFilters } from '@/services/expenses';
 import type { BankAccountRow } from '@/types/database';
+import { EXPENSE_CATEGORIES } from '@/types/database';
 
-const CATEGORIES = [
-  'Limpieza', 'Lavandería', 'Internet', 'Servicios Públicos',
-  'Mantenimiento', 'Administración', 'Welcome Kit', 'Seguros', 'Impuestos',
-  'Toallas y ropa de cama', 'Utensilios y enseres', 'Decoración', 'Otro',
-];
+const CATEGORIES = EXPENSE_CATEGORIES;
 
 interface Props {
   filters: ExpenseFilters;

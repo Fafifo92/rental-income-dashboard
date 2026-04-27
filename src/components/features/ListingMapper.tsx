@@ -16,7 +16,7 @@ export default function ListingMapper({ uniqueNames, onConfirm, onBack }: Props)
 
   useEffect(() => {
     listProperties().then(result => {
-      if (!result.error) setProperties(result.data);
+      if (!result.error) setProperties(result.data ?? []);
       setLoading(false);
     });
   }, []);

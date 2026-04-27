@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ExpensesList from './ExpensesList';
 import ExpenseModal from './ExpenseModal';
@@ -6,6 +6,8 @@ import ExpenseDetailModal from './ExpenseDetailModal';
 import BookingDetailModal from './BookingDetailModal';
 import FilterBar from './FilterBar';
 import PropertySelector from './PropertySelector';
+import RecurringPendingPanel from './RecurringPendingPanel';
+import SharedBillsPendingPanel from './SharedBillsPendingPanel';
 import {
   listExpenses,
   createExpense,
@@ -17,13 +19,22 @@ import { listBankAccounts } from '@/services/bankAccounts';
 import { listListings } from '@/services/listings';
 import { deleteBookingAdjustment } from '@/services/bookingAdjustments';
 import { supabase } from '@/lib/supabase/client';
+import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import type { Expense } from '@/types';
-import type { PropertyRow, BankAccountRow, BookingRow, ListingRow } from '@/types/database';
+import type { BankAccountRow, BookingRow, ListingRow, ExpenseSection, ExpenseSubcategory } from '@/types/database';
+import { EXPENSE_SUBCATEGORY_META } from '@/types/database';
+import { classifyExpense } from '@/lib/expenseClassify';
 import { formatCurrency } from '@/lib/utils';
 import { useAuth } from '@/lib/useAuth';
 import { usePropertyFilter } from '@/lib/usePropertyFilter';
 
 // Shown while Supabase isn't connected yet
+const dispatchRecurringChange = () => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('recurring-period-changed'));
+  }
+};
+
 const DEMO_EXPENSES: Expense[] = [
   { id: '1', property_id: 'demo', category: 'Limpieza', type: 'variable', amount: 150000, date: '2024-03-01', description: 'Limpieza post-huésped', status: 'paid' },
   { id: '2', property_id: 'demo', category: 'Internet', type: 'fixed', amount: 89000, date: '2024-03-05', description: null, status: 'paid' },
@@ -50,7 +61,8 @@ export default function ExpensesClient() {
   const [bankAccounts, setBankAccounts] = useState<BankAccountRow[]>([]);
   const [listings, setListings] = useState<ListingRow[]>([]);
   const [viewingBooking, setViewingBooking] = useState<BookingRow | null>(null);
-  const [tab, setTab] = useState<'all' | 'real' | 'recurring' | 'fees'>('all');
+  const [tab, setTab] = useState<'all' | ExpenseSection | 'others'>('all');
+  const [subFilter, setSubFilter] = useState<ExpenseSubcategory | null>(null);
 
   const loadExpenses = useCallback(async (f: ExpenseFilters, propId?: string) => {
     setLoading(true);
@@ -69,7 +81,7 @@ export default function ExpensesClient() {
       setExpenses(demo);
       setDbConnected(false);
     } else {
-      setExpenses(result.data);
+      setExpenses(result.data ?? []);
       setDbConnected(true);
     }
     setLoading(false);
@@ -80,9 +92,9 @@ export default function ExpensesClient() {
   useEffect(() => {
     if (authStatus === 'authed') {
       listBankAccounts().then(res => {
-        if (!res.error) setBankAccounts(res.data.filter(a => a.is_active));
+        if (!res.error) setBankAccounts((res.data ?? []).filter(a => a.is_active));
       });
-      listListings().then(res => { if (!res.error) setListings(res.data); });
+      listListings().then(res => { if (!res.error) setListings(res.data ?? []); });
     }
   }, [authStatus]);
 
@@ -93,6 +105,25 @@ export default function ExpensesClient() {
       setViewingBooking(data as BookingRow);
     }
   }, []);
+
+  // ── Clasificación Fase 16: sección + subcategoría (antes de cualquier early return) ──
+  const classified = useMemo(
+    () => expenses.map(e => ({ exp: e, ...classifyExpense(e) })),
+    [expenses],
+  );
+
+  const visibleExpenses = useMemo(() => {
+    if (tab === 'all') return expenses;
+    if (tab === 'others') {
+      // Fees de canal y cualquier gasto sin sección clasificable
+      return classified
+        .filter(c => c.exp.id.startsWith('fee-') || c.section === null)
+        .map(c => c.exp);
+    }
+    return classified
+      .filter(c => !c.exp.id.startsWith('fee-') && c.section === tab && (subFilter ? c.subcategory === subFilter : true))
+      .map(c => c.exp);
+  }, [tab, subFilter, expenses, classified]);
 
   // Auth guard (after all hooks)
   if (authStatus === 'checking') {
@@ -110,8 +141,8 @@ export default function ExpensesClient() {
       // EDITAR
       if (dbConnected) {
         const result = await updateExpense(editing.id, data);
-        if (result.error) { setSaveError(result.error); return; }
-        setExpenses(prev => prev.map(e => e.id === editing.id ? result.data : e));
+        if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); return; }
+        setExpenses(prev => prev.map(e => e.id === editing.id ? result.data! : e));
       } else {
         setExpenses(prev => prev.map(e => e.id === editing.id ? { ...e, ...data } : e));
       }
@@ -122,12 +153,13 @@ export default function ExpensesClient() {
     // CREAR
     if (dbConnected) {
       const result = await createExpense(data);
-      if (result.error) { setSaveError(result.error); return; }
-      setExpenses(prev => [result.data, ...prev]);
+      if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); return; }
+      setExpenses(prev => [result.data!, ...prev]);
     } else {
       setExpenses(prev => [{ ...data, id: crypto.randomUUID() }, ...prev]);
     }
     setShowModal(false);
+    dispatchRecurringChange();
   };
 
   const handleEdit = (expense: Expense) => {
@@ -167,6 +199,7 @@ export default function ExpensesClient() {
     }
     setExpenses(prev => prev.filter(e => e.id !== deleteTarget.id));
     setDeleteTarget(null);
+    dispatchRecurringChange();
   };
 
   const totalFixed = expenses.filter(e => e.type === 'fixed').reduce((s, e) => s + e.amount, 0);
@@ -174,19 +207,29 @@ export default function ExpensesClient() {
   const pendingExpenses = expenses.filter(e => e.status === 'pending');
   const totalPending = pendingExpenses.reduce((s, e) => s + e.amount, 0);
 
-  // Clasificación por origen
-  const kindOf = (e: Expense): 'real' | 'recurring' | 'fees' => {
-    if (e.id.startsWith('rec-')) return 'recurring';
-    if (e.id.startsWith('fee-')) return 'fees';
-    return 'real';
-  };
+  // ── Clasificación Fase 16: sección + subcategoría ──
+  // (classified y visibleExpenses ya calculados arriba antes del auth guard)
+
+  // Detecta fees de canal por id legacy 'fee-…'. Estos quedan fuera del scope
+  // property/booking — se muestran solo en "Todos" como info.
+  const isFee = (e: Expense) => e.id.startsWith('fee-');
+
   const tabCounts = {
     all: expenses.length,
-    real: expenses.filter(e => kindOf(e) === 'real').length,
-    recurring: expenses.filter(e => kindOf(e) === 'recurring').length,
-    fees: expenses.filter(e => kindOf(e) === 'fees').length,
+    property: classified.filter(c => !isFee(c.exp) && c.section === 'property').length,
+    booking:  classified.filter(c => !isFee(c.exp) && c.section === 'booking').length,
+    others:   classified.filter(c => isFee(c.exp) || c.section === null).length,
   };
-  const visibleExpenses = tab === 'all' ? expenses : expenses.filter(e => kindOf(e) === tab);
+
+  const subCountsBySection = (sec: ExpenseSection) => {
+    const counts: Partial<Record<ExpenseSubcategory, number>> = {};
+    for (const c of classified) {
+      if (isFee(c.exp) || c.section !== sec || !c.subcategory) continue;
+      counts[c.subcategory] = (counts[c.subcategory] ?? 0) + 1;
+    }
+    return counts;
+  };
+
   const visibleTotal = visibleExpenses.reduce((s, e) => s + e.amount, 0);
 
   const kpis = [
@@ -242,6 +285,27 @@ export default function ExpensesClient() {
             </motion.div>
           ))}
         </div>
+
+        {/* Facturas compartidas pendientes (vendors con N propiedades) */}
+        <SharedBillsPendingPanel
+          onChanged={() => {
+            loadExpenses(filters, propertyId);
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('recurring-period-changed'));
+            }
+          }}
+        />
+
+        {/* Recurrentes pendientes (fuente única: tabla periods + auto-detección) */}
+        <RecurringPendingPanel
+          propertyFilter={propertyId ?? null}
+          onChanged={() => {
+            loadExpenses(filters, propertyId);
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('recurring-period-changed'));
+            }
+          }}
+        />
 
         {/* Cuentas por Pagar */}
         <AnimatePresence>
@@ -302,26 +366,18 @@ export default function ExpensesClient() {
           )}
         </AnimatePresence>
 
-        {/* Filters */}
-        <FilterBar
-          filters={filters}
-          onChange={setFilters}
-          onReset={() => setFilters(EMPTY_FILTERS)}
-          bankAccounts={bankAccounts}
-        />
-
-        {/* Tabs por origen — con total por tab */}
+        {/* Tabs por sección — taxonomía 4+3 */}
         <div>
           <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto">
             {([
-              { key: 'all',       label: 'Todos',            color: 'text-slate-700',  hint: 'Vista consolidada' },
-              { key: 'real',      label: 'Registrados',      color: 'text-blue-700',   hint: 'Gastos cargados manualmente o por CSV' },
-              { key: 'recurring', label: 'Recurrentes',      color: 'text-purple-700', hint: 'Expansión mensual de gastos fijos por propiedad' },
-              { key: 'fees',      label: 'Comisiones canal', color: 'text-rose-700',   hint: 'Fees de Airbnb/Booking derivados de reservas' },
+              { key: 'all',      label: 'Todos',                 color: 'text-slate-700', hint: 'Vista consolidada de todos los gastos' },
+              { key: 'property', label: 'Sobre propiedades',     color: 'text-blue-700',  hint: 'Operación del inmueble: servicios, admin, mantenimiento, stock' },
+              { key: 'booking',  label: 'Sobre reservas',        color: 'text-rose-700',  hint: 'Atribuibles a un huésped: aseo del turn, daños, atenciones' },
+              { key: 'others',   label: 'Otros gastos',          color: 'text-slate-700', hint: 'Comisiones de canal (Booking, Airbnb), fees y gastos sin clasificar' },
             ] as const).map(t => (
               <button
                 key={t.key}
-                onClick={() => setTab(t.key)}
+                onClick={() => { setTab(t.key); setSubFilter(null); }}
                 title={t.hint}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                   tab === t.key
@@ -333,19 +389,63 @@ export default function ExpensesClient() {
               </button>
             ))}
           </div>
-          {/* Resumen del tab activo */}
+
+          {/* Chips de subcategoría dentro de cada sección */}
+          {tab !== 'all' && tab !== 'others' && (
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              <button
+                onClick={() => setSubFilter(null)}
+                className={`px-2.5 py-1 text-xs rounded-full border transition ${
+                  subFilter === null
+                    ? 'bg-slate-800 text-white border-slate-800'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                Todas
+              </button>
+              {(Object.entries(EXPENSE_SUBCATEGORY_META) as [ExpenseSubcategory, typeof EXPENSE_SUBCATEGORY_META[ExpenseSubcategory]][])
+                .filter(([, meta]) => meta.section === tab)
+                .map(([sub, meta]) => {
+                  const count = subCountsBySection(tab)[sub] ?? 0;
+                  return (
+                    <button
+                      key={sub}
+                      onClick={() => setSubFilter(sub)}
+                      title={meta.description}
+                      className={`px-2.5 py-1 text-xs rounded-full border transition ${
+                        subFilter === sub
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      {meta.icon} {meta.label} <span className="opacity-60">({count})</span>
+                    </button>
+                  );
+                })}
+            </div>
+          )}
+
+          {/* Resumen */}
           <div className="flex items-center justify-between mt-3 px-1 text-sm">
             <p className="text-slate-500">
               {tab === 'all' && 'Mostrando todas las fuentes de gasto combinadas.'}
-              {tab === 'real' && 'Gastos reales cargados por ti. Editables y eliminables.'}
-              {tab === 'recurring' && 'Valores generados automáticamente según los rubros recurrentes por propiedad. Para modificar, ve a Propiedades → Config.'}
-              {tab === 'fees' && 'Comisiones descontadas por el canal en cada reserva. Editables desde el modal "Payout" de la reserva.'}
+              {tab === 'property' && 'Operación del inmueble: existen aunque no haya huésped.'}
+              {tab === 'booking' && 'Atribuibles a un huésped específico.'}
+              {tab === 'others' && 'Comisiones de canal y gastos sin sección (Booking/Airbnb fees, etc.).'}
             </p>
             <p className="font-semibold text-slate-800">
-              Total tab: <span className="text-slate-900">{formatCurrency(visibleTotal)}</span>
+              Total: <span className="text-slate-900">{formatCurrency(visibleTotal)}</span>
             </p>
           </div>
         </div>
+
+        {/* Filters — bajo las pestañas para que el filtro aplique siempre sobre la pestaña activa */}
+        <FilterBar
+          filters={filters}
+          onChange={setFilters}
+          onReset={() => setFilters(EMPTY_FILTERS)}
+          bankAccounts={bankAccounts}
+        />
 
         {/* Table */}
         <ExpensesList
@@ -427,7 +527,7 @@ export default function ExpensesClient() {
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={e => e.target === e.currentTarget && setDeleteTarget(null)}
+            {...makeBackdropHandlers(() => setDeleteTarget(null))}
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}

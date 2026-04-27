@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../lib/useAuth';
 import { listProperties, createProperty } from '../../services/properties';
+import { makeBackdropHandlers } from '../../lib/useBackdropClose';
 
 interface Property {
   id: string;
@@ -99,7 +100,7 @@ function PropertyModal({ onClose, onCreated }: { onClose: () => void; onCreated:
     setError(null);
     const res = await createProperty(name.trim(), address.trim() || undefined);
     setSaving(false);
-    if (res.error) { setError(res.error); return; }
+    if (res.error || !res.data) { setError(res.error ?? 'No se pudo crear'); return; }
     onCreated(res.data);
   };
 
@@ -109,7 +110,7 @@ function PropertyModal({ onClose, onCreated }: { onClose: () => void; onCreated:
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-      onClick={onClose}
+      {...makeBackdropHandlers(onClose)}
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0, y: 12 }}

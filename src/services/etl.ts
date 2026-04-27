@@ -113,7 +113,7 @@ export const parseXLSXFile = async (file: File): Promise<ParsedBooking[]> => {
       const v = row[i];
       obj[h] = v !== null && v !== undefined ? (typeof v === 'number' ? v : String(v)) : '';
     });
-    return transformRow(obj as RawAirbnbRow);
+    return transformRow(obj as unknown as RawAirbnbRow);
   });
 };
 

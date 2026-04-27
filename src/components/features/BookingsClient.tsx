@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table';
 import {
-  listBookings, getDemoBookings, saveDemoBookings, insertBooking, updateBookingPayout,
+  listBookings, getDemoBookings, saveDemoBookings, insertBooking,
   updateBooking, deleteBooking,
   generateDirectBookingCode, type BookingFilters,
 } from '@/services/bookings';
@@ -20,6 +20,7 @@ import CSVUploader from './CSVUploader';
 import PropertySelector from './PropertySelector';
 import BookingPayoutModal from './BookingPayoutModal';
 import BookingDetailModal from './BookingDetailModal';
+import ConfirmDeleteChallenge from './ConfirmDeleteChallenge';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,10 @@ interface DisplayBooking {
   payout_bank_account_id?: string | null;
   payout_date?: string | null;
   notes?: string | null;
+  checkin_done?: boolean;
+  checkout_done?: boolean;
+  inventory_checked?: boolean;
+  operational_notes?: string | null;
   isDemo?: boolean;
 }
 
@@ -80,6 +85,10 @@ const fromRow = (row: BookingRow): DisplayBooking => ({
   payout_date: row.payout_date ?? null,
   listing_id: row.listing_id ?? null,
   notes: row.notes ?? null,
+  checkin_done: row.checkin_done ?? false,
+  checkout_done: row.checkout_done ?? false,
+  inventory_checked: row.inventory_checked ?? false,
+  operational_notes: row.operational_notes ?? null,
 });
 
 const fromDemo = (b: ParsedBooking, i: number): DisplayBooking => ({
@@ -164,7 +173,7 @@ export default function BookingsClient() {
       setBookings(demo);
       setIsDemo(true);
     } else {
-      setBookings(result.data.map(fromRow));
+      setBookings((result.data ?? []).map(fromRow));
       setIsDemo(false);
     }
     setLoading(false);
@@ -174,9 +183,9 @@ export default function BookingsClient() {
 
   useEffect(() => {
     if (authStatus === 'authed') {
-      listProperties().then(res => { if (!res.error) setProperties(res.data); });
-      listBankAccounts().then(res => { if (!res.error) setBankAccounts(res.data.filter(a => a.is_active)); });
-      listListings().then(res => { if (!res.error) setListings(res.data); });
+      listProperties().then(res => { if (!res.error) setProperties(res.data ?? []); });
+      listBankAccounts().then(res => { if (!res.error) setBankAccounts((res.data ?? []).filter(a => a.is_active)); });
+      listListings().then(res => { if (!res.error) setListings(res.data ?? []); });
     }
   }, [authStatus]);
 
@@ -283,7 +292,7 @@ export default function BookingsClient() {
           return;
         }
         const listingRes = await findOrCreateListing(propertyId, form.listing_name || 'Manual');
-        if (listingRes.error) { setFormError(listingRes.error); setFormLoading(false); return; }
+        if (listingRes.error || !listingRes.data) { setFormError(listingRes.error ?? 'No se pudo crear el listing'); setFormLoading(false); return; }
         const res = await insertBooking(listingRes.data.id, {
           confirmation_code: code,
           guest_name: form.guest_name || undefined,
@@ -744,9 +753,9 @@ export default function BookingsClient() {
                   </div>
                   {form.start_date && form.end_date && (
                     <p className="text-xs text-slate-500">
-                      {new Date(form.start_date).toLocaleDateString('es-CO', { day: 'numeric', month: 'long' })}
+                      {new Date(form.start_date + 'T00:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'long' })}
                       {' → '}
-                      {new Date(form.end_date).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}
+                      {new Date(form.end_date + 'T00:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}
                     </p>
                   )}
                 </div>
@@ -858,48 +867,30 @@ export default function BookingsClient() {
         )}
       </AnimatePresence>
 
-      {/* ── Delete confirmation ──────────────────────────────────────── */}
+      {/* ── Delete confirmation (reto BORRAR) ──────────────────────────── */}
       <AnimatePresence>
         {deleteTarget && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-          >
-            <motion.div
-              initial={{ scale: 0.93, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.93, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
-            >
-              <div className="px-6 py-5 border-b">
-                <h3 className="text-lg font-bold text-slate-900">Eliminar reserva</h3>
-                <p className="text-xs text-slate-500 mt-0.5">Esta acción es irreversible.</p>
-              </div>
-              <div className="p-6 space-y-3">
-                <p className="text-sm text-slate-700">
-                  ¿Seguro que quieres eliminar la reserva
-                  {' '}<span className="font-mono font-semibold">{deleteTarget.confirmation_code}</span>
-                  {' '}de <span className="font-semibold">{deleteTarget.guest_name}</span>?
+          <ConfirmDeleteChallenge
+            title="Eliminar reserva"
+            description={
+              <div className="space-y-3">
+                <p>
+                  Vas a eliminar la reserva{' '}
+                  <span className="font-mono font-semibold">{deleteTarget.confirmation_code}</span>{' '}
+                  de <span className="font-semibold">{deleteTarget.guest_name}</span>.
                 </p>
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600 space-y-1">
                   <div>Estadía: {deleteTarget.start_date} → {deleteTarget.end_date}</div>
                   <div>Monto: <span className="font-semibold">{formatCurrency(deleteTarget.total_revenue)}</span></div>
                 </div>
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
-                  Los datos financieros derivados (ingresos, ocupación) se recalcularán automáticamente.
+                  Los ajustes, aseos y gastos vinculados a esta reserva también se eliminarán en cascada.
                 </p>
               </div>
-              <div className="flex justify-end gap-2 px-6 py-4 border-t bg-slate-50">
-                <button onClick={() => setDeleteTarget(null)}
-                  className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
-                  Cancelar
-                </button>
-                <button onClick={handleConfirmDelete}
-                  className="px-4 py-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
-                  Eliminar definitivamente
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
+            }
+            onConfirm={handleConfirmDelete}
+            onCancel={() => setDeleteTarget(null)}
+          />
         )}
       </AnimatePresence>
     </main>

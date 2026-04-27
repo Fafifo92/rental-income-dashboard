@@ -1,0 +1,14 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import AseoClient from '../components/features/AseoClient';
+---
+
+<Layout title="Aseo — STR Management">
+  <div class="min-h-screen bg-slate-50">
+    <Nav />
+    <main class="p-8 max-w-7xl mx-auto">
+      <AseoClient client:load />
+    </main>
+  </div>
+</Layout>

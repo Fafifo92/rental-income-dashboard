@@ -64,7 +64,7 @@ export const computeBalances = async (): Promise<ServiceResult<BankAccountBalanc
 
   const balances: BankAccountBalance[] = [];
 
-  for (const account of accRes.data) {
+  for (const account of accRes.data ?? []) {
     // Inflows = sum of net_payout on bookings with this bank
     const { data: inflowData } = await supabase
       .from('bookings')

@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase/client';
 import type { Expense } from '@/types';
 import type { ExpenseRow } from '@/types/database';
-import { listAllRecurringExpensesForOwner } from './recurringExpenses';
+// listAllRecurringExpensesForOwner ya no se usa: synthesis legacy desactivada.
 import { listBookings } from './bookings';
 
 export interface ExpenseFilters {
@@ -29,6 +29,7 @@ const toExpense = (row: ExpenseRow): Expense => ({
   owner_id: row.owner_id,
   property_id: row.property_id,
   category: row.category,
+  subcategory: (row as ExpenseRow & { subcategory?: string | null }).subcategory ?? null,
   type: row.type,
   amount: Number(row.amount),
   date: row.date,
@@ -39,6 +40,8 @@ const toExpense = (row: ExpenseRow): Expense => ({
   person_in_charge: row.person_in_charge ?? null,
   booking_id: row.booking_id ?? null,
   adjustment_id: row.adjustment_id ?? null,
+  vendor_id: row.vendor_id ?? null,
+  shared_bill_id: row.shared_bill_id ?? null,
 });
 
 export const listExpenses = async (
@@ -65,56 +68,21 @@ export const listExpenses = async (
 
   if (error) return { data: null, error: error.message };
 
-  let expenses = data.map(toExpense);
+  let expenses = (data ?? []).map(toExpense);
 
-  // ── Inject synthetic recurring expenses (monthly expansions) ─────────
-  if (filters?.includeRecurring !== false) {
-    const recRes = await listAllRecurringExpensesForOwner();
-    if (!recRes.error && recRes.data.length > 0) {
-      const filteredRec = propertyId
-        ? recRes.data.filter(r => r.property_id === propertyId)
-        : recRes.data;
-
-      const now = new Date();
-      const fromDate = filters?.dateFrom
-        ? new Date(filters.dateFrom + 'T00:00:00')
-        : new Date(now.getFullYear(), now.getMonth() - 11, 1);
-      const toDate = filters?.dateTo
-        ? new Date(filters.dateTo + 'T00:00:00')
-        : now;
-
-      const cur = new Date(fromDate.getFullYear(), fromDate.getMonth(), 1);
-      const end = new Date(toDate.getFullYear(), toDate.getMonth() + 1, 1);
-      while (cur < end) {
-        const daysInMo = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate();
-        for (const r of filteredRec) {
-          const day = Math.min(Math.max(Number(r.day_of_month) || 1, 1), daysInMo);
-          const date = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-          // Respeta vigencia histórica
-          if (r.valid_from && date < r.valid_from) continue;
-          if (r.valid_to && date > r.valid_to) continue;
-          expenses.push({
-            id: `rec-${r.id}-${date}`,
-            property_id: r.property_id,
-            category: r.category,
-            type: 'fixed',
-            amount: Number(r.amount),
-            date,
-            description: r.description ? `[Recurrente] ${r.description}` : `[Recurrente] ${r.category}`,
-            status: 'paid',
-            vendor: r.vendor ?? null,
-            person_in_charge: r.person_in_charge ?? null,
-          } as Expense);
-        }
-        cur.setMonth(cur.getMonth() + 1);
-      }
-    }
-  }
+  // ── Synthesis legacy de recurrentes (Fase 15+: deshabilitado) ──────
+  // Antes inyectábamos expenses sintéticos con id='rec-...' a partir de
+  // property_recurring_expenses. Con el nuevo modelo de servicios +
+  // shared_bills, los gastos reales se crean al pagar la factura, así
+  // que ya no necesitamos sintetizar. Esto arregla el bug "aparece como
+  // pagado pero todavía se debe".
+  // Mantenemos el flag por compat pero lo ignoramos.
+  void filters?.includeRecurring;
 
   // ── Inject synthetic channel fee expenses ─────────────────────────────
   if (filters?.includeChannelFees !== false) {
     const bkRes = await listBookings(propertyId ? { propertyId } : undefined);
-    if (!bkRes.error) {
+    if (!bkRes.error && bkRes.data) {
       for (const r of bkRes.data) {
         const fees = Number(r.channel_fees ?? 0);
         if (fees > 0) {
@@ -180,6 +148,7 @@ export const createExpense = async (
       category:         expense.category,
       type:             expense.type,
       amount:           expense.amount,
+      currency:         'COP',
       date:             expense.date,
       description:      expense.description,
       status:           expense.status,
@@ -188,6 +157,9 @@ export const createExpense = async (
       person_in_charge: expense.person_in_charge ?? null,
       booking_id:       expense.booking_id ?? null,
       adjustment_id:    expense.adjustment_id ?? null,
+      vendor_id:        expense.vendor_id ?? null,
+      shared_bill_id:   expense.shared_bill_id ?? null,
+      subcategory:      expense.subcategory ?? null,
     })
     .select()
     .single();

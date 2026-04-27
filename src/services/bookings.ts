@@ -82,7 +82,7 @@ export const upsertBookings = async (
     const result = await findOrCreateListing(propertyId, listingName);
     if (result.error) {
       errors.push(`Anuncio "${listingName}": ${result.error}`);
-    } else {
+    } else if (result.data) {
       listingIdCache[listingName] = result.data.id;
     }
   }
@@ -119,6 +119,10 @@ export const upsertBookings = async (
       currency: 'COP',
       exchange_rate: null,
       notes: null,
+      checkin_done: false,
+      checkout_done: false,
+      inventory_checked: false,
+      operational_notes: null,
     });
   }
 
@@ -169,7 +173,7 @@ export const listBookings = async (
   const { data, error } = await query;
   if (error) return { data: null, error: error.message };
 
-  let rows = data;
+  let rows = data ?? [];
   if (filters?.search) {
     const q = filters.search.toLowerCase();
     rows = rows.filter(
@@ -186,7 +190,7 @@ export const getBookingKPIs = async (): Promise<ServiceResult<BookingKPIs>> => {
   const result = await listBookings();
   if (result.error) return { data: null, error: result.error };
 
-  const all = result.data;
+  const all = result.data ?? [];
   const completed = all.filter(
     b => b.status && !b.status.toLowerCase().includes('cancel'),
   );
@@ -243,8 +247,19 @@ export const insertBooking = async (
       gross_revenue: data.total_revenue,
       status: data.status ?? null,
       channel: data.channel ?? 'airbnb',
+      channel_fees: null,
+      taxes_withheld: null,
+      net_payout: null,
+      payout_bank_account_id: null,
+      payout_date: null,
+      currency: null,
+      exchange_rate: null,
       notes: data.notes ?? null,
       raw_data: null,
+      checkin_done: false,
+      checkout_done: false,
+      inventory_checked: false,
+      operational_notes: null,
     })
     .select()
     .single();
@@ -269,7 +284,7 @@ export const updateBooking = async (
     notes?: string | null;
   },
 ): Promise<ServiceResult<BookingRow>> => {
-  const dbPatch: Record<string, unknown> = { ...patch };
+  const dbPatch: Partial<Omit<BookingRow, 'id' | 'created_at'>> = { ...patch } as Partial<Omit<BookingRow, 'id' | 'created_at'>>;
   // mantener gross_revenue en sync con total_revenue
   if (patch.total_revenue !== undefined && patch.gross_revenue === undefined) {
     dbPatch.gross_revenue = patch.total_revenue;
@@ -306,7 +321,7 @@ export const updateBookingPayout = async (
 ): Promise<ServiceResult<BookingRow>> => {
   // Si se modifica el bruto, también sincronizamos total_revenue
   // (campo legado que alimenta KPIs históricos).
-  const dbPatch: Record<string, unknown> = { ...patch };
+  const dbPatch: Partial<Omit<BookingRow, 'id' | 'created_at'>> = { ...patch } as Partial<Omit<BookingRow, 'id' | 'created_at'>>;
   if (patch.gross_revenue !== undefined && patch.gross_revenue !== null) {
     dbPatch.total_revenue = patch.gross_revenue;
   }

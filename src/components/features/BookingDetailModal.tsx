@@ -1,14 +1,21 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { listExpenses, createExpense, deleteExpense, updateExpense } from '@/services/expenses';
+import { listExpenses, createExpense, updateExpense, deleteExpense } from '@/services/expenses';
+import { updateBooking } from '@/services/bookings';
 import {
   listBookingAdjustments, createBookingAdjustment, deleteBookingAdjustment, netAdjustment,
 } from '@/services/bookingAdjustments';
+import {
+  listCleaningsByBooking, createCleaning, updateCleaning, deleteCleaning,
+  updateBookingOperational, type BookingCleaning,
+} from '@/services/cleanings';
+import { listVendors, type Vendor } from '@/services/vendors';
 import type { Expense } from '@/types';
 import type {
   PropertyRow, BankAccountRow, BookingAdjustmentRow, BookingAdjustmentKind,
 } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
+import { useBackdropClose, makeBackdropHandlers } from '@/lib/useBackdropClose';
 import ExpenseModal from './ExpenseModal';
 
 interface BookingLite {
@@ -27,6 +34,11 @@ interface BookingLite {
   payout_date?: string | null;
   listing_id?: string | null;
   notes?: string | null;
+  // Fase 11 — banderas operativas
+  checkin_done?: boolean;
+  checkout_done?: boolean;
+  inventory_checked?: boolean;
+  operational_notes?: string | null;
 }
 
 interface Props {
@@ -53,21 +65,35 @@ export default function BookingDetailModal({
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
   const [deletingAdjId, setDeletingAdjId] = useState<string | null>(null);
 
+  // Fase 11 — operativo
+  const [opFlags, setOpFlags] = useState({
+    checkin_done: booking.checkin_done ?? false,
+    checkout_done: booking.checkout_done ?? false,
+    inventory_checked: booking.inventory_checked ?? false,
+  });
+  const [cleanings, setCleanings] = useState<BookingCleaning[]>([]);
+  const [cleaners, setCleaners] = useState<Vendor[]>([]);
+  const [showAddCleaning, setShowAddCleaning] = useState(false);
+
   const propertyId = resolvePropertyId?.(booking.listing_id) ?? null;
   const property = propertyId ? properties.find(p => p.id === propertyId) : null;
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [resE, resA] = await Promise.all([
+    const [resE, resA, resC, resV] = await Promise.all([
       listExpenses(undefined, {
         bookingId: booking.id,
         includeRecurring: false,
         includeChannelFees: false,
       }),
       listBookingAdjustments(booking.id),
+      listCleaningsByBooking(booking.id),
+      listVendors('cleaner'),
     ]);
-    if (!resE.error) setExpenses(resE.data);
-    if (!resA.error) setAdjustments(resA.data);
+    if (!resE.error) setExpenses(resE.data ?? []);
+    if (!resA.error) setAdjustments(resA.data ?? []);
+    if (!resC.error) setCleanings(resC.data ?? []);
+    if (!resV.error) setCleaners(resV.data ?? []);
     setLoading(false);
   }, [booking.id]);
 
@@ -110,19 +136,17 @@ export default function BookingDetailModal({
     if (!res.error) { setDeletingId(null); await load(); }
   }, [load]);
 
-  const handleDeleteExpense = useCallback(async (id: string) => {
-    if (id.startsWith('rec-') || id.startsWith('fee-')) return;
-    const res = await deleteExpense(id);
-    if (!res.error) {
-      setDeletingId(null);
-      await load();
-    }
-  }, [load]);
-
   const handleDeleteAdjustment = useCallback(async (id: string) => {
+    // Cascade: si hay un gasto vinculado vía adjustment_id, también lo borramos
+    // para evitar dejar gastos huérfanos referenciando un ajuste inexistente.
+    const linkedExp = expenses.find(e => e.adjustment_id === id);
+    if (linkedExp) {
+      const resExp = await deleteExpense(linkedExp.id);
+      if (resExp.error) { setSaveError(`No se pudo borrar el gasto vinculado: ${resExp.error}`); return; }
+    }
     const res = await deleteBookingAdjustment(id);
     if (!res.error) { setDeletingAdjId(null); await load(); }
-  }, [load]);
+  }, [load, expenses]);
 
   const handleCreateAdjustment = useCallback(async (
     payload: {
@@ -141,6 +165,7 @@ export default function BookingDetailModal({
       await createExpense({
         property_id: propertyId,
         category: pendingCategory || 'Reparación daño',
+        subcategory: 'damage',
         type: 'variable',
         amount: payload.amount,
         date: payload.date,
@@ -159,12 +184,82 @@ export default function BookingDetailModal({
     await load();
   }, [booking.id, booking.confirmation_code, propertyId, load]);
 
+  // Fase 11 — Operativo handlers
+  const toggleFlag = useCallback(async (
+    field: 'checkin_done' | 'checkout_done' | 'inventory_checked',
+  ) => {
+    const next = !opFlags[field];
+    setOpFlags(prev => ({ ...prev, [field]: next }));
+    await updateBookingOperational(booking.id, { [field]: next });
+  }, [booking.id, opFlags]);
+
+  const addCleaning = useCallback(async (payload: {
+    cleaner_id: string; fee: number; status: 'pending' | 'done' | 'paid';
+    done_date: string | null; notes: string | null;
+    supplies_amount: number; reimburse_to_cleaner: boolean;
+  }) => {
+    const res = await createCleaning({ ...payload, booking_id: booking.id, paid_date: null });
+    if (!res.error) await load();
+  }, [booking.id, load]);
+
+  const setCleaningStatus = useCallback(async (
+    c: BookingCleaning,
+    next: 'pending' | 'done' | 'paid',
+  ) => {
+    const today = new Date().toISOString().split('T')[0];
+    const patch: Partial<BookingCleaning> = { status: next };
+    if (next === 'done' && !c.done_date) patch.done_date = today;
+    if (next === 'paid' && !c.paid_date) patch.paid_date = today;
+    await updateCleaning(c.id, patch);
+    await load();
+  }, [load]);
+
+  const removeCleaning = useCallback(async (id: string) => {
+    await deleteCleaning(id);
+    await load();
+  }, [load]);
+
+  // Marcar reserva como completada: valida operativo + bypass con advertencia
+  const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const [completeError, setCompleteError] = useState<string | null>(null);
+
+  const isAlreadyCompleted = (booking.status ?? '').toLowerCase() === 'completed';
+
+  const operationalChecklist = useMemo(() => {
+    const hasCleaning = cleanings.length > 0;
+    const allCleaningsDone = hasCleaning && cleanings.every(c => c.status === 'done' || c.status === 'paid');
+    return {
+      checkin: opFlags.checkin_done,
+      checkout: opFlags.checkout_done,
+      inventory: opFlags.inventory_checked,
+      cleaning_assigned: hasCleaning,
+      cleaning_done: allCleaningsDone,
+      allDone:
+        opFlags.checkin_done &&
+        opFlags.checkout_done &&
+        opFlags.inventory_checked &&
+        hasCleaning &&
+        allCleaningsDone,
+    };
+  }, [opFlags, cleanings]);
+
+  const markCompleted = useCallback(async (_force: boolean) => {
+    setCompleting(true);
+    setCompleteError(null);
+    const res = await updateBooking(booking.id, { status: 'completed' });
+    setCompleting(false);
+    if (res.error) { setCompleteError(res.error); return; }
+    setShowCompleteModal(false);
+    onClose();
+  }, [booking.id, onClose]);
+
   return (
     <AnimatePresence>
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-        onClick={e => e.target === e.currentTarget && onClose()}
+        {...makeBackdropHandlers(onClose)}
       >
         <motion.div
           initial={{ scale: 0.95, opacity: 0, y: 20 }}
@@ -226,6 +321,92 @@ export default function BookingDetailModal({
                 <p className="text-sm text-slate-700 whitespace-pre-line">{booking.notes}</p>
               </div>
             )}
+
+            {/* Fase 11 — Operativo */}
+            <div className="px-7 py-5 border-b border-slate-100">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-800">Operativo de la estadía</h3>
+                  <p className="text-xs text-slate-500">Check-in / check-out, aseo e inventario.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4">
+                {([
+                  ['checkin_done',     'Check-in hecho',      '🛬'],
+                  ['checkout_done',    'Check-out hecho',     '🛫'],
+                  ['inventory_checked','Inventario revisado', '📋'],
+                ] as const).map(([key, label, icon]) => {
+                  const active = opFlags[key];
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => toggleFlag(key)}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border-2 transition ${
+                        active
+                          ? 'bg-emerald-50 border-emerald-500 text-emerald-800'
+                          : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                      }`}
+                    >
+                      <span className="text-lg">{icon}</span>
+                      <span className="font-semibold flex-1 text-left">{label}</span>
+                      <span className={active ? 'text-emerald-600' : 'text-slate-300'}>
+                        {active ? '✓' : '○'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Aseo */}
+              <div className="border border-slate-200 rounded-lg bg-slate-50/40">
+                <div className="px-4 py-2.5 flex items-center justify-between border-b border-slate-200">
+                  <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">🧹 Aseo</p>
+                  <button
+                    onClick={() => setShowAddCleaning(true)}
+                    className="text-xs font-semibold text-blue-600 hover:underline"
+                  >
+                    + Asignar aseo
+                  </button>
+                </div>
+                {cleanings.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-4">Aún no has asignado aseo.</p>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {cleanings.map(c => {
+                      const cleaner = cleaners.find(v => v.id === c.cleaner_id);
+                      return (
+                        <div key={c.id} className="px-4 py-2.5 flex items-center justify-between text-sm">
+                          <div className="flex-1">
+                            <p className="font-semibold text-slate-800">
+                              {cleaner?.name ?? 'Sin asignar'}
+                              <span className="ml-2 text-xs font-normal text-slate-500">{formatCurrency(c.fee)}</span>
+                            </p>
+                            {c.done_date && <p className="text-xs text-slate-500">Hecho {c.done_date}</p>}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {c.status === 'paid' && <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs font-semibold">Pagado</span>}
+                            {c.status === 'done' && (
+                              <>
+                                <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-semibold">Hecho</span>
+                                <button onClick={() => setCleaningStatus(c, 'paid')} className="text-xs text-emerald-700 font-semibold hover:underline">Pagar</button>
+                              </>
+                            )}
+                            {c.status === 'pending' && (
+                              <>
+                                <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-semibold">Pendiente</span>
+                                <button onClick={() => setCleaningStatus(c, 'done')} className="text-xs text-blue-700 font-semibold hover:underline">Marcar hecho</button>
+                              </>
+                            )}
+                            <button onClick={() => removeCleaning(c.id)} className="text-slate-400 hover:text-red-600 text-xs ml-1">✕</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
 
             {/* Gastos vinculados */}
             <div className="px-7 py-5">
@@ -340,6 +521,12 @@ export default function BookingDetailModal({
                   Sin ajustes registrados.
                 </p>
               ) : (
+                <>
+                <p className="text-[11px] text-slate-500 mb-2 italic">
+                  💡 Los ajustes son del lado del huésped (lo que cobras o descuentas). Solo
+                  los <strong>cobros por daño</strong> generan automáticamente un gasto pendiente
+                  vinculado (badge ⚠️ debajo).
+                </p>
                 <div className="border border-slate-200 rounded-lg overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 text-xs text-slate-600 uppercase tracking-wider">
@@ -355,6 +542,7 @@ export default function BookingDetailModal({
                       {adjustments.map(a => {
                         const sign = a.kind === 'discount' ? -1 : 1;
                         const impact = sign * Number(a.amount);
+                        const linkedExpense = expenses.find(e => e.adjustment_id === a.id);
                         return (
                           <tr key={a.id} className="border-t border-slate-100 hover:bg-slate-50/50">
                             <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{a.date}</td>
@@ -363,14 +551,24 @@ export default function BookingDetailModal({
                                 {ADJ_KIND_LABEL[a.kind]}
                               </span>
                             </td>
-                            <td className="px-3 py-2 text-slate-700">{a.description ?? '—'}</td>
+                            <td className="px-3 py-2 text-slate-700">
+                              {a.description ?? '—'}
+                              {linkedExpense && (
+                                <div className="mt-1 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 inline-flex items-center gap-1">
+                                  ⚠️ Gasto reparación: {formatCurrency(Number(linkedExpense.amount))}
+                                  <span className="font-semibold uppercase">· {linkedExpense.status}</span>
+                                </div>
+                              )}
+                            </td>
                             <td className={`px-3 py-2 text-right font-semibold tabular-nums whitespace-nowrap ${impact >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                               {impact >= 0 ? '+' : ''}{formatCurrency(impact)}
                             </td>
                             <td className="px-3 py-2 text-right">
                               {deletingAdjId === a.id ? (
                                 <span className="inline-flex gap-2 text-xs">
-                                  <span className="text-slate-500">¿Eliminar?</span>
+                                  <span className="text-slate-500">
+                                    {linkedExpense ? '¿Eliminar ajuste + gasto vinculado?' : '¿Eliminar?'}
+                                  </span>
                                   <button onClick={() => handleDeleteAdjustment(a.id)} className="text-red-600 hover:underline font-semibold">Sí</button>
                                   <button onClick={() => setDeletingAdjId(null)} className="text-slate-500 hover:underline">No</button>
                                 </span>
@@ -397,12 +595,35 @@ export default function BookingDetailModal({
                     </tfoot>
                   </table>
                 </div>
+                </>
               )}
             </div>
           </div>
 
           {/* Footer */}
-          <div className="px-7 py-3 border-t border-slate-100 bg-slate-50 flex justify-end">
+          <div className="px-7 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {isAlreadyCompleted ? (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-100 text-emerald-700 rounded-full">
+                  ✓ Reserva completada
+                </span>
+              ) : operationalChecklist.allDone ? (
+                <button
+                  onClick={() => setShowCompleteModal(true)}
+                  className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg inline-flex items-center gap-1.5"
+                >
+                  ✓ Marcar completada
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowCompleteModal(true)}
+                  className="px-4 py-2 text-sm font-semibold text-amber-700 bg-amber-100 hover:bg-amber-200 rounded-lg inline-flex items-center gap-1.5"
+                  title="Faltan tareas operativas"
+                >
+                  ⚠ Marcar completada
+                </button>
+              )}
+            </div>
             <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">Cerrar</button>
           </div>
         </motion.div>
@@ -445,6 +666,32 @@ export default function BookingDetailModal({
               defaultDate={booking.end_date || new Date().toISOString().split('T')[0]}
               onClose={() => setShowAddAdjustment(false)}
               onSave={handleCreateAdjustment}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Add cleaning modal — Fase 11 */}
+        <AnimatePresence>
+          {showAddCleaning && (
+            <CleaningFormModal
+              cleaners={cleaners}
+              defaultFee={property?.default_cleaning_fee ?? null}
+              defaultDate={booking.end_date || new Date().toISOString().split('T')[0]}
+              onClose={() => setShowAddCleaning(false)}
+              onSave={async (payload) => { await addCleaning(payload); setShowAddCleaning(false); }}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Complete booking confirmation — Fase 11 */}
+        <AnimatePresence>
+          {showCompleteModal && (
+            <CompleteBookingModal
+              checklist={operationalChecklist}
+              working={completing}
+              error={completeError}
+              onClose={() => { setShowCompleteModal(false); setCompleteError(null); }}
+              onConfirm={markCompleted}
             />
           )}
         </AnimatePresence>
@@ -515,7 +762,7 @@ function LinkExistingExpenseModal({
       includeRecurring: false,
       includeChannelFees: false,
     }).then(res => {
-      if (!res.error) {
+      if (!res.error && res.data) {
         setCandidates(res.data.filter(e => !e.booking_id && !e.id.startsWith('rec-') && !e.id.startsWith('fee-')));
       }
       setLoading(false);
@@ -536,7 +783,7 @@ function LinkExistingExpenseModal({
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-      onClick={e => e.target === e.currentTarget && onClose()}
+      {...makeBackdropHandlers(onClose)}
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
@@ -628,7 +875,7 @@ function AdjustmentFormModal({
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-      onClick={e => e.target === e.currentTarget && onClose()}
+      {...makeBackdropHandlers(onClose)}
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
@@ -734,6 +981,303 @@ function AdjustmentFormModal({
             </button>
           </div>
         </form>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─── Sub-modal: Asignar aseo — Fase 11 ──────────────────────────────
+function CleaningFormModal({
+  cleaners, defaultFee, defaultDate, onClose, onSave,
+}: {
+  cleaners: Vendor[];
+  defaultFee: number | null;
+  defaultDate: string;
+  onClose: () => void;
+  onSave: (p: {
+    cleaner_id: string; fee: number;
+    status: 'pending' | 'done' | 'paid';
+    done_date: string | null; notes: string | null;
+    supplies_amount: number; reimburse_to_cleaner: boolean;
+  }) => void;
+}) {
+  const [cleanerId, setCleanerId] = useState<string>('');
+  const [fee, setFee] = useState<string>(defaultFee ? String(defaultFee) : '');
+  const [status, setStatus] = useState<'pending' | 'done' | 'paid'>('pending');
+  const [doneDate, setDoneDate] = useState<string>(defaultDate);
+  const [notes, setNotes] = useState('');
+  const [suppliesAmount, setSuppliesAmount] = useState<string>('');
+  const [reimburse, setReimburse] = useState<boolean>(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!cleanerId) {
+      setError('Debes seleccionar la persona de aseo que ejecutó el turno.');
+      return;
+    }
+    const feeNum = parseFloat(fee);
+    if (isNaN(feeNum) || feeNum < 0) {
+      setError('Tarifa inválida.');
+      return;
+    }
+    const suppliesNum = suppliesAmount.trim() === '' ? 0 : parseFloat(suppliesAmount);
+    if (isNaN(suppliesNum) || suppliesNum < 0) {
+      setError('Monto de insumos inválido.');
+      return;
+    }
+    setSaving(true);
+    await onSave({
+      cleaner_id: cleanerId,
+      fee: feeNum,
+      status,
+      done_date: status === 'pending' ? null : doneDate,
+      notes: notes.trim() || null,
+      supplies_amount: suppliesNum,
+      reimburse_to_cleaner: suppliesNum > 0 && reimburse,
+    });
+    setSaving(false);
+  };
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      {...makeBackdropHandlers(onClose)}
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+      >
+        <div className="px-6 py-4 border-b border-slate-100">
+          <h3 className="text-lg font-bold text-slate-800">🧹 Asignar aseo</h3>
+          <p className="text-xs text-slate-500">Se guarda como parte de esta reserva y suma al saldo de la persona.</p>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">
+              Persona de aseo <span className="text-rose-500">*</span>
+            </label>
+            <select
+              value={cleanerId}
+              onChange={e => setCleanerId(e.target.value)}
+              required
+              className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white ${
+                !cleanerId && error ? 'border-rose-300' : ''
+              }`}
+            >
+              <option value="">— Selecciona quién hizo la limpieza —</option>
+              {cleaners.filter(c => c.active).map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            {cleaners.length === 0 ? (
+              <p className="text-xs text-amber-600 mt-1">
+                Aún no hay personal. <a href="/aseo" className="underline font-semibold">Agregar →</a>
+              </p>
+            ) : (
+              <p className="text-xs text-slate-500 mt-1">
+                Obligatorio: cada turno debe quedar atribuido a alguien para que su saldo y su histórico sean correctos.
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Tarifa *</label>
+            <input
+              type="number" min="0" step="1000"
+              value={fee}
+              onChange={e => setFee(e.target.value)}
+              placeholder={defaultFee ? `Default propiedad: ${defaultFee}` : 'Ej: 50000'}
+              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              required
+            />
+            {defaultFee != null && (
+              <p className="text-xs text-slate-500 mt-1">Tarifa por defecto de la propiedad: {formatCurrency(defaultFee)}</p>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Estado</label>
+            <div className="grid grid-cols-3 gap-2">
+              {(['pending','done','paid'] as const).map(s => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setStatus(s)}
+                  className={`py-2 rounded-lg text-xs font-semibold border-2 transition ${
+                    status === s
+                      ? 'bg-blue-50 border-blue-500 text-blue-800'
+                      : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  {s === 'pending' && 'Pendiente'}
+                  {s === 'done' && 'Hecho'}
+                  {s === 'paid' && 'Pagado'}
+                </button>
+              ))}
+            </div>
+          </div>
+          {status !== 'pending' && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Fecha realización</label>
+              <input
+                type="date"
+                value={doneDate}
+                onChange={e => setDoneDate(e.target.value)}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Notas</label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              rows={2}
+              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+            />
+          </div>
+          <div className="border-t border-slate-100 pt-3 space-y-2">
+            <p className="text-xs font-semibold text-slate-700">Insumos del turno</p>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Monto en insumos (papel, jabón, blanqueador, etc.)
+              </label>
+              <input
+                type="number" min="0" step="500"
+                value={suppliesAmount}
+                onChange={e => setSuppliesAmount(e.target.value)}
+                placeholder="0 si no hubo gasto en insumos"
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+            <label className={`flex items-center gap-2 text-xs ${parseFloat(suppliesAmount || '0') > 0 ? 'text-slate-700' : 'text-slate-400'}`}>
+              <input
+                type="checkbox"
+                checked={reimburse}
+                onChange={e => setReimburse(e.target.checked)}
+                disabled={!(parseFloat(suppliesAmount || '0') > 0)}
+                className="rounded"
+              />
+              <span>Reembolsar al aseador (los insumos los puso él/ella)</span>
+            </label>
+          </div>
+          {error && (
+            <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded px-2 py-1.5">
+              {error}
+            </p>
+          )}
+          <div className="flex gap-2 pt-4 border-t border-slate-100">
+            <button type="button" onClick={onClose}
+              className="flex-1 py-2.5 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
+              Cancelar
+            </button>
+            <button type="submit" disabled={saving || !fee}
+              className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
+              {saving ? 'Guardando…' : 'Guardar'}
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ──── Complete booking modal (Fase 11) ─────────────────────────────────
+
+function CompleteBookingModal({
+  checklist, working, error, onClose, onConfirm,
+}: {
+  checklist: {
+    checkin: boolean;
+    checkout: boolean;
+    inventory: boolean;
+    cleaning_assigned: boolean;
+    cleaning_done: boolean;
+    allDone: boolean;
+  };
+  working: boolean;
+  error: string | null;
+  onClose: () => void;
+  onConfirm: (force: boolean) => void;
+}) {
+  const backdrop = useBackdropClose(onClose);
+  const items: { ok: boolean; label: string }[] = [
+    { ok: checklist.checkin, label: 'Check-in realizado' },
+    { ok: checklist.checkout, label: 'Check-out realizado' },
+    { ok: checklist.inventory, label: 'Inventario revisado' },
+    { ok: checklist.cleaning_assigned, label: 'Aseo asignado' },
+    { ok: checklist.cleaning_done, label: 'Aseo hecho o pagado' },
+  ];
+  const missing = items.filter(i => !i.ok);
+
+  return (
+    <motion.div
+      {...backdrop}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4"
+    >
+      <motion.div
+        initial={{ scale: 0.93, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.93, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+        onClick={e => e.stopPropagation()}
+        onMouseDown={e => e.stopPropagation()}
+        onMouseUp={e => e.stopPropagation()}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+      >
+        <div className="px-6 py-5 border-b">
+          <h3 className="text-lg font-bold text-slate-900">Marcar reserva como completada</h3>
+          <p className="text-xs text-slate-500 mt-0.5">Revisa el checklist operativo antes de cerrar la reserva.</p>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <ul className="space-y-2">
+            {items.map((it, i) => (
+              <li key={i} className="flex items-center gap-2 text-sm">
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
+                  it.ok ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'
+                }`}>
+                  {it.ok ? '✓' : '○'}
+                </span>
+                <span className={it.ok ? 'text-slate-800' : 'text-slate-500'}>{it.label}</span>
+              </li>
+            ))}
+          </ul>
+
+          {checklist.allDone ? (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-700">
+              Todo está en orden. La reserva se marcará como <strong>completada</strong>.
+            </div>
+          ) : (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800 space-y-1">
+              <div className="font-semibold">⚠ Quedan {missing.length} tareas pendientes.</div>
+              <div className="text-xs">
+                Puedes completar la reserva de todos modos, pero quedará <strong>cerrada con pendientes</strong>. Las banderas faltantes seguirán visibles para que las termines luego.
+              </div>
+            </div>
+          )}
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+        </div>
+
+        <div className="flex justify-end gap-2 px-6 py-4 border-t bg-slate-50">
+          <button onClick={onClose} disabled={working}
+            className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50">
+            Cancelar
+          </button>
+          {checklist.allDone ? (
+            <button onClick={() => onConfirm(false)} disabled={working}
+              className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg disabled:opacity-50">
+              {working ? 'Guardando…' : '✓ Completar'}
+            </button>
+          ) : (
+            <button onClick={() => onConfirm(true)} disabled={working}
+              className="px-4 py-2 text-sm font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-lg disabled:opacity-50">
+              {working ? 'Guardando…' : 'Completar de todos modos'}
+            </button>
+          )}
+        </div>
       </motion.div>
     </motion.div>
   );

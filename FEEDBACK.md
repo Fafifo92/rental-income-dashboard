@@ -4,7 +4,63 @@
 
 ---
 
-## 📌 Última iteración — Resolver/Descartar gasto pendiente por daño
+## 📌 Última iteración — Fase 11: Administración + Aseo + Operativo
+
+### 🧠 Alcance
+Reestructurar el nav y entregar la base técnica (tabla `vendors` + aseo) que desbloquea las fases 12-16.
+
+### ✅ Hecho
+
+**Migraciones (ya corridas en Supabase ✓)**
+- `migration_008_vendors.sql` — tabla `vendors` (utility/admin/maintenance/cleaner/insurance/other) + `vendor_id` opcional en `expenses` y `property_recurring_expenses`.
+- `migration_011_cleanings_operational.sql` — `bookings.checkin_done/checkout_done/inventory_checked/operational_notes`, `properties.default_cleaning_fee`, tabla `booking_cleanings`.
+
+**Tipos y servicios**
+- `types/database.ts`: `VendorRow`, `VendorKind`, `BookingCleaningRow`, `CleaningStatus` + campos operativos en Booking/Property.
+- `services/vendors.ts`: CRUD completo + auth.
+- `services/cleanings.ts`: CRUD por booking + `computeCleanerBalances()` + `updateBookingOperational()`.
+
+**Nav reestructurado**
+- Dropdown **Administración** con submenús Propiedades / Cuentas bancarias / Proveedores / Aseo.
+- El ítem raíz "Propiedades" y "Cuentas" desaparecen del top-nav.
+
+**Nuevas páginas**
+- `/vendors` — CRUD de proveedores con filtros por tipo (6 categorías con iconos).
+- `/aseo` — listado de personal de aseo con saldos adeudados (pendiente / hecho sin pagar / total), modal detalle con historial y botón "Marcar pagado".
+
+**BookingDetailModal — tab Operativo**
+- 3 toggles visuales (check-in hecho / check-out hecho / inventario revisado), persistencia directa a DB.
+- Sección 🧹 Aseo: asignar limpiadora (prellenado con `default_cleaning_fee` de la propiedad), marcar hecho → pagar → eliminar, sub-modal con selector de estado.
+
+**Otros fixes**
+- Bug fechas check-in/out off-by-one en preview del modal (se parseaba como UTC → mostraba día anterior en Bogotá). Arreglado con `'T00:00:00'` local.
+- Configurar `default_cleaning_fee` desde la tab "Configuración" en PropertyDetailClient.
+
+### 🧪 Cómo probarlo
+
+1. **Proveedores**: navbar → Administración → Proveedores. Crea uno de tipo "Servicio público" (Claro, EPM). Edita, elimina.
+2. **Aseo**:
+   - Administración → Aseo → + Nueva persona (Juanita, 300123456).
+   - En una propiedad (menú Propiedades → detalle), tab Configuración → pon tarifa de aseo por defecto (ej. 60000) y guarda.
+   - Abre una reserva → sección Operativo → Asignar aseo → selecciona Juanita, tarifa pre-llenada, estado "Hecho" → Guardar.
+   - Verifica que en `/aseo` aparece el saldo adeudado de Juanita.
+   - "Marcar pagado" desde la fila en el modal → saldo baja.
+3. **Operativo**: toggles check-in/out/inv en una reserva → refresca → persisten.
+4. **Fechas**: en `/bookings` → Nuevo. Selecciona 20 abril + 3 noches → preview debe decir "20 de abril → 23 de abril" (antes mostraba 19).
+
+### ⚠️ Pendiente
+- `npm run dev` — verificar visualmente. Yo no pude correr `astro check` por falta de pwsh en mi entorno; hice auditoría manual de tipos.
+- Booking_cleanings no aparece aún en reportes financieros (Fase 16/17 lo integrará al cashflow).
+- Email recordatorios aún no implementado (Fase 12 lo incluirá).
+
+### 🔜 Siguiente
+**Fase 12** — Recurring mensualizado + notificaciones configurables + email Resend. Desbloquea recordatorios.
+
+---
+
+## 📚 Historial
+
+### Resolver/Descartar gasto pendiente por daño (Fase 10 cierre)
 
 ### 🧠 El problema
 

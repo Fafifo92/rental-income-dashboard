@@ -53,7 +53,15 @@ export default function ExpensesList({ expenses, loading = false, onDelete, onEd
                   {kind}
                 </span>
               )}
-              {row.booking_id && (
+              {row.adjustment_id && (
+                <span
+                  className="px-1.5 py-0.5 rounded text-[10px] font-semibold border bg-amber-50 text-amber-800 border-amber-200"
+                  title="Generado automáticamente desde un cobro por daño en la reserva"
+                >
+                  ⚠️ Daño huésped
+                </span>
+              )}
+              {row.booking_id && !row.adjustment_id && (
                 <span
                   className="px-1.5 py-0.5 rounded text-[10px] font-semibold border bg-indigo-50 text-indigo-700 border-indigo-200 font-mono"
                   title="Gasto vinculado a una reserva"

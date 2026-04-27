@@ -114,6 +114,8 @@ export const changeRecurringExpensePrice = async (
       description: newAttrs.description ?? current.description,
       vendor: newAttrs.vendor ?? current.vendor,
       person_in_charge: newAttrs.person_in_charge ?? current.person_in_charge,
+      vendor_id: null,
+      is_shared: current.is_shared ?? false,
       valid_from: effectiveDate,
       valid_to: null,
     })

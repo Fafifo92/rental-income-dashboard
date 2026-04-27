@@ -16,9 +16,8 @@ export function usePropertyFilter() {
 
   useEffect(() => {
     listProperties().then(res => {
-      if (!res.error) {
+      if (!res.error && res.data) {
         setProperties(res.data);
-        // If saved ID no longer exists, clear it
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored && !res.data.find(p => p.id === stored)) {
           localStorage.removeItem(STORAGE_KEY);

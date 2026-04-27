@@ -68,6 +68,12 @@ export default function NavActions() {
                 <p className="text-xs text-slate-400">Sesión activa</p>
                 <p className="text-sm font-medium text-slate-700 truncate">{email}</p>
               </div>
+              <a
+                href="/notificaciones"
+                className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2"
+              >
+                <span>⚙️</span> Configuración de notificaciones
+              </a>
               <button
                 type="button"
                 onClick={handleLogout}

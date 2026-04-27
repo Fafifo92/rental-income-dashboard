@@ -339,7 +339,7 @@ export const computeFinancials = async (
 
   if (isAuthenticated) {
     const bookingRes = await listBookings(bookingFilters);
-    if (!bookingRes.error) {
+    if (!bookingRes.error && bookingRes.data) {
       bookings = bookingRes.data.map(r => ({
         start_date: r.start_date,
         end_date:   r.end_date,
@@ -365,14 +365,14 @@ export const computeFinancials = async (
     }
   } else {
     const bookingRes = await listBookings(bookingFilters);
-    if (bookingRes.error || bookingRes.data.length === 0) {
+    if (bookingRes.error || !bookingRes.data || bookingRes.data.length === 0) {
       const stored = getDemoBookings();
       bookings = stored.length > 0
         ? stored.map(b => ({ start_date: b.start_date, end_date: b.end_date, num_nights: b.num_nights, revenue: b.revenue, status: b.status }))
         : DEMO_BOOKINGS_SEED;
       isDemo = true;
     } else {
-      bookings = bookingRes.data.map(r => ({
+      bookings = (bookingRes.data ?? []).map(r => ({
         start_date: r.start_date,
         end_date:   r.end_date,
         num_nights: r.num_nights,
@@ -390,9 +390,9 @@ export const computeFinancials = async (
   });
   let expenses: Expense[] = [];
   if (isAuthenticated) {
-    expenses = expenseRes.error ? [] : expenseRes.data;
+    expenses = expenseRes.error ? [] : (expenseRes.data ?? []);
   } else {
-    expenses = (expenseRes.error || expenseRes.data.length === 0)
+    expenses = (expenseRes.error || !expenseRes.data || expenseRes.data.length === 0)
       ? DEMO_EXPENSES_SEED
       : expenseRes.data;
   }
@@ -401,7 +401,7 @@ export const computeFinancials = async (
   // Only for authenticated users; demo data already includes fixed expenses.
   if (isAuthenticated) {
     const recRes = await listAllRecurringExpensesForOwner();
-    if (!recRes.error && recRes.data.length > 0) {
+    if (!recRes.error && recRes.data && recRes.data.length > 0) {
       const filtered = propertyId
         ? recRes.data.filter(r => r.property_id === propertyId)
         : recRes.data;

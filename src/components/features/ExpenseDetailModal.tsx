@@ -2,6 +2,7 @@ import { motion } from 'framer-motion';
 import type { Expense } from '@/types';
 import type { PropertyRow, BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
+import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 
 interface Props {
   expense: Expense;
@@ -38,7 +39,7 @@ export default function ExpenseDetailModal({
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-      onClick={e => e.target === e.currentTarget && onClose()}
+      {...makeBackdropHandlers(onClose)}
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0, y: 20 }}
