@@ -8,8 +8,11 @@ import {
   computeCleanerBalances,
   payoutCleanerConsolidated,
   listCleaningsByCleaner,
+  getLooseCleanerSuppliesTotals,
+  listCleanerLooseSupplies,
   type BookingCleaning,
   type CleaningHistoryRow,
+  type LooseSupplyRow,
 } from '@/services/cleanings';
 import {
   listCleanerGroups,
@@ -21,12 +24,14 @@ import {
 import type { BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { useBackdropClose } from '@/lib/useBackdropClose';
+import { Pencil, UserMinus } from 'lucide-react';
 
 export default function AseoClient(): JSX.Element {
   const [cleaners, setCleaners] = useState<Vendor[]>([]);
   const [cleanings, setCleanings] = useState<BookingCleaning[]>([]);
   const [banks, setBanks] = useState<BankAccountRow[]>([]);
   const [groups, setGroups] = useState<CleanerGroup[]>([]);
+  const [looseSupplies, setLooseSupplies] = useState<Map<string, { amount: number; count: number }>>(new Map());
   const [groupFilter, setGroupFilter] = useState<string | 'all' | 'none'>('all');
   const [loading, setLoading] = useState(true);
   const [newModal, setNewModal] = useState(false);
@@ -40,22 +45,43 @@ export default function AseoClient(): JSX.Element {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [vRes, cRes, bRes, gRes] = await Promise.all([
+    const [vRes, cRes, bRes, gRes, lRes] = await Promise.all([
       listVendors('cleaner'),
       listAllCleanings(),
       listBankAccounts(),
       listCleanerGroups(),
+      getLooseCleanerSuppliesTotals(),
     ]);
     if (vRes.data) setCleaners(vRes.data);
     if (cRes.data) setCleanings(cRes.data);
     if (bRes.data) setBanks(bRes.data);
     if (gRes.data) setGroups(gRes.data);
+    if (lRes.data) setLooseSupplies(lRes.data);
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
   const balances = useMemo(() => computeCleanerBalances(cleanings), [cleanings]);
+
+  /** Balance combinado: cleanings + insumos sueltos pendientes (vendor_id=cleaner). */
+  const combinedBalances = useMemo(() => {
+    const out = new Map<string, { pending_amount: number; loose_amount: number; loose_count: number; total: number }>();
+    const ids = new Set<string>([...balances.keys(), ...looseSupplies.keys()]);
+    for (const id of ids) {
+      const b = balances.get(id);
+      const loose = looseSupplies.get(id);
+      const cleaningTotal = b ? b.total_owed : 0;
+      const looseAmount = loose?.amount ?? 0;
+      out.set(id, {
+        pending_amount: cleaningTotal,
+        loose_amount: looseAmount,
+        loose_count: loose?.count ?? 0,
+        total: cleaningTotal + looseAmount,
+      });
+    }
+    return out;
+  }, [balances, looseSupplies]);
 
   // Mapa cleanerId -> groupIds (derivado de groups[].member_ids)
   const cleanerGroupsMap = useMemo(() => {
@@ -232,8 +258,12 @@ export default function AseoClient(): JSX.Element {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filteredCleaners.map(c => {
             const b = balances.get(c.id);
-            const owed = b?.total_owed ?? 0;
-            const canPay = (b?.done_unpaid_count ?? 0) > 0;
+            const cb = combinedBalances.get(c.id);
+            const cleaningOwed = b?.total_owed ?? 0;
+            const looseOwed = cb?.loose_amount ?? 0;
+            const looseCount = cb?.loose_count ?? 0;
+            const owed = cleaningOwed + looseOwed;
+            const canPay = (b?.done_unpaid_count ?? 0) > 0 || looseCount > 0;
             const cGroups = cleanerGroupsMap.get(c.id) ?? [];
             return (
               <motion.div
@@ -278,16 +308,16 @@ export default function AseoClient(): JSX.Element {
                         className="w-7 h-7 rounded hover:bg-slate-200 flex items-center justify-center text-slate-500 hover:text-slate-700"
                         aria-label="Editar"
                       >
-                        ✏️
+                        <Pencil size={14} strokeWidth={2} />
                       </button>
                       <button
                         type="button"
-                        title="Eliminar"
+                        title="Retirar persona"
                         onClick={() => setConfirmDelete(c)}
-                        className="w-7 h-7 rounded hover:bg-red-100 flex items-center justify-center text-slate-400 hover:text-red-600"
-                        aria-label="Eliminar"
+                        className="w-7 h-7 rounded hover:bg-amber-100 flex items-center justify-center text-slate-400 hover:text-amber-700"
+                        aria-label="Retirar persona"
                       >
-                        🗑️
+                        <UserMinus size={15} strokeWidth={2} />
                       </button>
                     </div>
                   </div>
@@ -311,6 +341,12 @@ export default function AseoClient(): JSX.Element {
                       {formatCurrency(owed)}
                     </span>
                   </div>
+                  {looseCount > 0 && (
+                    <div className="flex items-center justify-between text-[11px] text-cyan-700 bg-cyan-50 border border-cyan-200 rounded px-2 py-1">
+                      <span>🧴 {looseCount} compra{looseCount === 1 ? '' : 's'} de insumos pendientes</span>
+                      <span className="font-semibold">{formatCurrency(looseOwed)}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 flex gap-2">
@@ -365,6 +401,8 @@ export default function AseoClient(): JSX.Element {
           <PayoutModal
             cleaner={payoutTarget}
             balance={balances.get(payoutTarget.id)}
+            looseAmount={combinedBalances.get(payoutTarget.id)?.loose_amount ?? 0}
+            looseCount={combinedBalances.get(payoutTarget.id)?.loose_count ?? 0}
             banks={banks}
             onClose={() => setPayoutTarget(null)}
             onConfirm={async (args) => {
@@ -597,13 +635,18 @@ function DetailModal({
 }) {
   const backdrop = useBackdropClose(onClose);
   const [rows, setRows] = useState<CleaningHistoryRow[]>([]);
+  const [loose, setLoose] = useState<LooseSupplyRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
-    listCleaningsByCleaner(cleaner.id).then(res => {
+    Promise.all([
+      listCleaningsByCleaner(cleaner.id),
+      listCleanerLooseSupplies(cleaner.id),
+    ]).then(([res, lRes]) => {
       if (!mounted) return;
       setRows(res.data ?? []);
+      setLoose(lRes.data ?? []);
       setLoading(false);
     });
     return () => { mounted = false; };
@@ -612,6 +655,9 @@ function DetailModal({
   const totalEarned = rows.reduce((s, r) => s + r.fee, 0);
   const totalPaid = rows.filter(r => r.status === 'paid').reduce((s, r) => s + r.fee, 0);
   const totalUnpaid = rows.filter(r => r.status !== 'paid').reduce((s, r) => s + r.fee, 0);
+  const totalSuppliesReimb = rows.reduce((s, r) => s + (r.reimburse_to_cleaner ? r.supplies_amount : 0), 0);
+  const totalLoosePending = loose.filter(l => l.status === 'pending').reduce((s, l) => s + l.amount, 0);
+  const totalLoosePaid = loose.filter(l => l.status === 'paid').reduce((s, l) => s + l.amount, 0);
   const sourceBadge = (s: string | null): string => {
     if (!s) return '—';
     const v = s.toLowerCase();
@@ -639,7 +685,7 @@ function DetailModal({
             <h3 className="text-xl font-bold text-slate-800">🧹 {cleaner.name}</h3>
             <p className="text-sm text-slate-500">Historial de aseos ({rows.length})</p>
           </div>
-          <div className="grid grid-cols-3 gap-3 text-center text-xs">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center text-xs">
             <div className="bg-slate-50 rounded-lg px-3 py-2 min-w-[110px]">
               <div className="text-[10px] uppercase text-slate-500 font-semibold">Total facturado</div>
               <div className="text-base font-bold text-slate-800">{formatCurrency(totalEarned)}</div>
@@ -652,61 +698,146 @@ function DetailModal({
               <div className="text-[10px] uppercase text-amber-600 font-semibold">Sin pagar</div>
               <div className="text-base font-bold text-amber-700">{formatCurrency(totalUnpaid)}</div>
             </div>
+            <div className="bg-indigo-50 rounded-lg px-3 py-2 min-w-[110px]">
+              <div className="text-[10px] uppercase text-indigo-600 font-semibold">Insumos reemb.</div>
+              <div className="text-base font-bold text-indigo-700">{formatCurrency(totalSuppliesReimb)}</div>
+            </div>
+            <div className="bg-cyan-50 rounded-lg px-3 py-2 min-w-[110px]" title="Insumos comprados por la persona, sin asignar a una reserva">
+              <div className="text-[10px] uppercase text-cyan-600 font-semibold">Insumos sueltos</div>
+              <div className="text-base font-bold text-cyan-700">{formatCurrency(totalLoosePending)}</div>
+              <div className="text-[10px] text-cyan-600">pend · pagado: {formatCurrency(totalLoosePaid)}</div>
+            </div>
           </div>
         </div>
-        <div className="p-6">
+        <div className="p-6 space-y-6">
           {loading ? (
             <p className="text-sm text-slate-500 text-center py-8">Cargando historial…</p>
-          ) : rows.length === 0 ? (
-            <p className="text-sm text-slate-500 text-center py-8">Aún no hay aseos registrados para esta persona.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-[10px] uppercase text-slate-500 bg-slate-50">
-                  <tr>
-                    <th className="text-left py-2 px-2">Estado</th>
-                    <th className="text-left py-2 px-2">Propiedad</th>
-                    <th className="text-left py-2 px-2">Reserva</th>
-                    <th className="text-left py-2 px-2">Huésped</th>
-                    <th className="text-left py-2 px-2">Fecha aseo</th>
-                    <th className="text-left py-2 px-2">Pagado</th>
-                    <th className="text-right py-2 px-2">Tarifa</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {rows.map(r => (
-                    <tr key={r.id} className="hover:bg-slate-50">
-                      <td className="py-2 px-2">
-                        {r.status === 'paid' && <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs font-semibold">Pagado</span>}
-                        {r.status === 'done' && <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-semibold">Hecho</span>}
-                        {r.status === 'pending' && <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-semibold">Pendiente</span>}
-                      </td>
-                      <td className="py-2 px-2 text-slate-700 font-medium">{r.property_name ?? '—'}</td>
-                      <td className="py-2 px-2">
-                        {r.booking_id ? (
-                          <a
-                            href={`/bookings?focus=${r.booking_id}`}
-                            className="text-blue-600 hover:underline text-xs font-mono"
-                            title="Abrir reserva"
-                          >
-                            {r.booking_code ?? r.booking_id.slice(0, 8)}
-                          </a>
-                        ) : '—'}
-                        {r.listing_source && (
-                          <span className="ml-1.5 text-[10px] text-slate-400">· {sourceBadge(r.listing_source)}</span>
-                        )}
-                      </td>
-                      <td className="py-2 px-2 text-slate-600 truncate max-w-[180px]" title={r.guest_name ?? undefined}>
-                        {r.guest_name ?? '—'}
-                      </td>
-                      <td className="py-2 px-2 text-slate-500">{r.done_date ?? r.check_out ?? '—'}</td>
-                      <td className="py-2 px-2 text-slate-500">{r.paid_date ?? '—'}</td>
-                      <td className="py-2 px-2 text-right font-semibold">{formatCurrency(r.fee)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {/* Sección 1: aseos por reserva */}
+              <div>
+                <h4 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                  🧹 Aseos hechos por reserva
+                  <span className="text-[10px] text-slate-400 font-normal">({rows.length})</span>
+                </h4>
+                {rows.length === 0 ? (
+                  <p className="text-sm text-slate-500 py-4 bg-slate-50 rounded-lg text-center">Aún no hay aseos registrados.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="text-[10px] uppercase text-slate-500 bg-slate-50">
+                        <tr>
+                          <th className="text-left py-2 px-2">Estado</th>
+                          <th className="text-left py-2 px-2">Propiedad</th>
+                          <th className="text-left py-2 px-2">Reserva</th>
+                          <th className="text-left py-2 px-2">Huésped</th>
+                          <th className="text-left py-2 px-2">Fecha aseo</th>
+                          <th className="text-left py-2 px-2">Pagado</th>
+                          <th className="text-right py-2 px-2">Tarifa</th>
+                          <th className="text-right py-2 px-2">Insumos</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {rows.map(r => (
+                          <tr key={r.id} className="hover:bg-slate-50">
+                            <td className="py-2 px-2">
+                              {r.status === 'paid' && <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs font-semibold">Pagado</span>}
+                              {r.status === 'done' && <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-semibold">Hecho</span>}
+                              {r.status === 'pending' && <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-semibold">Pendiente</span>}
+                            </td>
+                            <td className="py-2 px-2 text-slate-700 font-medium">{r.property_name ?? '—'}</td>
+                            <td className="py-2 px-2">
+                              {r.booking_id ? (
+                                <a
+                                  href={`/bookings?focus=${r.booking_id}`}
+                                  className="text-blue-600 hover:underline text-xs font-mono"
+                                  title="Abrir reserva"
+                                >
+                                  {r.booking_code ?? r.booking_id.slice(0, 8)}
+                                </a>
+                              ) : '—'}
+                              {r.listing_source && (
+                                <span className="ml-1.5 text-[10px] text-slate-400">· {sourceBadge(r.listing_source)}</span>
+                              )}
+                            </td>
+                            <td className="py-2 px-2 text-slate-600 truncate max-w-[180px]" title={r.guest_name ?? undefined}>
+                              {r.guest_name ?? '—'}
+                            </td>
+                            <td className="py-2 px-2 text-slate-500">{r.done_date ?? r.check_out ?? '—'}</td>
+                            <td className="py-2 px-2 text-slate-500">{r.paid_date ?? '—'}</td>
+                            <td className="py-2 px-2 text-right font-semibold">{formatCurrency(r.fee)}</td>
+                            <td className="py-2 px-2 text-right">
+                              {r.supplies_amount > 0 ? (
+                                <span
+                                  className={r.reimburse_to_cleaner ? 'text-indigo-700 font-semibold' : 'text-slate-400'}
+                                  title={r.reimburse_to_cleaner ? 'Insumos reembolsados al cleaner en la liquidación' : 'Insumos NO reembolsados al cleaner'}
+                                >
+                                  {formatCurrency(r.supplies_amount)}
+                                  {!r.reimburse_to_cleaner && <span className="ml-1 text-[10px]">(no reemb.)</span>}
+                                </span>
+                              ) : (
+                                <span className="text-slate-300">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Sección 2: insumos sueltos comprados por la persona */}
+              <div>
+                <h4 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                  🧴 Insumos comprados por la persona
+                  <span className="text-[10px] text-slate-400 font-normal">({loose.length})</span>
+                  {totalLoosePending > 0 && (
+                    <span className="ml-auto text-[11px] font-semibold text-cyan-700 bg-cyan-50 border border-cyan-200 rounded px-2 py-0.5">
+                      Por liquidar: {formatCurrency(totalLoosePending)}
+                    </span>
+                  )}
+                </h4>
+                {loose.length === 0 ? (
+                  <p className="text-xs text-slate-500 py-3 bg-slate-50 rounded-lg text-center">
+                    No hay compras de insumos registradas a nombre de esta persona.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="text-[10px] uppercase text-slate-500 bg-slate-50">
+                        <tr>
+                          <th className="text-left py-2 px-2">Estado</th>
+                          <th className="text-left py-2 px-2">Fecha</th>
+                          <th className="text-left py-2 px-2">Propiedad</th>
+                          <th className="text-left py-2 px-2">Detalle</th>
+                          <th className="text-left py-2 px-2">Pagado</th>
+                          <th className="text-right py-2 px-2">Monto</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {loose.map(l => (
+                          <tr key={l.id} className="hover:bg-slate-50">
+                            <td className="py-2 px-2">
+                              {l.status === 'paid'
+                                ? <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs font-semibold">Liquidado</span>
+                                : <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-semibold">Por liquidar</span>}
+                            </td>
+                            <td className="py-2 px-2 text-slate-500">{l.date}</td>
+                            <td className="py-2 px-2 text-slate-700">{l.property_name ?? <span className="text-slate-400">—</span>}</td>
+                            <td className="py-2 px-2 text-slate-600 truncate max-w-[260px]" title={l.description ?? undefined}>
+                              {l.description ?? <span className="text-slate-400">Sin detalle</span>}
+                            </td>
+                            <td className="py-2 px-2 text-slate-500">{l.paid_date ?? '—'}</td>
+                            <td className="py-2 px-2 text-right font-semibold text-cyan-700">{formatCurrency(l.amount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
         <div className="p-4 border-t border-slate-100 flex justify-end">
@@ -718,10 +849,12 @@ function DetailModal({
 }
 
 function PayoutModal({
-  cleaner, balance, banks, onClose, onConfirm,
+  cleaner, balance, looseAmount, looseCount, banks, onClose, onConfirm,
 }: {
   cleaner: Vendor;
   balance: ReturnType<typeof computeCleanerBalances> extends Map<string, infer V> ? V | undefined : never;
+  looseAmount: number;
+  looseCount: number;
   banks: BankAccountRow[];
   onClose: () => void;
   onConfirm: (args: { paidDate: string; bankAccountId: string | null; includePending: boolean }) => Promise<string | null>;
@@ -733,8 +866,10 @@ function PayoutModal({
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const amount = (balance?.done_unpaid_amount ?? 0) + (includePending ? (balance?.pending_amount ?? 0) : 0);
-  const count = (balance?.done_unpaid_count ?? 0) + (includePending ? (balance?.pending_count ?? 0) : 0);
+  const cleaningAmount = (balance?.done_unpaid_amount ?? 0) + (includePending ? (balance?.pending_amount ?? 0) : 0);
+  const cleaningCount = (balance?.done_unpaid_count ?? 0) + (includePending ? (balance?.pending_count ?? 0) : 0);
+  const amount = cleaningAmount + looseAmount;
+  const count = cleaningCount;
 
   const submit = async () => {
     setWorking(true);
@@ -759,14 +894,19 @@ function PayoutModal({
       >
         <div className="p-6 border-b">
           <h3 className="text-xl font-bold text-slate-800">💸 Liquidar a {cleaner.name}</h3>
-          <p className="text-xs text-slate-500 mt-1">Consolida todos los aseos pendientes en un único gasto.</p>
+          <p className="text-xs text-slate-500 mt-1">Crea un gasto por reserva (aseo + insumos por separado) y los marca como pagados.</p>
         </div>
 
         <div className="p-6 space-y-4">
           <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
             <div className="text-xs text-emerald-700 font-semibold uppercase tracking-wide">A pagar ahora</div>
             <div className="text-2xl font-bold text-emerald-700 mt-1">{formatCurrency(amount)}</div>
-            <div className="text-xs text-emerald-700 mt-0.5">{count} aseos serán marcados como pagados</div>
+            <div className="text-xs text-emerald-700/80 mt-1 space-y-0.5">
+              <div>🧹 Aseos: {formatCurrency(cleaningAmount)} ({count} aseo{count === 1 ? '' : 's'})</div>
+              {looseCount > 0 && (
+                <div>🧴 Insumos sueltos: {formatCurrency(looseAmount)} ({looseCount} compra{looseCount === 1 ? '' : 's'})</div>
+              )}
+            </div>
           </div>
 
           <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
@@ -807,9 +947,13 @@ function PayoutModal({
           </div>
 
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
-            Se creará un gasto <strong>"Pago consolidado aseo – {cleaner.name}"</strong> con categoría{' '}
-            <code className="bg-white px-1 rounded">cleaning</code> y status{' '}
-            <code className="bg-white px-1 rounded">paid</code>. Los aseos involucrados quedarán vinculados al pago.
+            Por cada aseo se creará un gasto independiente <strong>"Aseo – {'{propiedad}'} · Reserva {'{código}'}"</strong>{' '}
+            con categoría <code className="bg-white px-1 rounded">cleaning</code> y status{' '}
+            <code className="bg-white px-1 rounded">paid</code>. Si el aseo tenía insumos reembolsables se generará{' '}
+            <strong>otro gasto separado</strong> <em>"Insumos de aseo – {'{propiedad}'} · Reserva {'{código}'}"</em>.
+            {looseCount > 0 && (
+              <> Las <strong>{looseCount} compras de insumos sueltas</strong> ya registradas a nombre de esta persona se marcarán como pagadas y se unirán al mismo grupo de liquidación.</>
+            )}
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}

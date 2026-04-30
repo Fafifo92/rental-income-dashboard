@@ -256,21 +256,30 @@ export const registerInventoryMovement = async (
 // luego el gasto que lo referencia, luego el movimiento que referencia el gasto.
 
 export interface ReportDamageInput {
-  item_id: string;
+  /** Item del inventario afectado. `null` cuando el daño es a la propiedad/estructura (no inventariada). */
+  item_id: string | null;
+  /** Nombre del item. Cuando `item_id=null` es el texto libre (ej. "Pared sala", "Estufa"). */
   item_name: string;
   property_id: string;
-  booking_id: string | null;
+  /** **Obligatorio**: todo daño debe estar atado a una reserva. */
+  booking_id: string;
   repair_cost: number;
   description: string | null;
   charge_to_guest: boolean;
   charge_amount: number | null;
+  /** Cobro al huésped directamente (depósito/efectivo). */
+  charge_from_guest?: number | null;
+  /** Cobro a la plataforma (Airbnb resolution center, Booking.com, etc.). */
+  charge_from_platform?: number | null;
   date?: string;
 }
 
 export interface ReportDamageResult {
   expense_id: string | null;
-  movement_id: string;
+  movement_id: string | null;
   adjustment_id: string | null;
+  /** True cuando se reusó un expense pendiente ya existente (idempotencia). */
+  reused_existing?: boolean;
 }
 
 export const reportItemDamage = async (
@@ -279,43 +288,90 @@ export const reportItemDamage = async (
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
   if (input.repair_cost < 0) return { data: null, error: 'Costo de reparación inválido' };
+  if (!input.booking_id) return { data: null, error: 'El daño debe asociarse a una reserva.' };
+  if (!input.item_id && !input.item_name?.trim()) {
+    return { data: null, error: 'Especifica el item del inventario o describe qué se dañó (pared, estufa, etc.).' };
+  }
 
   const today = input.date ?? new Date().toISOString().slice(0, 10);
 
-  // 1. Adjustment (si aplica)
+  // 0. Guard de idempotencia: ¿ya existe un expense de daño pendiente para
+  //    esta misma combinación (booking + item|sujeto)?
+  //    Evita duplicados cuando el usuario clickea dos veces o entra por dos vías.
+  {
+    const subjectKey = input.item_id ? `__item:${input.item_id}` : `__subject:${input.item_name.trim().toLowerCase()}`;
+    const { data: existing } = await supabase
+      .from('expenses')
+      .select('id, description, status, adjustment_id')
+      .eq('booking_id', input.booking_id)
+      .eq('subcategory', 'damage')
+      .in('status', ['pending', 'partial']);
+    const dup = (existing ?? []).find(e =>
+      typeof e.description === 'string' && e.description.includes(subjectKey),
+    );
+    if (dup) {
+      return {
+        data: null,
+        error: `Ya existe un gasto pendiente de daño para este ${input.item_id ? 'item' : 'sujeto'} en esta reserva. Edítalo en /expenses en lugar de crear uno nuevo.`,
+      };
+    }
+  }
+
+  // 1. Adjustment(s) — uno por fuente cuando se especifican guest y platform
+  //    por separado. `charge_amount` legacy sigue funcionando como suma única.
   let adjustmentId: string | null = null;
-  if (input.charge_to_guest && input.booking_id) {
-    const amount = input.charge_amount ?? input.repair_cost;
-    if (amount > 0) {
+  const adjustments: { id: string; source: 'guest' | 'platform' | 'combined' }[] = [];
+  if (input.charge_to_guest) {
+    const fromGuest = Number(input.charge_from_guest ?? 0);
+    const fromPlatform = Number(input.charge_from_platform ?? 0);
+    const splitProvided = (input.charge_from_guest != null) || (input.charge_from_platform != null);
+
+    const sources: { amount: number; source: 'guest' | 'platform' | 'combined' }[] = splitProvided
+      ? [
+          { amount: fromGuest,    source: 'guest' as const },
+          { amount: fromPlatform, source: 'platform' as const },
+        ].filter(s => s.amount > 0)
+      : [{ amount: input.charge_amount ?? input.repair_cost, source: 'combined' as const }];
+
+    for (const s of sources) {
+      if (s.amount <= 0) continue;
+      const sourceLabel = s.source === 'guest' ? 'Cobro huésped' : s.source === 'platform' ? 'Cobro plataforma' : 'Cobro';
       const adj = await supabase
         .from('booking_adjustments')
         .insert({
           booking_id: input.booking_id,
           kind: 'damage_charge',
-          amount,
-          description: `Daño: ${input.item_name}${input.description ? ' — ' + input.description : ''}`,
+          amount: s.amount,
+          description: `${sourceLabel} – Daño: ${input.item_name}${input.description ? ' — ' + input.description : ''}`,
           date: today,
           bank_account_id: null,
         })
         .select()
         .single();
       if (adj.error) return { data: null, error: adj.error.message };
-      adjustmentId = adj.data.id;
+      adjustments.push({ id: adj.data.id, source: s.source });
     }
+    adjustmentId = adjustments[0]?.id ?? null;
   }
 
-  // 2. Pending expense (si hay costo > 0) — usa createExpense para no chocar con el tipo Insert generado
+  // Subject key embebido en la descripción para idempotencia futura.
+  const subjectTag = input.item_id ? `__item:${input.item_id}` : `__subject:${input.item_name.trim().toLowerCase()}`;
+  const visibleDesc = input.item_id
+    ? `Reposición/reparación: ${input.item_name}${input.description ? ' — ' + input.description : ''}`
+    : `Daño en propiedad: ${input.item_name}${input.description ? ' — ' + input.description : ''}`;
+
+  // 2. Pending expense (si hay costo > 0)
   let expenseId: string | null = null;
   if (input.repair_cost > 0) {
     const { createExpense } = await import('./expenses');
     const exp = await createExpense({
       property_id: input.property_id,
-      category: 'Reparación inventario',
-      subcategory: null,
+      category: input.item_id ? 'Reparación inventario' : 'Reparación propiedad',
+      subcategory: 'damage',
       type: 'variable',
       amount: input.repair_cost,
       date: today,
-      description: `Reposición/reparación: ${input.item_name}${input.description ? ' — ' + input.description : ''}`,
+      description: `${visibleDesc} ${subjectTag}`,
       status: 'pending',
       bank_account_id: null,
       vendor: null,
@@ -330,34 +386,41 @@ export const reportItemDamage = async (
     expenseId = exp.data.id;
   }
 
-  // 3. Inventory movement + actualizar status del item
-  const mov = await supabase
-    .from('inventory_movements')
-    .insert({
-      owner_id: user.id,
-      item_id: input.item_id,
-      type: 'damaged',
-      quantity_delta: 0,
-      new_status: 'damaged',
-      notes: input.description,
-      related_booking_id: input.booking_id,
-      related_expense_id: expenseId,
-    })
-    .select()
-    .single();
-  if (mov.error) return { data: null, error: mov.error.message };
+  // 3. Inventory movement + actualizar status del item — solo si hay item de inventario.
+  let movementId: string | null = null;
+  if (input.item_id) {
+    const mov = await supabase
+      .from('inventory_movements')
+      .insert({
+        owner_id: user.id,
+        item_id: input.item_id,
+        type: 'damaged',
+        quantity_delta: 0,
+        new_status: 'damaged',
+        notes: input.description,
+        related_booking_id: input.booking_id,
+        related_expense_id: expenseId,
+      })
+      .select()
+      .single();
+    if (mov.error) return { data: null, error: mov.error.message };
+    movementId = mov.data.id;
 
-  const upd = await supabase
-    .from('inventory_items')
-    .update({ status: 'damaged' })
-    .eq('id', input.item_id);
-  if (upd.error) return { data: null, error: upd.error.message };
+    const upd = await supabase
+      .from('inventory_items')
+      .update({ status: 'damaged' })
+      .eq('id', input.item_id);
+    if (upd.error) return { data: null, error: upd.error.message };
+  }
 
   return {
-    data: { expense_id: expenseId, movement_id: mov.data.id, adjustment_id: adjustmentId },
+    data: { expense_id: expenseId, movement_id: movementId, adjustment_id: adjustmentId },
     error: null,
   };
 };
+
+/** Alias semánticamente más correcto. `reportItemDamage` se mantiene por compatibilidad. */
+export const reportDamage = reportItemDamage;
 
 // ──────────────────────────────────────────────────────────────────────────
 // KPIs / agregados

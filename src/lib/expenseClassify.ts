@@ -20,18 +20,21 @@ export function classifyExpense(e: Expense): {
     return { section: 'booking', subcategory: sub };
   }
 
-  // Inferencia por vínculo
+  // Heurística sobre el texto de category (ANTES del fallback por booking_id,
+  // para que un daño legacy sin subcategory no quede clasificado como cleaning).
+  const c = (e.category ?? '').toLowerCase();
+  if (/da[ñn]o|reparaci[oó]n|reposici[oó]n.*invent/.test(c))     return { section: 'booking', subcategory: 'damage' };
+  if (/insumos? de aseo|aseo$|^aseo|limpieza|lavander/.test(c))  return { section: 'booking', subcategory: 'cleaning' };
+  if (/welcome|kit|atenci/.test(c))                              return { section: 'booking', subcategory: 'guest_amenities' };
+
+  // Inferencia por vínculo (sólo si no hubo match textual)
   if (e.adjustment_id) return { section: 'booking', subcategory: 'damage' };
   if (e.booking_id)    return { section: 'booking', subcategory: 'cleaning' };
 
-  // Heurística sobre el texto de category (legacy)
-  const c = (e.category ?? '').toLowerCase();
-  if (/limpieza|aseo|lavander/.test(c))                          return { section: 'booking', subcategory: 'cleaning' };
-  if (/welcome|kit|atenci/.test(c))                              return { section: 'booking', subcategory: 'guest_amenities' };
-  if (/da[ñn]o|reparaci[oó]n da/.test(c))                        return { section: 'booking', subcategory: 'damage' };
-  if (/toalla|utensil|decora|reposici[oó]n|inventario/.test(c))  return { section: 'property', subcategory: 'stock' };
+  // Heurística restante (propiedad)
+  if (/toalla|utensil|decora|stock|inventario/.test(c))          return { section: 'property', subcategory: 'stock' };
   if (/internet|luz|agua|gas|servicio|p[uú]blico/.test(c))       return { section: 'property', subcategory: 'utilities' };
-  if (/manten|reparaci/.test(c))                                 return { section: 'property', subcategory: 'maintenance' };
+  if (/manten/.test(c))                                          return { section: 'property', subcategory: 'maintenance' };
   if (/admin|predial|seguro|impuesto|valoriza/.test(c))          return { section: 'property', subcategory: 'administration' };
 
   return { section: 'property', subcategory: null };

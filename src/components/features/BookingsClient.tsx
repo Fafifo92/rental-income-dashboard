@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table';
 import {
   listBookings, getDemoBookings, saveDemoBookings, insertBooking,
-  updateBooking, deleteBooking,
+  updateBooking, deleteBooking, checkBookingOverlap,
   generateDirectBookingCode, type BookingFilters,
 } from '@/services/bookings';
 import { listProperties } from '@/services/properties';
@@ -109,10 +109,11 @@ const fromDemo = (b: ParsedBooking, i: number): DisplayBooking => ({
 });
 
 const EMPTY_FILTERS: BookingFilters = {};
+const todayISO = (): string => new Date().toISOString().split('T')[0];
 const EMPTY_FORM: BookingForm = {
   guest_name: '', confirmation_code: '', start_date: '', end_date: '',
-  num_nights: '', total_revenue: '', status: 'Completada', listing_name: '', property_id: '',
-  channel: 'airbnb', num_adults: '1', num_children: '0', notes: '',
+  num_nights: '', total_revenue: '', status: 'Reservada', listing_name: '', property_id: '',
+  channel: '', num_adults: '1', num_children: '0', notes: '',
 };
 
 const bookingHelper = createColumnHelper<DisplayBooking>();
@@ -133,6 +134,9 @@ export default function BookingsClient() {
   const [form, setForm]               = useState<BookingForm>(EMPTY_FORM);
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError]     = useState('');
+  const [formWarning, setFormWarning] = useState('');
+  const [editingListingId, setEditingListingId] = useState<string | null>(null);
+  const [overlapAck, setOverlapAck] = useState(false);
   const [editingId, setEditingId]     = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DisplayBooking | null>(null);
   const [properties, setProperties]   = useState<PropertyRow[]>([]);
@@ -192,8 +196,37 @@ export default function BookingsClient() {
   );
 
   const handleFormChange = useCallback((field: keyof BookingForm, value: string) => {
+    if (field === 'start_date' || field === 'end_date') {
+      setOverlapAck(false);
+      setFormWarning('');
+    }
     setForm(prev => {
       const updated = { ...prev, [field]: value };
+
+      // Si pasa a "Inicia hoy" → fija check-in a hoy y lo bloquea (la fecha
+      // se recalcula a hoy y, si end_date está vacío o es anterior, se ajusta).
+      if (field === 'status' && value === 'Inicia hoy') {
+        const today = todayISO();
+        updated.start_date = today;
+        const nights = parseInt(updated.num_nights) || 0;
+        if (!updated.end_date || updated.end_date <= today) {
+          if (nights > 0) {
+            const end = new Date(today);
+            end.setDate(end.getDate() + nights);
+            updated.end_date = end.toISOString().split('T')[0];
+          }
+        } else {
+          const n = Math.max(0, Math.round(
+            (new Date(updated.end_date).getTime() - new Date(today).getTime()) / 86_400_000,
+          ));
+          updated.num_nights = String(n);
+        }
+        return updated;
+      }
+      // Si está en "Inicia hoy", bloquear cambios manuales del check-in.
+      if (field === 'start_date' && prev.status === 'Inicia hoy') {
+        return prev;
+      }
 
       // ── Bidirectional date ↔ nights sync ─────────────────────────────
       if (field === 'start_date') {
@@ -247,8 +280,13 @@ export default function BookingsClient() {
       setFormError('Completa los campos obligatorios: Check-in, Check-out e Ingresos.');
       return;
     }
+    if (form.end_date <= form.start_date) {
+      setFormError('El check-out debe ser posterior al check-in.');
+      return;
+    }
     setFormLoading(true);
     setFormError('');
+    setFormWarning('');
     const nights  = parseInt(form.num_nights) || 0;
     const revenue = parseMoney(form.total_revenue) ?? 0;
     const code = form.confirmation_code
@@ -257,6 +295,21 @@ export default function BookingsClient() {
     try {
       if (editingId) {
         // ── UPDATE flow ───────────────────────────────────────────────
+        // Validar solape contra otras reservas del mismo listing
+        if (editingListingId) {
+          const overlap = await checkBookingOverlap(editingListingId, form.start_date, form.end_date, editingId);
+          if (!overlap.ok) {
+            setFormError(overlap.error);
+            setFormLoading(false);
+            return;
+          }
+          if (overlap.warning && !overlapAck) {
+            setFormWarning(overlap.warning + ' Vuelve a guardar para confirmar.');
+            setOverlapAck(true);
+            setFormLoading(false);
+            return;
+          }
+        }
         const res = await updateBooking(editingId, {
           guest_name: form.guest_name || null,
           start_date: form.start_date,
@@ -290,6 +343,19 @@ export default function BookingsClient() {
         }
         const listingRes = await findOrCreateListing(propertyId, form.listing_name || 'Manual');
         if (listingRes.error || !listingRes.data) { setFormError(listingRes.error ?? 'No se pudo crear el listing'); setFormLoading(false); return; }
+        // Validar solape antes de insertar
+        const overlap = await checkBookingOverlap(listingRes.data.id, form.start_date, form.end_date);
+        if (!overlap.ok) {
+          setFormError(overlap.error);
+          setFormLoading(false);
+          return;
+        }
+        if (overlap.warning && !overlapAck) {
+          setFormWarning(overlap.warning + ' Vuelve a guardar para confirmar.');
+          setOverlapAck(true);
+          setFormLoading(false);
+          return;
+        }
         const res = await insertBooking(listingRes.data.id, {
           confirmation_code: code,
           guest_name: form.guest_name || undefined,
@@ -298,7 +364,7 @@ export default function BookingsClient() {
           num_nights: nights,
           total_revenue: revenue,
           status: form.status,
-          channel: form.channel || 'airbnb',
+          channel: form.channel || undefined,
           num_adults: parseInt(form.num_adults) || 1,
           num_children: parseInt(form.num_children) || 0,
           notes: form.notes || undefined,
@@ -307,16 +373,19 @@ export default function BookingsClient() {
       }
       setShowModal(false);
       setEditingId(null);
+      setEditingListingId(null);
+      setOverlapAck(false);
       setForm(EMPTY_FORM);
-      await load(filters);
+      await load({ ...filters, propertyIds });
     } catch {
       setFormError('Error inesperado al guardar.');
     }
     setFormLoading(false);
-  }, [form, editingId, authStatus, properties, filters, load]);
+  }, [form, editingId, editingListingId, overlapAck, authStatus, properties, filters, propertyIds, load]);
 
   const handleEdit = useCallback((b: DisplayBooking) => {
     setEditingId(b.id);
+    setEditingListingId(b.listing_id ?? null);
     setForm({
       guest_name: b.guest_name === '—' ? '' : b.guest_name,
       confirmation_code: b.confirmation_code,
@@ -327,7 +396,7 @@ export default function BookingsClient() {
       status: b.status,
       listing_name: b.listing_name,
       property_id: '',
-      channel: b.channel ?? 'airbnb',
+      channel: b.channel ?? '',
       num_adults: '1',
       num_children: '0',
       notes: '',
@@ -341,8 +410,8 @@ export default function BookingsClient() {
     const res = await deleteBooking(deleteTarget.id);
     if (res.error) { setFormError(res.error); return; }
     setDeleteTarget(null);
-    await load(filters);
-  }, [deleteTarget, filters, load]);
+    await load({ ...filters, propertyIds });
+  }, [deleteTarget, filters, propertyIds, load]);
 
   const columns = useMemo<ColumnDef<DisplayBooking, any>[]>(() => [
     bookingHelper.accessor('status', {
@@ -532,7 +601,7 @@ export default function BookingsClient() {
           <PropertyMultiSelect properties={allProperties} value={propertyIds} onChange={setPropertyIds} />
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-            onClick={() => { setEditingId(null); setForm(EMPTY_FORM); setFormError(''); setShowModal(true); }}
+            onClick={() => { setEditingId(null); setEditingListingId(null); setOverlapAck(false); setFormWarning(''); setForm(EMPTY_FORM); setFormError(''); setShowModal(true); }}
             className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
           >
             + Nueva reserva
@@ -649,7 +718,7 @@ export default function BookingsClient() {
         {showImporter && (
           <CSVUploader
             onClose={() => setShowImporter(false)}
-            onImport={() => { setShowImporter(false); load(filters); }}
+            onImport={() => { setShowImporter(false); load({ ...filters, propertyIds }); }}
           />
         )}
       </AnimatePresence>
@@ -681,6 +750,7 @@ export default function BookingsClient() {
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Canal</label>
                     <select value={form.channel} onChange={e => handleFormChange('channel', e.target.value)}
                       className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                      <option value="">— Selecciona canal —</option>
                       <option value="airbnb">Airbnb</option>
                       <option value="booking">Booking.com</option>
                       <option value="vrbo">Vrbo</option>
@@ -692,8 +762,9 @@ export default function BookingsClient() {
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Estado</label>
                     <select value={form.status} onChange={e => handleFormChange('status', e.target.value)}
                       className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white">
-                      <option value="Completada">Completada</option>
                       <option value="Reservada">Reservada</option>
+                      <option value="Inicia hoy">🟢 Inicia hoy</option>
+                      <option value="Completada">Completada</option>
                       <option value="Cancelada">Cancelada</option>
                     </select>
                   </div>
@@ -732,10 +803,13 @@ export default function BookingsClient() {
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Estadía</p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1">Check-in *</label>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">
+                        Check-in *{form.status === 'Inicia hoy' && <span className="ml-1 text-emerald-600">🔒 Hoy</span>}
+                      </label>
                       <input type="date" value={form.start_date}
                         onChange={e => handleFormChange('start_date', e.target.value)}
-                        className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                        disabled={form.status === 'Inicia hoy'}
+                        className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white disabled:bg-emerald-50 disabled:cursor-not-allowed"
                       />
                     </div>
                     <div>
@@ -822,6 +896,11 @@ export default function BookingsClient() {
                   />
                 </div>
 
+                {formWarning && (
+                  <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    {formWarning}
+                  </p>
+                )}
                 {formError && (
                   <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                     {formError}

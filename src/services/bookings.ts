@@ -225,6 +225,72 @@ export const getBookingKPIs = async (): Promise<ServiceResult<BookingKPIs>> => {
   };
 };
 
+// ─── Overlap detection ───────────────────────────────────────────────────────
+
+export type OverlapCheck = {
+  /** No hay solape ni colindancia. */
+  ok: true;
+  warning?: never;
+} | {
+  /** Solape duro: NO se puede guardar. */
+  ok: false;
+  error: string;
+} | {
+  /** Misma fecha de check-in que el check-out de otra reserva. Permitido con aviso. */
+  ok: true;
+  warning: string;
+};
+
+/**
+ * Devuelve si una reserva propuesta solapa con otras del MISMO listing.
+ * Se permite el "turnover": end_date de una == start_date de la otra.
+ */
+export const checkBookingOverlap = async (
+  listingId: string,
+  startDate: string,
+  endDate: string,
+  excludeBookingId?: string,
+): Promise<OverlapCheck> => {
+  // (a.start < b.end) && (a.end > b.start) → solape estricto
+  let q = supabase
+    .from('bookings')
+    .select('id, start_date, end_date, guest_name, status')
+    .eq('listing_id', listingId)
+    .lt('start_date', endDate)
+    .gt('end_date', startDate);
+  if (excludeBookingId) q = q.neq('id', excludeBookingId);
+  const { data, error } = await q;
+  if (error) return { ok: false, error: error.message };
+  const conflicts = (data ?? []).filter(b => {
+    const s = (b.status ?? '').toLowerCase();
+    return !s.includes('cancel');
+  });
+  if (conflicts.length > 0) {
+    const c = conflicts[0];
+    return {
+      ok: false,
+      error: `Esta reserva se solapa con otra del ${c.start_date} al ${c.end_date}${c.guest_name ? ` (${c.guest_name})` : ''}.`,
+    };
+  }
+  // Turnover: alguna reserva termina exactamente cuando esta empieza,
+  // o esta termina exactamente cuando otra empieza.
+  let qAdj = supabase
+    .from('bookings')
+    .select('id, start_date, end_date, guest_name, status')
+    .eq('listing_id', listingId)
+    .or(`end_date.eq.${startDate},start_date.eq.${endDate}`);
+  if (excludeBookingId) qAdj = qAdj.neq('id', excludeBookingId);
+  const { data: adj } = await qAdj;
+  const adjActive = (adj ?? []).filter(b => !((b.status ?? '').toLowerCase().includes('cancel')));
+  if (adjActive.length > 0) {
+    return {
+      ok: true,
+      warning: '⚠️ Hay otra reserva el mismo día (check-out/check-in). Coordina el aseo con prioridad.',
+    };
+  }
+  return { ok: true };
+};
+
 export const insertBooking = async (
   listingId: string,
   data: {
@@ -256,7 +322,7 @@ export const insertBooking = async (
       total_revenue: data.total_revenue,
       gross_revenue: data.total_revenue,
       status: data.status ?? null,
-      channel: data.channel ?? 'airbnb',
+      channel: data.channel ?? null,
       channel_fees: null,
       taxes_withheld: null,
       net_payout: null,

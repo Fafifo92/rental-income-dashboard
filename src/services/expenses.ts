@@ -330,6 +330,42 @@ export const deleteExpense = async (id: string): Promise<ServiceResult<null>> =>
   return { data: null, error: null };
 };
 
+/**
+ * Actualiza TODAS las filas que comparten un `expense_group_id` (gasto
+ * compartido entre varias propiedades). Pensado para cambiar el estado, la
+ * cuenta bancaria, o la fecha de pago de la factura entera de una sola vez.
+ *
+ * No toca el monto por propiedad — eso se mantiene en cada fila individual.
+ *
+ * Valida que, si el nuevo estado es 'paid', haya cuenta bancaria asignada.
+ */
+export const updateExpenseGroup = async (
+  groupId: string,
+  patch: Partial<Pick<Expense, 'status' | 'bank_account_id' | 'date' | 'description'>>,
+): Promise<ServiceResult<Expense[]>> => {
+  if (!groupId) return { data: null, error: 'Falta el grupo' };
+  if (patch.status === 'paid' && !patch.bank_account_id) {
+    // permitir si las filas existentes ya tienen banco; verificar.
+    const { data: existing } = await supabase
+      .from('expenses')
+      .select('id, bank_account_id')
+      .eq('expense_group_id', groupId);
+    const missing = (existing ?? []).some(r => !r.bank_account_id);
+    if (missing) {
+      return { data: null, error: 'Para marcar el grupo como pagado, indica la cuenta bancaria que pagó la factura completa.' };
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('expenses')
+    .update(patch)
+    .eq('expense_group_id', groupId)
+    .select();
+
+  if (error) return { data: null, error: error.message };
+  return { data: (data ?? []).map(toExpense), error: null };
+};
+
 export const getPendingExpenses = async (
   propertyId?: string,
 ): Promise<ServiceResult<Expense[]>> =>

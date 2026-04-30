@@ -5,6 +5,11 @@ import ExpenseModal from './ExpenseModal';
 import ExpenseDetailModal from './ExpenseDetailModal';
 import BookingDetailModal from './BookingDetailModal';
 import FilterBar from './FilterBar';
+import ExpenseTypeChooser, { type ExpenseTypeChoice } from './ExpenseTypeChooser';
+import DamageFromExpensesFlow from './DamageFromExpensesFlow';
+import PropertyExpenseForm from './expense-forms/PropertyExpenseForm';
+import CleaningSuppliesForm from './expense-forms/CleaningSuppliesForm';
+import VendorExpenseForm from './expense-forms/VendorExpenseForm';
 import PropertyMultiSelect from '@/components/PropertyMultiSelect';
 import RecurringPendingPanel from './RecurringPendingPanel';
 import SharedBillsPendingPanel from './SharedBillsPendingPanel';
@@ -13,6 +18,7 @@ import {
   createExpense,
   createSharedExpense,
   updateExpense,
+  updateExpenseGroup,
   deleteExpense,
   type ExpenseFilters,
 } from '@/services/expenses';
@@ -54,6 +60,13 @@ export default function ExpensesClient() {
   const [loading, setLoading] = useState(true);
   const [dbConnected, setDbConnected] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [showChooser, setShowChooser] = useState(false);
+  const [showDamageFlow, setShowDamageFlow] = useState(false);
+  const [showPropertyForm, setShowPropertyForm] = useState(false);
+  const [showSuppliesForm, setShowSuppliesForm] = useState(false);
+  const [showVendorForm, setShowVendorForm] = useState(false);
+  // Prefill que arrastra el chooser al ExpenseModal según el tipo elegido.
+  const [chooserPrefill, setChooserPrefill] = useState<Partial<Expense> | null>(null);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [viewing, setViewing] = useState<Expense | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
@@ -136,39 +149,40 @@ export default function ExpensesClient() {
     );
   }
 
-  const handleSave = async (data: Omit<Expense, 'id' | 'owner_id'>) => {
+  const handleSave = async (data: Omit<Expense, 'id' | 'owner_id'>): Promise<boolean> => {
     setSaveError('');
     if (editing) {
       // EDITAR
       if (dbConnected) {
         const result = await updateExpense(editing.id, data);
-        if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); return; }
+        if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); return false; }
         setExpenses(prev => prev.map(e => e.id === editing.id ? result.data! : e));
       } else {
         setExpenses(prev => prev.map(e => e.id === editing.id ? { ...e, ...data } : e));
       }
       setEditing(null);
       setShowModal(false);
-      return;
+      return true;
     }
     // CREAR
     if (dbConnected) {
       const result = await createExpense(data);
-      if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); return; }
+      if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); return false; }
       setExpenses(prev => [result.data!, ...prev]);
     } else {
       setExpenses(prev => [{ ...data, id: crypto.randomUUID() }, ...prev]);
     }
     setShowModal(false);
     dispatchRecurringChange();
+    return true;
   };
 
   /** Bloque 6: gasto compartido entre N propiedades. */
-  const handleSaveShared = async (rows: Omit<Expense, 'id' | 'owner_id'>[]) => {
+  const handleSaveShared = async (rows: Omit<Expense, 'id' | 'owner_id'>[]): Promise<boolean> => {
     setSaveError('');
     if (dbConnected) {
       const result = await createSharedExpense(rows);
-      if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); return; }
+      if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); return false; }
       setExpenses(prev => [...result.data!.expenses, ...prev]);
     } else {
       const groupId = crypto.randomUUID();
@@ -181,12 +195,30 @@ export default function ExpensesClient() {
     }
     setShowModal(false);
     dispatchRecurringChange();
+    return true;
   };
 
   const handleEdit = (expense: Expense) => {
     setViewing(null);
     setEditing(expense);
     setShowModal(true);
+  };
+
+  /**
+   * Routing inteligente para "Cuentas por Pagar".
+   * - Aseo / Insumos pendientes → /aseo (liquidación canónica).
+   * - Daño pendiente → modal de edición (para registrar costo real y marcarlo pagado).
+   * - Resto → modal de edición legacy.
+   */
+  const handlePendingClick = (expense: Expense) => {
+    const cat = (expense.category ?? '').toLowerCase();
+    const sub = (expense.subcategory ?? '').toLowerCase();
+    const isCleaning = sub === 'cleaning' || cat === 'aseo' || cat === 'insumos de aseo' || cat === 'cleaning';
+    if (isCleaning) {
+      if (typeof window !== 'undefined') window.location.href = '/aseo';
+      return;
+    }
+    handleEdit(expense);
   };
 
   // Descarta un gasto pendiente JUNTO con su ajuste de reserva vinculado (si aplica).
@@ -210,6 +242,31 @@ export default function ExpensesClient() {
   const handleDeleteRequest = (id: string) => {
     const target = expenses.find(e => e.id === id);
     if (target) setDeleteTarget(target);
+  };
+
+  // Encamina la elección del chooser al flujo correspondiente.
+  const handleChooserChoice = (choice: ExpenseTypeChoice) => {
+    setShowChooser(false);
+    setSaveError('');
+    if (choice === 'cleaning_payout') {
+      // Liquidación: redirigir a la pantalla de Aseo (donde está el flujo dedicado).
+      if (typeof window !== 'undefined') window.location.href = '/aseo';
+      return;
+    }
+    if (choice === 'damage') {
+      setShowDamageFlow(true);
+      return;
+    }
+    if (choice === 'cleaning_supplies') {
+      setShowSuppliesForm(true);
+      return;
+    }
+    if (choice === 'vendor') {
+      setShowVendorForm(true);
+      return;
+    }
+    // 'property' → formulario dedicado de gasto sobre propiedad.
+    setShowPropertyForm(true);
   };
 
   const handleConfirmDelete = async () => {
@@ -283,7 +340,7 @@ export default function ExpensesClient() {
             <motion.button
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
-              onClick={() => setShowModal(true)}
+              onClick={() => setShowChooser(true)}
               className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
             >
               + Registrar Gasto
@@ -348,21 +405,30 @@ export default function ExpensesClient() {
                   <span className="font-bold text-yellow-800">{formatCurrency(totalPending)}</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {pendingExpenses.map((e, i) => (
+                  {pendingExpenses.map((e, i) => {
+                    const cat = (e.category ?? '').toLowerCase();
+                    const sub = (e.subcategory ?? '').toLowerCase();
+                    const isCleaning = sub === 'cleaning' || cat === 'aseo' || cat === 'insumos de aseo' || cat === 'cleaning';
+                    return (
                     <motion.button
                       key={e.id}
                       type="button"
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: i * 0.06 }}
-                      onClick={() => handleEdit(e)}
-                      title="Clic para completar, pagar o descartar este gasto pendiente"
+                      onClick={() => handlePendingClick(e)}
+                      title={isCleaning ? 'Clic → ir a /aseo para liquidar' : 'Clic para completar, pagar o descartar este gasto pendiente'}
                       className="bg-white rounded-lg p-4 border border-yellow-100 shadow-sm text-left hover:border-yellow-300 hover:shadow transition focus:outline-none focus:ring-2 focus:ring-yellow-400"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <p className="font-semibold text-slate-800 text-sm truncate">{e.category}</p>
+                            {isCleaning && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-cyan-50 text-cyan-700 border-cyan-200 whitespace-nowrap">
+                                🧹 ASEO
+                              </span>
+                            )}
                             {e.adjustment_id && (
                               <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-red-50 text-red-700 border-red-200 whitespace-nowrap">
                                 🔗 DAÑO
@@ -377,10 +443,11 @@ export default function ExpensesClient() {
                         <p className="font-bold text-yellow-700 text-sm whitespace-nowrap">{formatCurrency(e.amount)}</p>
                       </div>
                       <p className="text-[10px] text-yellow-700/70 mt-2 font-medium uppercase tracking-wide">
-                        Clic para resolver →
+                        {isCleaning ? 'Liquidar en /aseo →' : 'Clic para resolver →'}
                       </p>
                     </motion.button>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </motion.section>
@@ -479,6 +546,71 @@ export default function ExpensesClient() {
       </main>
 
       <AnimatePresence>
+        {showChooser && (
+          <ExpenseTypeChooser
+            onChoose={handleChooserChoice}
+            onClose={() => setShowChooser(false)}
+          />
+        )}
+
+        {showDamageFlow && (
+          <DamageFromExpensesFlow
+            properties={properties}
+            onClose={() => setShowDamageFlow(false)}
+            onSaved={() => {
+              setShowDamageFlow(false);
+              loadExpenses(filters, propertyIds);
+            }}
+          />
+        )}
+
+        {showPropertyForm && (
+          <PropertyExpenseForm
+            properties={properties}
+            bankAccounts={bankAccounts}
+            error={saveError || undefined}
+            onClose={() => { setShowPropertyForm(false); setSaveError(''); }}
+            onSave={async (data) => {
+              const ok = await handleSave(data);
+              if (ok) setShowPropertyForm(false);
+            }}
+            onSaveShared={async (rows) => {
+              const ok = await handleSaveShared(rows);
+              if (ok) setShowPropertyForm(false);
+            }}
+          />
+        )}
+
+        {showSuppliesForm && (
+          <CleaningSuppliesForm
+            properties={properties}
+            bankAccounts={bankAccounts}
+            error={saveError || undefined}
+            onClose={() => { setShowSuppliesForm(false); setSaveError(''); }}
+            onSave={async (data) => {
+              const ok = await handleSave(data);
+              if (ok) setShowSuppliesForm(false);
+            }}
+            onSaveShared={async (rows) => {
+              const ok = await handleSaveShared(rows);
+              if (ok) setShowSuppliesForm(false);
+            }}
+          />
+        )}
+
+        {showVendorForm && (
+          <VendorExpenseForm
+            properties={properties}
+            bankAccounts={bankAccounts}
+            error={saveError || undefined}
+            onClose={() => { setShowVendorForm(false); setSaveError(''); }}
+            onSave={async (data) => {
+              const ok = await handleSave(data);
+              if (ok) setShowVendorForm(false);
+            }}
+          />
+        )}
+
         {showModal && (
           <ExpenseModal
             properties={properties}
@@ -497,9 +629,26 @@ export default function ExpensesClient() {
               booking_id: editing.booking_id ?? null,
               adjustment_id: editing.adjustment_id ?? null,
             } : null}
-            onClose={() => { setShowModal(false); setEditing(null); setSaveError(''); }}
+            prefill={!editing ? chooserPrefill : null}
+            onClose={() => {
+              setShowModal(false);
+              setEditing(null);
+              setChooserPrefill(null);
+              setSaveError('');
+            }}
             onSave={handleSave}
             onSaveShared={handleSaveShared}
+            onSaveGroup={editing?.expense_group_id ? async (patch) => {
+              if (!editing.expense_group_id) return;
+              const res = await updateExpenseGroup(editing.expense_group_id, patch);
+              if (res.error || !res.data) { setSaveError(res.error ?? 'Error al actualizar el grupo'); return; }
+              const byId = new Map(res.data.map(r => [r.id, r]));
+              setExpenses(prev => prev.map(e => byId.get(e.id) ?? e));
+            } : undefined}
+            editingGroupId={editing?.expense_group_id ?? null}
+            editingGroupSize={editing?.expense_group_id
+              ? expenses.filter(e => e.expense_group_id === editing.expense_group_id).length
+              : 0}
             error={saveError}
             onDiscardLinked={editing?.adjustment_id ? () => handleDiscardWithAdjustment(editing) : undefined}
           />

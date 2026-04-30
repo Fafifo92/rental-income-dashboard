@@ -17,6 +17,7 @@ import type {
 import { formatCurrency } from '@/lib/utils';
 import { useBackdropClose, makeBackdropHandlers } from '@/lib/useBackdropClose';
 import ExpenseModal from './ExpenseModal';
+import DamageReportModal from './DamageReportModal';
 import MoneyInput from '@/components/MoneyInput';
 import { getDamageReconciliations, type DamageReconciliation } from '@/services/inventory';
 
@@ -65,6 +66,7 @@ export default function BookingDetailModal({
   // Bloque C — ajustes
   const [adjustments, setAdjustments] = useState<BookingAdjustmentRow[]>([]);
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
+  const [showDamageReport, setShowDamageReport] = useState(false);
   const [deletingAdjId, setDeletingAdjId] = useState<string | null>(null);
 
   // Fase 11 — operativo
@@ -153,47 +155,41 @@ export default function BookingDetailModal({
   const handleCreateAdjustment = useCallback(async (
     payload: {
       kind: BookingAdjustmentKind; amount: number; description: string | null; date: string;
-      createPendingExpense?: boolean; pendingCategory?: string;
     },
   ) => {
-    const { createPendingExpense, pendingCategory, ...adjPayload } = payload;
-    const res = await createBookingAdjustment({ ...adjPayload, booking_id: booking.id, bank_account_id: null });
+    const res = await createBookingAdjustment({ ...payload, booking_id: booking.id, bank_account_id: null });
     if (res.error || !res.data) return;
-
-    // Cobro por daño → auto-crear gasto pendiente de reparación vinculado a la reserva
-    // Y VINCULADO AL AJUSTE vía adjustment_id (FK robusta, no convención textual).
-    // Permite "descartar ambos" atómicamente más adelante.
-    if (payload.kind === 'damage_charge' && createPendingExpense && propertyId) {
-      await createExpense({
-        property_id: propertyId,
-        category: pendingCategory || 'Reparación daño',
-        subcategory: 'damage',
-        type: 'variable',
-        amount: payload.amount,
-        date: payload.date,
-        description: payload.description
-          ? `[Daño reserva ${booking.confirmation_code}] ${payload.description}`
-          : `[Daño reserva ${booking.confirmation_code}] Reparación pendiente`,
-        status: 'pending',
-        bank_account_id: null,
-        vendor: null,
-        person_in_charge: null,
-        booking_id: booking.id,
-        adjustment_id: res.data.id,
-      });
-    }
     setShowAddAdjustment(false);
     await load();
-  }, [booking.id, booking.confirmation_code, propertyId, load]);
+  }, [booking.id, load]);
 
   // Fase 11 — Operativo handlers
+  const [opError, setOpError] = useState<string | null>(null);
   const toggleFlag = useCallback(async (
     field: 'checkin_done' | 'checkout_done' | 'inventory_checked',
   ) => {
     const next = !opFlags[field];
+    setOpError(null);
+
+    // Regla: no se puede marcar check-out si el check-in no está hecho.
+    if (field === 'checkout_done' && next && !opFlags.checkin_done) {
+      setOpError('No puedes marcar el check-out sin haber hecho el check-in primero.');
+      return;
+    }
+
     setOpFlags(prev => ({ ...prev, [field]: next }));
     await updateBookingOperational(booking.id, { [field]: next });
-  }, [booking.id, opFlags]);
+
+    // Auto-marcar aseos pendientes como hechos cuando se marca el check-out.
+    if (field === 'checkout_done' && next) {
+      const doneDate = booking.end_date || new Date().toISOString().split('T')[0];
+      const pending = cleanings.filter(c => c.status === 'pending');
+      if (pending.length > 0) {
+        await Promise.all(pending.map(c => updateCleaning(c.id, { status: 'done', done_date: c.done_date ?? doneDate })));
+        await load();
+      }
+    }
+  }, [booking.id, booking.end_date, opFlags, cleanings, load]);
 
   const addCleaning = useCallback(async (payload: {
     cleaner_id: string; fee: number; status: 'pending' | 'done' | 'paid';
@@ -340,14 +336,19 @@ export default function BookingDetailModal({
                   ['inventory_checked','Inventario revisado', '📋'],
                 ] as const).map(([key, label, icon]) => {
                   const active = opFlags[key];
+                  const disabled = key === 'checkout_done' && !active && !opFlags.checkin_done;
                   return (
                     <button
                       key={key}
                       onClick={() => toggleFlag(key)}
+                      disabled={disabled}
+                      title={disabled ? 'Marca primero el check-in' : undefined}
                       className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border-2 transition ${
                         active
                           ? 'bg-emerald-50 border-emerald-500 text-emerald-800'
-                          : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                          : disabled
+                            ? 'bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed'
+                            : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
                       }`}
                     >
                       <span className="text-lg">{icon}</span>
@@ -359,6 +360,11 @@ export default function BookingDetailModal({
                   );
                 })}
               </div>
+              {opError && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
+                  {opError}
+                </p>
+              )}
 
               {/* Aseo */}
               <div className="border border-slate-200 rounded-lg bg-slate-50/40">
@@ -505,17 +511,27 @@ export default function BookingDetailModal({
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-800">Ajustes de reserva</h3>
-                  <p className="text-xs text-slate-500">Ingresos extra, descuentos y cargos por daño al huésped.</p>
+                  <p className="text-xs text-slate-500">Ingresos extra, descuentos al huésped, reembolsos de plataforma.</p>
                 </div>
-                <button
-                  onClick={() => setShowAddAdjustment(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                  </svg>
-                  Nuevo ajuste
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowDamageReport(true)}
+                    disabled={!propertyId}
+                    title={propertyId ? 'Registrar un daño (inventario o estructura)' : 'No se puede resolver la propiedad de esta reserva'}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition"
+                  >
+                    ⚠ Registrar daño
+                  </button>
+                  <button
+                    onClick={() => setShowAddAdjustment(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                    </svg>
+                    Nuevo ajuste
+                  </button>
+                </div>
               </div>
 
               {adjustments.length === 0 ? (
@@ -525,9 +541,9 @@ export default function BookingDetailModal({
               ) : (
                 <>
                 <p className="text-[11px] text-slate-500 mb-2 italic">
-                  💡 Los ajustes son del lado del huésped (lo que cobras o descuentas). Solo
-                  los <strong>cobros por daño</strong> generan automáticamente un gasto pendiente
-                  vinculado (badge ⚠️ debajo).
+                  💡 Los ajustes son del lado del huésped (lo que cobras o descuentas).
+                  Para registrar un <strong>daño</strong> (inventario o estructura) usa el botón{' '}
+                  <strong>"⚠ Registrar daño"</strong>: queda atado a esta reserva, evita duplicados y vincula al inventario cuando aplica.
                 </p>
                 <div className="border border-slate-200 rounded-lg overflow-hidden">
                   <table className="w-full text-sm">
@@ -671,6 +687,25 @@ export default function BookingDetailModal({
               defaultDate={booking.end_date || new Date().toISOString().split('T')[0]}
               onClose={() => setShowAddAdjustment(false)}
               onSave={handleCreateAdjustment}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Damage report modal — punto único para registrar daños */}
+        <AnimatePresence>
+          {showDamageReport && propertyId && (
+            <DamageReportModal
+              propertyId={propertyId}
+              propertyName={property?.name ?? undefined}
+              booking={{
+                id: booking.id,
+                confirmation_code: booking.confirmation_code,
+                guest_name: booking.guest_name,
+                start_date: booking.start_date,
+                end_date: booking.end_date,
+              }}
+              onClose={() => setShowDamageReport(false)}
+              onSaved={async () => { setShowDamageReport(false); await load(); }}
             />
           )}
         </AnimatePresence>
@@ -849,6 +884,9 @@ function LinkExistingExpenseModal({
 }
 
 // ─── Sub-modal: Crear ajuste de reserva ──────────────────────────────
+// NOTA: `damage_charge` ya NO se crea desde aquí. Para registrar daños
+// se usa el botón "⚠ Registrar daño" que abre `DamageReportModal`.
+// Esto evita la duplicación de gastos y garantiza el vínculo a inventario.
 function AdjustmentFormModal({
   defaultDate, onClose, onSave,
 }: {
@@ -856,15 +894,12 @@ function AdjustmentFormModal({
   onClose: () => void;
   onSave: (p: {
     kind: BookingAdjustmentKind; amount: number; description: string | null; date: string;
-    createPendingExpense?: boolean; pendingCategory?: string;
   }) => void;
 }) {
   const [kind, setKind] = useState<BookingAdjustmentKind>('extra_income');
   const [amount, setAmount] = useState<number | null>(null);
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(defaultDate);
-  const [createPendingExpense, setCreatePendingExpense] = useState(true);
-  const [pendingCategory, setPendingCategory] = useState('Reparación daño');
   const [saving, setSaving] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
@@ -873,8 +908,6 @@ function AdjustmentFormModal({
     setSaving(true);
     await onSave({
       kind, amount, description: description.trim() || null, date,
-      createPendingExpense: kind === 'damage_charge' ? createPendingExpense : false,
-      pendingCategory: kind === 'damage_charge' ? pendingCategory : undefined,
     });
     setSaving(false);
   };
@@ -895,6 +928,9 @@ function AdjustmentFormModal({
             <strong>Solo</strong> dinero ligado a esta reserva (huésped, plataforma).
             Servicios públicos, aseo o gastos del negocio NO van aquí.
           </p>
+          <p className="text-[11px] text-amber-700 mt-1">
+            ¿Es un <strong>daño</strong>? Cierra esto y usa el botón <strong>"⚠ Registrar daño"</strong>.
+          </p>
         </div>
         <form onSubmit={submit} className="p-6 space-y-4">
           <div>
@@ -907,14 +943,12 @@ function AdjustmentFormModal({
               <option value="extra_income">Ingreso extra (suma)</option>
               <option value="extra_guest_fee">Huésped adicional (suma)</option>
               <option value="discount">Descuento al huésped (resta)</option>
-              <option value="damage_charge">Cobro por daño (suma)</option>
               <option value="platform_refund">Reembolso de plataforma (suma)</option>
             </select>
             <p className="text-xs text-slate-500 mt-1">
               {kind === 'extra_income'    && 'Ingreso atípico cobrado al huésped: late check-out, mascota, servicio adicional.'}
               {kind === 'extra_guest_fee' && 'Cobro por persona adicional fuera del precio base.'}
               {kind === 'discount'        && 'Compensación o descuento otorgado al huésped por algún inconveniente.'}
-              {kind === 'damage_charge'   && 'Plataforma/huésped me paga por un daño. El gasto de reposición se registra aparte (gasto pendiente).'}
               {kind === 'platform_refund' && 'La plataforma me devuelve dinero: resolution center, impuestos, reembolso por cancelación.'}
             </p>
           </div>
@@ -939,47 +973,10 @@ function AdjustmentFormModal({
               type="text"
               value={description}
               onChange={e => setDescription(e.target.value)}
-              placeholder="Ej: 2 personas adicionales, se dañó espejo baño…"
+              placeholder="Ej: 2 personas adicionales, late check-out…"
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
-          {kind === 'damage_charge' && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={createPendingExpense}
-                  onChange={e => setCreatePendingExpense(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
-                />
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-amber-900">
-                    Crear gasto pendiente de reparación
-                  </p>
-                  <p className="text-xs text-amber-800 mt-0.5">
-                    Se registrará un gasto <span className="font-mono bg-amber-100 px-1 rounded">pending</span> vinculado
-                    a esta reserva por el mismo monto. Cuando compres/repares, editas el monto real y lo marcas como pagado.
-                    Esto permite calcular el neto real del daño: <span className="italic">cobro − costo real</span>.
-                  </p>
-                </div>
-              </label>
-              {createPendingExpense && (
-                <div className="pl-6">
-                  <label className="block text-xs font-medium text-amber-900 mb-1">Categoría del gasto</label>
-                  <select
-                    value={pendingCategory}
-                    onChange={e => setPendingCategory(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs border border-amber-300 rounded-md bg-white focus:ring-2 focus:ring-amber-500 outline-none"
-                  >
-                    <option value="Reparación daño">Reparación daño</option>
-                    <option value="Mantenimiento">Mantenimiento</option>
-                    <option value="Reposición inventario">Reposición inventario</option>
-                    <option value="Limpieza especial">Limpieza especial</option>
-                  </select>
-                </div>
-              )}
-            </div>
-          )}
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} disabled={saving}
               className="flex-1 py-2.5 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">

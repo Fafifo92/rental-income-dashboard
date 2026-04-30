@@ -1025,7 +1025,7 @@ function DamageReportModal({
       item_id: item.id,
       item_name: item.name,
       property_id: item.property_id,
-      booking_id: bookingId || null,
+      booking_id: bookingId,
       repair_cost: cost,
       description: description.trim() || null,
       charge_to_guest: chargeBack && !!bookingId,
@@ -1068,13 +1068,14 @@ function DamageReportModal({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">¿Durante qué reserva ocurrió? (opcional)</label>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">¿Durante qué reserva ocurrió? *</label>
             <select
+              required
               value={bookingId}
               onChange={e => setBookingId(e.target.value)}
               className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
             >
-              <option value="">Sin reserva específica</option>
+              <option value="">— Selecciona la reserva —</option>
               {bookings.map(b => (
                 <option key={b.id} value={b.id}>
                   {b.confirmation_code} · {b.guest_name ?? 'Huésped'} · {b.start_date} → {b.end_date}
@@ -1082,7 +1083,8 @@ function DamageReportModal({
               ))}
             </select>
             <p className="text-[10px] text-slate-400 mt-1">
-              Reservas de esta propiedad (activas primero, luego más recientes).
+              Todo daño debe estar asociado a una reserva (activas primero, luego más recientes).
+              Si la reserva no está aquí, créala antes de registrar el daño.
             </p>
           </div>
 

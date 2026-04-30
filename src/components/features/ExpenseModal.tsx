@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Expense } from '@/types';
-import type { PropertyRow, BankAccountRow, BookingRow, ExpenseSubcategory } from '@/types/database';
+import type { PropertyRow, BankAccountRow, BookingRow, ListingRow, ExpenseSubcategory } from '@/types/database';
 import { EXPENSE_SUBCATEGORY_META, SUBCATEGORY_TO_CATEGORY } from '@/types/database';
 import { listBookings } from '@/services/bookings';
+import { listListings } from '@/services/listings';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import MoneyInput from '@/components/MoneyInput';
 import { addMoney, splitMoney } from '@/lib/money';
@@ -17,6 +18,13 @@ interface Props {
   onSave: (expense: FormData) => void;
   /** Si se provee, habilita el modo "gasto compartido entre varias propiedades". */
   onSaveShared?: (rows: FormData[]) => void;
+  /** Editando una fila que pertenece a un gasto compartido: aplicar
+   *  estado/banco/fecha a TODAS las filas del grupo en una sola operación. */
+  onSaveGroup?: (patch: Partial<Pick<Expense, 'status' | 'bank_account_id' | 'date'>>) => void;
+  /** id del grupo cuando se está editando una fila compartida. */
+  editingGroupId?: string | null;
+  /** total de filas que tiene el grupo (para mostrar en el toggle). */
+  editingGroupSize?: number;
   error?: string;
   /** Si se provee, el modal entra en modo edición. */
   initial?: FormData | null;
@@ -69,7 +77,7 @@ const composeDescription = (subtype: string, rest: string): string | null => {
   return t || null;
 };
 
-export default function ExpenseModal({ properties = [], bankAccounts = [], onClose, onSave, onSaveShared, error, initial, prefill, onDiscardLinked }: Props) {
+export default function ExpenseModal({ properties = [], bankAccounts = [], onClose, onSave, onSaveShared, onSaveGroup, editingGroupId, editingGroupSize, error, initial, prefill, onDiscardLinked }: Props) {
   const initialForm = initial ?? { ...INITIAL, ...(prefill ?? {}) };
   const initialParsed = parseDescription(initialForm.description ?? null);
   const [form, setForm] = useState<FormData>({ ...initialForm, description: initialParsed.rest || null });
@@ -79,6 +87,11 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const isEdit = !!initial;
   const isLinkedToDamage = isEdit && !!initial?.adjustment_id;
+  const isGroupedEdit = isEdit && !!editingGroupId && !!onSaveGroup;
+  // Por defecto, si esta fila pertenece a un grupo compartido, aplicamos los
+  // cambios de estado/banco/fecha a todo el grupo (es lo que el usuario quiere
+  // siempre: una factura = un solo estado).
+  const [applyToGroup, setApplyToGroup] = useState<boolean>(isGroupedEdit);
 
   // ── Estado modo compartido (Bloque 6) ──────────────────────────────────
   // Solo disponible en CREAR (no edición) y cuando hay >=2 propiedades en el catálogo.
@@ -92,12 +105,32 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
     form.subcategory ? EXPENSE_SUBCATEGORY_META[form.subcategory as ExpenseSubcategory].section : null;
   const isBookingScope = currentSection === 'booking';
 
-  // Carga las últimas 50 reservas de la propiedad seleccionada (si hay)
+  // Carga listings para mapear booking → property (auto-fill propiedad)
+  const [listings, setListings] = useState<ListingRow[]>([]);
+  useEffect(() => {
+    listListings().then(res => { if (!res.error) setListings(res.data ?? []); });
+  }, []);
+  const listingToPropertyId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const l of listings) m.set(l.id, l.property_id);
+    return m;
+  }, [listings]);
+
+  // Carga reservas. Si hay propiedad seleccionada → filtra por ella; si no → todas.
   useEffect(() => {
     listBookings(form.property_id ? { propertyId: form.property_id } : undefined).then(res => {
-      if (!res.error) setBookings((res.data ?? []).slice(0, 50));
+      if (!res.error) setBookings((res.data ?? []).slice(0, 100));
     });
   }, [form.property_id]);
+
+  // Cuando se elige una reserva sin propiedad seleccionada, autocompletar propiedad.
+  useEffect(() => {
+    if (!form.booking_id || form.property_id) return;
+    const b = bookings.find(x => x.id === form.booking_id);
+    if (!b) return;
+    const propId = listingToPropertyId.get(b.listing_id);
+    if (propId) setForm(prev => ({ ...prev, property_id: propId }));
+  }, [form.booking_id, form.property_id, bookings, listingToPropertyId]);
 
   // Al cambiar subcategoría, resetea subtipo si ya no aplica
   useEffect(() => {
@@ -152,6 +185,20 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
         amount: parts[i] ?? 0,
       }));
       onSaveShared(rows);
+      return;
+    }
+
+    // Edición de fila compartida: aplicar estado/banco/fecha al GRUPO entero
+    // (lo demás — descripción, vendor, monto — sigue siendo per-row vía onSave).
+    if (isGroupedEdit && applyToGroup && onSaveGroup) {
+      onSaveGroup({
+        status: merged.status,
+        bank_account_id: merged.bank_account_id ?? null,
+        date: merged.date,
+      });
+      // Igual disparamos el save individual para que se persistan los demás
+      // cambios de la fila (descripción, monto, vendor, etc.).
+      onSave(merged);
       return;
     }
 
@@ -258,10 +305,19 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
                 </div>
               )}
               {form.subcategory === 'damage' && (
-                <div className="mt-2 text-xs px-3 py-2 rounded-lg border bg-amber-50 border-amber-200 text-amber-900">
-                  ⚠️ <strong>Daños del huésped</strong> es solo para daños ocurridos durante una reserva
-                  específica (vinculados al huésped). Si el daño NO está relacionado con una reserva
-                  (avería del edificio, desgaste, accidente sin huésped) usa <strong>Mantenimiento</strong>.
+                <div className="mt-2 text-xs px-3 py-2 rounded-lg border bg-amber-50 border-amber-200 text-amber-900 space-y-1">
+                  <p>
+                    ⚠️ <strong>Daños del huésped</strong> es solo para daños ocurridos durante una reserva
+                    específica (vinculados al huésped). Si el daño NO está relacionado con una reserva
+                    (avería del edificio, desgaste, accidente sin huésped) usa <strong>Mantenimiento</strong>.
+                  </p>
+                  <p className="pt-1 border-t border-amber-200/60">
+                    💡 <strong>Recomendado:</strong> registra el daño desde el botón
+                    <span className="font-mono bg-amber-100 px-1 rounded mx-1">⚠ Registrar daño</span>
+                    en el detalle de la reserva o desde Inventario. Así queda vinculado al item específico
+                    (o a la zona de la propiedad), evita duplicados y crea automáticamente el ajuste de
+                    cobro al huésped/plataforma cuando aplique.
+                  </p>
                 </div>
               )}
               {errors.subcategory && <p className="text-xs text-red-500 mt-1">{errors.subcategory}</p>}
@@ -317,6 +373,30 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
                     {form.type === 'variable' ? 'Cambia mes a mes (luz, agua, daños…).' : 'Mismo monto recurrente (admin, internet, predial).'}
                   </p>
                 </div>
+              </div>
+            )}
+
+            {/* Edición de fila perteneciente a un gasto compartido */}
+            {isGroupedEdit && (
+              <div className="border border-violet-200 bg-violet-50/60 rounded-lg p-3">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={applyToGroup}
+                    onChange={e => setApplyToGroup(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-violet-300 text-violet-600 focus:ring-violet-500"
+                  />
+                  <span className="flex-1">
+                    <span className="text-sm font-semibold text-violet-800">
+                      ⇄ Aplicar estado, fecha y cuenta a las {editingGroupSize ?? '?'} propiedades del grupo
+                    </span>
+                    <span className="block text-[11px] text-violet-700/80 mt-0.5">
+                      Esta fila pertenece a una factura compartida. Al activarlo, los cambios de
+                      <b> estado</b>, <b>fecha</b> y <b>cuenta bancaria</b> se replican en todas las filas
+                      del grupo. La descripción, el monto y el vendor se mantienen por fila.
+                    </span>
+                  </span>
+                </label>
               </div>
             )}
 
@@ -562,9 +642,7 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
                 </select>
               ) : (
                 <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                  {form.property_id
-                    ? 'No hay reservas para esta propiedad todavía.'
-                    : 'Selecciona una propiedad para ver sus reservas.'}
+                  No hay reservas disponibles todavía.
                 </p>
               )}
               {errors.booking_id && <p className="text-xs text-red-500 mt-1">{errors.booking_id}</p>}

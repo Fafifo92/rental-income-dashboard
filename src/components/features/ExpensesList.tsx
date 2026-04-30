@@ -95,16 +95,25 @@ export default function ExpensesList({ expenses, loading = false, onDelete, onEd
         enableSorting: false,
         meta: { className: 'text-slate-500 max-w-[200px] truncate' },
         cell: info => {
-          const row = info.row.original as Expense & { expense_group_id?: string | null };
+          const row = info.row.original as Expense & { expense_group_id?: string | null; subcategory?: string | null };
+          const isCleaningGroup = (row.subcategory ?? '').toLowerCase() === 'cleaning';
           return (
             <span className="flex items-center gap-1.5">
               <span className="truncate">{info.getValue() ?? '—'}</span>
-              {row.expense_group_id && (
+              {row.expense_group_id && !isCleaningGroup && (
                 <span
                   title="Gasto compartido entre varias propiedades"
                   className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-violet-100 text-violet-700 flex-shrink-0"
                 >
                   ⇄ Compartido
+                </span>
+              )}
+              {row.expense_group_id && isCleaningGroup && (
+                <span
+                  title="Parte de una liquidación de aseo"
+                  className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-cyan-100 text-cyan-700 flex-shrink-0"
+                >
+                  💸 Liquidación
                 </span>
               )}
             </span>
