@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table';
+import { FileText, Pencil, Trash2 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import type { Expense } from '@/types';
 import DataTable from './DataTable';
@@ -93,7 +94,22 @@ export default function ExpensesList({ expenses, loading = false, onDelete, onEd
         header: 'Descripción',
         enableSorting: false,
         meta: { className: 'text-slate-500 max-w-[200px] truncate' },
-        cell: info => info.getValue() ?? '—',
+        cell: info => {
+          const row = info.row.original as Expense & { expense_group_id?: string | null };
+          return (
+            <span className="flex items-center gap-1.5">
+              <span className="truncate">{info.getValue() ?? '—'}</span>
+              {row.expense_group_id && (
+                <span
+                  title="Gasto compartido entre varias propiedades"
+                  className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-violet-100 text-violet-700 flex-shrink-0"
+                >
+                  ⇄ Compartido
+                </span>
+              )}
+            </span>
+          );
+        },
       }),
       helper.accessor('amount', {
         header: 'Monto',
@@ -138,12 +154,10 @@ export default function ExpensesList({ expenses, loading = false, onDelete, onEd
                     whileTap={{ scale: 0.9 }}
                     onClick={() => onView(row)}
                     className="p-1.5 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                    title="Ver detalle"
+                    title="Ver comprobante / detalle"
+                    aria-label="Ver detalle del gasto"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
+                    <FileText className="w-4 h-4" />
                   </motion.button>
                 )}
                 {onEdit && !synthetic && (
@@ -152,11 +166,10 @@ export default function ExpensesList({ expenses, loading = false, onDelete, onEd
                     whileTap={{ scale: 0.9 }}
                     onClick={() => onEdit(row)}
                     className="p-1.5 rounded-md text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
-                    title="Editar"
+                    title="Editar gasto"
+                    aria-label="Editar gasto"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
+                    <Pencil className="w-4 h-4" />
                   </motion.button>
                 )}
                 {onDelete && !synthetic && (
@@ -165,11 +178,10 @@ export default function ExpensesList({ expenses, loading = false, onDelete, onEd
                     whileTap={{ scale: 0.9 }}
                     onClick={() => onDelete(row.id)}
                     className="p-1.5 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                    title="Eliminar"
+                    title="Eliminar gasto"
+                    aria-label="Eliminar gasto"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2" />
-                    </svg>
+                    <Trash2 className="w-4 h-4" />
                   </motion.button>
                 )}
                 {synthetic && <span className="text-xs text-slate-300 px-2" title="Entrada automática">auto</span>}

@@ -11,6 +11,8 @@ export interface Property {
   name: string;
   address: string | null;
   base_currency: string;
+  /** Registro Nacional de Turismo (Colombia). */
+  rnt?: string | null;
 }
 
 export interface Booking {
@@ -43,6 +45,7 @@ export interface Expense {
   adjustment_id?: string | null;
   vendor_id?: string | null;
   shared_bill_id?: string | null;
+  expense_group_id?: string | null;
 }
 
 export interface FinancialMetrics {

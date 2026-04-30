@@ -4,6 +4,8 @@ import { updateBookingPayout } from '@/services/bookings';
 import type { BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
+import { subMoney } from '@/lib/money';
+import MoneyInput from '@/components/MoneyInput';
 
 export interface PayoutTarget {
   id: string;
@@ -15,6 +17,10 @@ export interface PayoutTarget {
   net_payout?: number | null;
   payout_bank_account_id?: string | null;
   payout_date?: string | null;
+  // Bloque 10: contexto para validar payout
+  channel?: string | null;
+  start_date?: string | null;
+  checkin_done?: boolean | null;
 }
 
 interface Props {
@@ -25,56 +31,52 @@ interface Props {
 }
 
 export default function BookingPayoutModal({ booking, bankAccounts, onClose, onSaved }: Props) {
-  const [gross, setGross] = useState(
-    String(booking.gross_revenue ?? booking.total_revenue ?? ''),
-  );
-  const [fees, setFees] = useState(String(booking.channel_fees ?? ''));
-  const [net, setNet] = useState(String(booking.net_payout ?? ''));
+  const [gross, setGross] = useState<number | null>(booking.gross_revenue ?? booking.total_revenue ?? null);
+  const [fees, setFees] = useState<number | null>(booking.channel_fees ?? null);
+  const [net, setNet] = useState<number | null>(booking.net_payout ?? null);
   const [bankAccountId, setBankAccountId] = useState(booking.payout_bank_account_id ?? '');
   const [payoutDate, setPayoutDate] = useState(booking.payout_date ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const num = (s: string): number | null => {
-    const v = parseFloat(s.replace(/[^0-9.-]/g, ''));
-    return isNaN(v) ? null : v;
-  };
-
-  // ── Bidirectional sync: gross, fees, net — only 2 are independent ────
-  // Edit fees → net = gross - fees
-  // Edit net  → fees = gross - net
-  // Edit gross → recompute net = gross - fees (fees source of truth)
-  const handleGrossChange = (v: string) => {
+  // Sincronización bidireccional bruto / fees / neto usando aritmética en centavos.
+  const handleGrossChange = (v: number | null) => {
     setGross(v);
-    const g = num(v);
-    const f = num(fees);
-    if (g !== null && f !== null) setNet(String(Math.max(0, g - f)));
+    if (v !== null && fees !== null) setNet(Math.max(0, subMoney(v, fees)));
   };
-  const handleFeesChange = (v: string) => {
+  const handleFeesChange = (v: number | null) => {
     setFees(v);
-    const g = num(gross);
-    const f = num(v);
-    if (g !== null && f !== null) setNet(String(Math.max(0, g - f)));
+    if (gross !== null && v !== null) setNet(Math.max(0, subMoney(gross, v)));
   };
-  const handleNetChange = (v: string) => {
+  const handleNetChange = (v: number | null) => {
     setNet(v);
-    const g = num(gross);
-    const n = num(v);
-    if (g !== null && n !== null) setFees(String(Math.max(0, g - n)));
+    if (gross !== null && v !== null) setFees(Math.max(0, subMoney(gross, v)));
   };
   const suggestNet = () => {
-    const g = num(gross);
-    const f = num(fees) ?? 0;
-    if (g !== null) setNet(String(Math.max(0, g - f)));
+    if (gross !== null) setNet(Math.max(0, subMoney(gross, fees ?? 0)));
   };
 
   const handleSave = async () => {
     setSaving(true);
     setError('');
+
+    // Bloque 10: bloquear payout de reservas futuras no-directas sin checkin
+    const isDirect = (booking.channel ?? '').toLowerCase() === 'direct';
+    const today = new Date().toISOString().slice(0, 10);
+    const isFuture = booking.start_date ? booking.start_date > today : false;
+    if (!isDirect && isFuture && !booking.checkin_done) {
+      setSaving(false);
+      setError(
+        'No se puede liquidar payout: la reserva es futura y no es de cliente directo. ' +
+        'Las plataformas pagan después del check-in. Espera a que el huésped haga check-in.'
+      );
+      return;
+    }
+
     const res = await updateBookingPayout(booking.id, {
-      gross_revenue: num(gross),
-      channel_fees: num(fees) ?? 0,
-      net_payout: num(net),
+      gross_revenue: gross,
+      channel_fees: fees ?? 0,
+      net_payout: net,
       payout_bank_account_id: bankAccountId || null,
       payout_date: payoutDate || null,
     });
@@ -86,8 +88,7 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
     onSaved();
   };
 
-  const diff =
-    num(gross) !== null && num(net) !== null ? (num(gross)! - num(net)!) : null;
+  const diff = gross !== null && net !== null ? subMoney(gross, net) : null;
 
   return (
     <motion.div
@@ -121,13 +122,11 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Bruto (reserva) COP</label>
-              <input type="number" value={gross} onChange={e => handleGrossChange(e.target.value)}
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+              <MoneyInput value={gross} onChange={handleGrossChange} />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Comisiones / Fees</label>
-              <input type="number" value={fees} onChange={e => handleFeesChange(e.target.value)}
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+              <MoneyInput value={fees} onChange={handleFeesChange} />
             </div>
           </div>
 
@@ -137,8 +136,11 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
               <button type="button" onClick={suggestNet}
                 className="text-xs text-blue-600 hover:underline">Sugerir (bruto − fees)</button>
             </div>
-            <input type="number" value={net} onChange={e => handleNetChange(e.target.value)}
-              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-semibold" />
+            <MoneyInput
+              value={net}
+              onChange={handleNetChange}
+              inputClassName="font-semibold focus:ring-emerald-500"
+            />
             {diff !== null && diff !== 0 && (
               <p className="text-xs text-amber-700 mt-1">
                 Diferencia con bruto: {formatCurrency(diff)}
@@ -160,6 +162,11 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
                 <a href="/accounts" className="block mt-1 text-xs text-blue-600 hover:underline">
                   + Crear cuenta bancaria
                 </a>
+              )}
+              {bankAccounts.length > 0 && !bankAccountId && (
+                <p className="mt-1 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                  ⚠️ Sin cuenta: el dinero quedará "volando". Podrás asignarlo después en /accounts.
+                </p>
               )}
             </div>
             <div>

@@ -86,6 +86,7 @@ export const createSharedBill = async (args: {
     vendor_id:        args.vendorId,
     shared_bill_id:   (bill as SharedBillRow).id,
     subcategory:      subcategoryFromVendor,
+    expense_group_id: null,
   }));
 
   const { error: expErr } = await supabase.from('expenses').insert(expensesPayload);
@@ -191,6 +192,9 @@ export const listPendingSharedBills = async (
 
     for (const ym of months) {
       if (paidSet.has(`${v.id}::${ym}`)) continue;
+      // No generar periodos previos a start_year_month si el vendor lo define.
+      const start = (v as VendorRow & { start_year_month?: string | null }).start_year_month;
+      if (start && ym < start) continue;
       out.push({
         vendor: v,
         yearMonth: ym,

@@ -68,13 +68,13 @@ function PropertyCard({ property, index, isDemo }: { property: Property; index: 
             </a>
           )}
           <a
-            href="/bookings"
+            href={`/bookings?property=${property.id}`}
             className="text-center text-xs font-medium text-slate-600 hover:text-slate-800 py-2 px-2 rounded-lg hover:bg-slate-50 transition-colors"
           >
             Reservas
           </a>
           <a
-            href="/expenses"
+            href={`/expenses?property=${property.id}`}
             className="text-center text-xs font-medium text-slate-600 hover:text-slate-800 py-2 px-2 rounded-lg hover:bg-slate-50 transition-colors"
           >
             Gastos
@@ -90,6 +90,7 @@ function PropertyCard({ property, index, isDemo }: { property: Property; index: 
 function PropertyModal({ onClose, onCreated }: { onClose: () => void; onCreated: (p: Property) => void }) {
   const [name, setName]       = useState('');
   const [address, setAddress] = useState('');
+  const [rnt, setRnt]         = useState('');
   const [saving, setSaving]   = useState(false);
   const [error, setError]     = useState<string | null>(null);
 
@@ -98,7 +99,12 @@ function PropertyModal({ onClose, onCreated }: { onClose: () => void; onCreated:
     if (!name.trim()) return;
     setSaving(true);
     setError(null);
-    const res = await createProperty(name.trim(), address.trim() || undefined);
+    const res = await createProperty(
+      name.trim(),
+      address.trim() || undefined,
+      'COP',
+      rnt.trim() || null,
+    );
     setSaving(false);
     if (res.error || !res.data) { setError(res.error ?? 'No se pudo crear'); return; }
     onCreated(res.data);
@@ -144,6 +150,19 @@ function PropertyModal({ onClose, onCreated }: { onClose: () => void; onCreated:
               value={address}
               onChange={e => setAddress(e.target.value)}
               placeholder="Ej: Calle 10 #43E-31, El Poblado"
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              RNT <span className="text-slate-400 font-normal">(Registro Nacional de Turismo, opcional)</span>
+            </label>
+            <input
+              type="text"
+              value={rnt}
+              onChange={e => setRnt(e.target.value)}
+              placeholder="Ej: 123456"
               className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>

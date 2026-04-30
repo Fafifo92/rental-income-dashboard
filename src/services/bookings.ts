@@ -3,6 +3,7 @@ import type { ServiceResult } from './expenses';
 import type { BookingRow } from '@/types/database';
 import type { ParsedBooking } from './etl';
 import { findOrCreateListing } from './listings';
+import { inferOperationalFlags } from '@/lib/bookingStatus';
 
 // ─── Public Types ────────────────────────────────────────────────────────────
 
@@ -14,7 +15,9 @@ export interface ImportResult {
 
 export interface BookingFilters {
   listingId?: string;
+  /** @deprecated usar `propertyIds`. Si ambos están, gana `propertyIds`. */
   propertyId?: string;
+  propertyIds?: string[];
   status?: string;
   dateFrom?: string;
   dateTo?: string;
@@ -96,6 +99,7 @@ export const upsertBookings = async (
     const listingId = listingIdCache[b.listing_name];
     if (!listingId) { skippedCodes.push(b.confirmation_code); continue; }
 
+    const flags = inferOperationalFlags(b.start_date, b.end_date);
     rows.push({
       listing_id: listingId,
       confirmation_code: b.confirmation_code,
@@ -119,8 +123,8 @@ export const upsertBookings = async (
       currency: 'COP',
       exchange_rate: null,
       notes: null,
-      checkin_done: false,
-      checkout_done: false,
+      checkin_done: flags.checkin_done,
+      checkout_done: flags.checkout_done,
       inventory_checked: false,
       operational_notes: null,
     });
@@ -149,11 +153,17 @@ export const listBookings = async (
 ): Promise<ServiceResult<BookingRow[]>> => {
   // If filtering by property, resolve listing IDs first
   let allowedListingIds: string[] | undefined;
-  if (filters?.propertyId) {
+  const propIds: string[] | undefined =
+    filters?.propertyIds && filters.propertyIds.length > 0
+      ? filters.propertyIds
+      : filters?.propertyId
+        ? [filters.propertyId]
+        : undefined;
+  if (propIds) {
     const { data: listings, error } = await supabase
       .from('listings')
       .select('id')
-      .eq('property_id', filters.propertyId);
+      .in('property_id', propIds);
     if (error) return { data: null, error: error.message };
     if (!listings || listings.length === 0) return { data: [], error: null };
     allowedListingIds = listings.map((l: { id: string }) => l.id);

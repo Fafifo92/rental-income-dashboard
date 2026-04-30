@@ -4,6 +4,7 @@ import { markPeriodPaid } from '@/services/recurringPeriods';
 import type { PropertyRecurringExpenseRow, BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
+import MoneyInput from '@/components/MoneyInput';
 
 const ymLabel = (ym: string): string => {
   const [y, m] = ym.split('-');
@@ -20,7 +21,7 @@ export default function MarkPaidModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [amount, setAmount] = useState(String(Number(recurring.amount)));
+  const [amount, setAmount] = useState<number | null>(Number(recurring.amount));
   const [date, setDate] = useState(() => {
     const [y, m] = yearMonth.split('-').map(Number);
     const dom = recurring.day_of_month ?? 1;
@@ -35,15 +36,15 @@ export default function MarkPaidModal({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const n = parseFloat(amount);
-    if (!n || n <= 0) { setError('El monto debe ser mayor a 0'); return; }
+    if (!amount || amount <= 0) { setError('El monto debe ser mayor a 0'); return; }
     if (!date) { setError('Indica la fecha del pago'); return; }
+    if (!bankAccountId) { setError('Indica de qué cuenta bancaria salió el dinero (obligatorio para pagos).'); return; }
     setSaving(true);
     setError(null);
     const res = await markPeriodPaid({
       recurring,
       yearMonth,
-      amount: n,
+      amount,
       date,
       bankAccountId: bankAccountId || null,
       note: note.trim() || null,
@@ -78,12 +79,7 @@ export default function MarkPaidModal({
         <form onSubmit={submit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">Monto real pagado *</label>
-            <input
-              type="number" step="100" required autoFocus
-              value={amount}
-              onChange={e => setAmount(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            />
+            <MoneyInput value={amount} onChange={setAmount} required autoFocus />
             <p className="text-xs text-slate-400 mt-1">Recurrente configurado en {formatCurrency(Number(recurring.amount))}</p>
           </div>
 
@@ -98,17 +94,21 @@ export default function MarkPaidModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Cuenta bancaria</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Cuenta bancaria <span className="text-rose-600">*</span></label>
             <select
+              required
               value={bankAccountId}
               onChange={e => setBankAccountId(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+              className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white ${
+                !bankAccountId ? 'border-rose-300' : 'border-slate-200'
+              }`}
             >
-              <option value="">— Sin cuenta asociada —</option>
+              <option value="">— Selecciona la cuenta —</option>
               {banks.filter(b => b.is_active).map(b => (
                 <option key={b.id} value={b.id}>{b.name}{b.bank ? ` · ${b.bank}` : ''}</option>
               ))}
             </select>
+            <p className="text-[11px] text-slate-500 mt-1">Obligatorio: necesitamos saber de qué cuenta sale el dinero para mantener los balances correctos.</p>
           </div>
 
           <div>

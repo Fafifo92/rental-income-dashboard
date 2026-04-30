@@ -17,10 +17,14 @@ import { useAuth } from '@/lib/useAuth';
 import { usePropertyFilter } from '@/lib/usePropertyFilter';
 import DataTable from './DataTable';
 import CSVUploader from './CSVUploader';
-import PropertySelector from './PropertySelector';
+import PropertyMultiSelect from '@/components/PropertyMultiSelect';
 import BookingPayoutModal from './BookingPayoutModal';
 import BookingDetailModal from './BookingDetailModal';
 import ConfirmDeleteChallenge from './ConfirmDeleteChallenge';
+import MoneyInput from '@/components/MoneyInput';
+import { parseMoney } from '@/lib/money';
+import { getBookingStatus, statusUI } from '@/lib/bookingStatus';
+import { CalendarCheck, Pencil, HandCoins, Trash2 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -104,13 +108,6 @@ const fromDemo = (b: ParsedBooking, i: number): DisplayBooking => ({
   isDemo: true,
 });
 
-const statusColor = (s: string) => {
-  const lower = s.toLowerCase();
-  if (lower.includes('cancel')) return 'bg-red-100 text-red-700';
-  if (lower.includes('complet') || lower.includes('reserv')) return 'bg-green-100 text-green-700';
-  return 'bg-yellow-100 text-yellow-700';
-};
-
 const EMPTY_FILTERS: BookingFilters = {};
 const EMPTY_FORM: BookingForm = {
   guest_name: '', confirmation_code: '', start_date: '', end_date: '',
@@ -125,7 +122,7 @@ const bookingHelper = createColumnHelper<DisplayBooking>();
 export default function BookingsClient() {
   // ── ALL HOOKS — must come before any conditional returns ──────────────────
   const authStatus = useAuth();
-  const { properties: allProperties, propertyId, setPropertyId } = usePropertyFilter();
+  const { properties: allProperties, propertyIds, setPropertyIds } = usePropertyFilter();
   const [bookings, setBookings]     = useState<DisplayBooking[]>([]);
   const [loading, setLoading]       = useState(true);
   const [isDemo, setIsDemo]         = useState(false);
@@ -179,7 +176,7 @@ export default function BookingsClient() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { load({ ...filters, propertyId }); }, [filters, propertyId, load]);
+  useEffect(() => { load({ ...filters, propertyIds }); }, [filters, propertyIds, load]);
 
   useEffect(() => {
     if (authStatus === 'authed') {
@@ -253,7 +250,7 @@ export default function BookingsClient() {
     setFormLoading(true);
     setFormError('');
     const nights  = parseInt(form.num_nights) || 0;
-    const revenue = parseFloat(form.total_revenue.replace(/[^0-9.]/g, '')) || 0;
+    const revenue = parseMoney(form.total_revenue) ?? 0;
     const code = form.confirmation_code
       || (form.channel === 'direct' ? generateDirectBookingCode() : `MANUAL-${Date.now()}`);
 
@@ -350,11 +347,25 @@ export default function BookingsClient() {
   const columns = useMemo<ColumnDef<DisplayBooking, any>[]>(() => [
     bookingHelper.accessor('status', {
       header: 'Estado',
-      cell: info => (
-        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${statusColor(info.getValue())}`}>
-          {info.getValue() || '—'}
-        </span>
-      ),
+      cell: info => {
+        const row = info.row.original;
+        const derived = getBookingStatus({
+          start_date: row.start_date,
+          end_date: row.end_date,
+          checkin_done: (row as any).checkin_done,
+          checkout_done: (row as any).checkout_done,
+          status: row.status,
+        });
+        const ui = statusUI[derived];
+        return (
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${ui.className}`}
+            title={info.getValue() || ui.label}
+          >
+            <span aria-hidden>{ui.emoji}</span>{ui.label}
+          </span>
+        );
+      },
     }),
     bookingHelper.accessor('guest_name', {
       header: 'Huésped',
@@ -436,45 +447,40 @@ export default function BookingsClient() {
           <div className="flex items-center gap-1 justify-end whitespace-nowrap">
             <button
               onClick={() => setDetailTarget(b)}
-              title="Ver detalle"
+              title="Ver detalle de reserva"
+              aria-label="Ver detalle"
               className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-              </svg>
+              <CalendarCheck className="w-4 h-4" />
             </button>
             <button
               onClick={() => handleEdit(b)}
               title="Editar reserva"
+              aria-label="Editar reserva"
               className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
+              <Pencil className="w-4 h-4" />
             </button>
             <button
               onClick={() => setPayoutTarget(b)}
               title={hasPayout ? 'Editar payout real' : 'Registrar payout real'}
+              aria-label="Payout de reserva"
               className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-md border transition-colors ${
                 hasPayout
                   ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-blue-300 hover:text-blue-700'
               }`}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-              </svg>
+              <HandCoins className="w-3.5 h-3.5" />
               Payout
             </button>
             <button
               onClick={() => setDeleteTarget(b)}
               title="Eliminar reserva"
+              aria-label="Eliminar reserva"
               className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2" />
-              </svg>
+              <Trash2 className="w-4 h-4" />
             </button>
           </div>
         );
@@ -523,7 +529,7 @@ export default function BookingsClient() {
           <p className="text-slate-500 mt-1">Historial de reservas importadas desde Airbnb.</p>
         </div>
         <div className="flex flex-wrap gap-2 items-center">
-          <PropertySelector properties={allProperties} value={propertyId} onChange={setPropertyId} />
+          <PropertyMultiSelect properties={allProperties} value={propertyIds} onChange={setPropertyIds} />
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
             onClick={() => { setEditingId(null); setForm(EMPTY_FORM); setFormError(''); setShowModal(true); }}
@@ -763,10 +769,10 @@ export default function BookingsClient() {
                 {/* Ingresos */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Ingresos (COP) *</label>
-                  <input type="number" value={form.total_revenue}
-                    onChange={e => handleFormChange('total_revenue', e.target.value)}
+                  <MoneyInput
+                    value={parseMoney(form.total_revenue)}
+                    onChange={(v) => handleFormChange('total_revenue', v == null ? '' : String(v))}
                     placeholder="0"
-                    className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                 </div>
 
@@ -843,10 +849,15 @@ export default function BookingsClient() {
       <AnimatePresence>
         {payoutTarget && (
           <BookingPayoutModal
-            booking={payoutTarget}
+            booking={{
+              ...payoutTarget,
+              channel: payoutTarget.channel ?? null,
+              start_date: payoutTarget.start_date ?? null,
+              checkin_done: payoutTarget.checkin_done ?? false,
+            }}
             bankAccounts={bankAccounts}
             onClose={() => setPayoutTarget(null)}
-            onSaved={() => { setPayoutTarget(null); load({ ...filters, propertyId }); }}
+            onSaved={() => { setPayoutTarget(null); load({ ...filters, propertyIds }); }}
           />
         )}
       </AnimatePresence>

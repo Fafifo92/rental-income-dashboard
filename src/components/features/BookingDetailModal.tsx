@@ -17,6 +17,8 @@ import type {
 import { formatCurrency } from '@/lib/utils';
 import { useBackdropClose, makeBackdropHandlers } from '@/lib/useBackdropClose';
 import ExpenseModal from './ExpenseModal';
+import MoneyInput from '@/components/MoneyInput';
+import { getDamageReconciliations, type DamageReconciliation } from '@/services/inventory';
 
 interface BookingLite {
   id: string;
@@ -155,7 +157,7 @@ export default function BookingDetailModal({
     },
   ) => {
     const { createPendingExpense, pendingCategory, ...adjPayload } = payload;
-    const res = await createBookingAdjustment({ ...adjPayload, booking_id: booking.id });
+    const res = await createBookingAdjustment({ ...adjPayload, booking_id: booking.id, bank_account_id: null });
     if (res.error || !res.data) return;
 
     // Cobro por daño → auto-crear gasto pendiente de reparación vinculado a la reserva
@@ -598,6 +600,9 @@ export default function BookingDetailModal({
                 </>
               )}
             </div>
+
+            {/* 🔧 Daños del inventario — Bloque 16 */}
+            <BookingDamagesSection bookingId={booking.id} />
           </div>
 
           {/* Footer */}
@@ -701,14 +706,18 @@ export default function BookingDetailModal({
 }
 
 const ADJ_KIND_LABEL: Record<BookingAdjustmentKind, string> = {
-  extra_income:  'Ingreso extra',
-  discount:      'Descuento',
-  damage_charge: 'Cobro por daño',
+  extra_income:    'Ingreso extra',
+  discount:        'Descuento',
+  damage_charge:   'Cobro por daño',
+  platform_refund: 'Reembolso plataforma',
+  extra_guest_fee: 'Huésped adicional',
 };
 const ADJ_KIND_STYLE: Record<BookingAdjustmentKind, string> = {
-  extra_income:  'bg-emerald-100 text-emerald-700',
-  discount:      'bg-rose-100 text-rose-700',
-  damage_charge: 'bg-amber-100 text-amber-700',
+  extra_income:    'bg-emerald-100 text-emerald-700',
+  discount:        'bg-rose-100 text-rose-700',
+  damage_charge:   'bg-amber-100 text-amber-700',
+  platform_refund: 'bg-sky-100 text-sky-700',
+  extra_guest_fee: 'bg-teal-100 text-teal-700',
 };
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -851,7 +860,7 @@ function AdjustmentFormModal({
   }) => void;
 }) {
   const [kind, setKind] = useState<BookingAdjustmentKind>('extra_income');
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState<number | null>(null);
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(defaultDate);
   const [createPendingExpense, setCreatePendingExpense] = useState(true);
@@ -860,11 +869,10 @@ function AdjustmentFormModal({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const n = parseFloat(amount);
-    if (!n || n <= 0) return;
+    if (!amount || amount <= 0) return;
     setSaving(true);
     await onSave({
-      kind, amount: n, description: description.trim() || null, date,
+      kind, amount, description: description.trim() || null, date,
       createPendingExpense: kind === 'damage_charge' ? createPendingExpense : false,
       pendingCategory: kind === 'damage_charge' ? pendingCategory : undefined,
     });
@@ -883,7 +891,10 @@ function AdjustmentFormModal({
       >
         <div className="px-6 py-4 border-b border-slate-100">
           <h3 className="text-lg font-bold text-slate-800">Nuevo ajuste</h3>
-          <p className="text-xs text-slate-500 mt-0.5">Registra ingresos extra, descuentos o cargos por daño al huésped.</p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            <strong>Solo</strong> dinero ligado a esta reserva (huésped, plataforma).
+            Servicios públicos, aseo o gastos del negocio NO van aquí.
+          </p>
         </div>
         <form onSubmit={submit} className="p-6 space-y-4">
           <div>
@@ -894,24 +905,23 @@ function AdjustmentFormModal({
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
             >
               <option value="extra_income">Ingreso extra (suma)</option>
+              <option value="extra_guest_fee">Huésped adicional (suma)</option>
               <option value="discount">Descuento al huésped (resta)</option>
               <option value="damage_charge">Cobro por daño (suma)</option>
+              <option value="platform_refund">Reembolso de plataforma (suma)</option>
             </select>
             <p className="text-xs text-slate-500 mt-1">
-              {kind === 'extra_income'  && 'Ej: huésped paga persona adicional, late check-out, mascota.'}
-              {kind === 'discount'      && 'Ej: compensación al huésped por problema durante la estadía.'}
-              {kind === 'damage_charge' && 'Ej: cobro al huésped por daño al inventario. El gasto de reparar se registra aparte.'}
+              {kind === 'extra_income'    && 'Ingreso atípico cobrado al huésped: late check-out, mascota, servicio adicional.'}
+              {kind === 'extra_guest_fee' && 'Cobro por persona adicional fuera del precio base.'}
+              {kind === 'discount'        && 'Compensación o descuento otorgado al huésped por algún inconveniente.'}
+              {kind === 'damage_charge'   && 'Plataforma/huésped me paga por un daño. El gasto de reposición se registra aparte (gasto pendiente).'}
+              {kind === 'platform_refund' && 'La plataforma me devuelve dinero: resolution center, impuestos, reembolso por cancelación.'}
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Monto *</label>
-              <input
-                type="number" step="1000" required
-                value={amount}
-                onChange={e => setAmount(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              />
+              <MoneyInput value={amount} onChange={setAmount} required />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Fecha *</label>
@@ -1002,11 +1012,11 @@ function CleaningFormModal({
   }) => void;
 }) {
   const [cleanerId, setCleanerId] = useState<string>('');
-  const [fee, setFee] = useState<string>(defaultFee ? String(defaultFee) : '');
+  const [fee, setFee] = useState<number | null>(defaultFee ?? null);
   const [status, setStatus] = useState<'pending' | 'done' | 'paid'>('pending');
   const [doneDate, setDoneDate] = useState<string>(defaultDate);
   const [notes, setNotes] = useState('');
-  const [suppliesAmount, setSuppliesAmount] = useState<string>('');
+  const [suppliesAmount, setSuppliesAmount] = useState<number | null>(null);
   const [reimburse, setReimburse] = useState<boolean>(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1018,20 +1028,19 @@ function CleaningFormModal({
       setError('Debes seleccionar la persona de aseo que ejecutó el turno.');
       return;
     }
-    const feeNum = parseFloat(fee);
-    if (isNaN(feeNum) || feeNum < 0) {
+    if (fee == null || fee < 0) {
       setError('Tarifa inválida.');
       return;
     }
-    const suppliesNum = suppliesAmount.trim() === '' ? 0 : parseFloat(suppliesAmount);
-    if (isNaN(suppliesNum) || suppliesNum < 0) {
+    const suppliesNum = suppliesAmount ?? 0;
+    if (suppliesNum < 0) {
       setError('Monto de insumos inválido.');
       return;
     }
     setSaving(true);
     await onSave({
       cleaner_id: cleanerId,
-      fee: feeNum,
+      fee,
       status,
       done_date: status === 'pending' ? null : doneDate,
       notes: notes.trim() || null,
@@ -1085,12 +1094,10 @@ function CleaningFormModal({
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Tarifa *</label>
-            <input
-              type="number" min="0" step="1000"
+            <MoneyInput
               value={fee}
-              onChange={e => setFee(e.target.value)}
-              placeholder={defaultFee ? `Default propiedad: ${defaultFee}` : 'Ej: 50000'}
-              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              onChange={setFee}
+              placeholder={defaultFee ? `Default: ${defaultFee}` : 'Ej: 50.000'}
               required
             />
             {defaultFee != null && (
@@ -1144,20 +1151,18 @@ function CleaningFormModal({
               <label className="block text-xs font-medium text-slate-600 mb-1">
                 Monto en insumos (papel, jabón, blanqueador, etc.)
               </label>
-              <input
-                type="number" min="0" step="500"
+              <MoneyInput
                 value={suppliesAmount}
-                onChange={e => setSuppliesAmount(e.target.value)}
+                onChange={setSuppliesAmount}
                 placeholder="0 si no hubo gasto en insumos"
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
-            <label className={`flex items-center gap-2 text-xs ${parseFloat(suppliesAmount || '0') > 0 ? 'text-slate-700' : 'text-slate-400'}`}>
+            <label className={`flex items-center gap-2 text-xs ${(suppliesAmount ?? 0) > 0 ? 'text-slate-700' : 'text-slate-400'}`}>
               <input
                 type="checkbox"
                 checked={reimburse}
                 onChange={e => setReimburse(e.target.checked)}
-                disabled={!(parseFloat(suppliesAmount || '0') > 0)}
+                disabled={!((suppliesAmount ?? 0) > 0)}
                 className="rounded"
               />
               <span>Reembolsar al aseador (los insumos los puso él/ella)</span>
@@ -1173,7 +1178,7 @@ function CleaningFormModal({
               className="flex-1 py-2.5 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
               Cancelar
             </button>
-            <button type="submit" disabled={saving || !fee}
+            <button type="submit" disabled={saving || fee == null}
               className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
               {saving ? 'Guardando…' : 'Guardar'}
             </button>
@@ -1280,5 +1285,82 @@ function CompleteBookingModal({
         </div>
       </motion.div>
     </motion.div>
+  );
+}
+// ---------- Bloque 16 — Sección "Daños del inventario" en BookingDetailModal ----------
+
+function BookingDamagesSection({ bookingId }: { bookingId: string }): JSX.Element | null {
+  const [rows, setRows] = useState<DamageReconciliation[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    getDamageReconciliations().then(res => {
+      if (!mounted) return;
+      const filtered = (res.data ?? []).filter(r => r.booking_id === bookingId);
+      setRows(filtered);
+      setLoading(false);
+    });
+    return () => { mounted = false; };
+  }, [bookingId]);
+
+  if (loading || rows.length === 0) return null;
+
+  const totalCost = rows.reduce((s, r) => s + r.repair_cost, 0);
+  const totalCharged = rows.reduce((s, r) => s + r.charged_to_guest, 0);
+  const netDiff = totalCharged - totalCost;
+
+  return (
+    <div className="bg-rose-50/40 border border-rose-200 rounded-xl p-4 mt-4">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <h3 className="text-sm font-bold text-rose-800 flex items-center gap-1.5">🔧 Daños del inventario ({rows.length})</h3>
+          <p className="text-[11px] text-rose-700/80">Items reportados como dañados durante esta reserva.</p>
+        </div>
+        <div className="text-right text-xs">
+          <div className="text-slate-500">Costo {formatCurrency(totalCost)} · Cobrado {formatCurrency(totalCharged)}</div>
+          <div className={`font-bold ${netDiff < 0 ? 'text-rose-700' : netDiff > 0 ? 'text-emerald-700' : 'text-slate-600'}`}>
+            Neto: {netDiff < 0 ? '−' : netDiff > 0 ? '+' : ''}{formatCurrency(Math.abs(netDiff))}
+          </div>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-[10px] uppercase text-slate-500 bg-white/60">
+            <tr>
+              <th className="text-left py-1.5 px-2">Item</th>
+              <th className="text-right py-1.5 px-2">Costo</th>
+              <th className="text-right py-1.5 px-2">Cobrado</th>
+              <th className="text-right py-1.5 px-2">Diff</th>
+              <th className="text-left py-1.5 px-2">Estado</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-rose-100">
+            {rows.map(r => (
+              <tr key={r.movement_id}>
+                <td className="py-1.5 px-2 font-medium text-slate-800">{r.item_name}</td>
+                <td className="py-1.5 px-2 text-right tabular-nums">{formatCurrency(r.repair_cost)}</td>
+                <td className="py-1.5 px-2 text-right tabular-nums">{formatCurrency(r.charged_to_guest)}</td>
+                <td className={`py-1.5 px-2 text-right tabular-nums font-semibold ${
+                  r.diff < 0 ? 'text-rose-700' : r.diff > 0 ? 'text-emerald-700' : 'text-slate-500'
+                }`}>
+                  {r.diff < 0 ? '−' : r.diff > 0 ? '+' : ''}{formatCurrency(Math.abs(r.diff))}
+                </td>
+                <td className="py-1.5 px-2">
+                  {r.status === 'balanced' && <span className="text-emerald-700">✓ Balanceado</span>}
+                  {r.status === 'pending_recovery' && <span className="text-rose-700">Falta recuperar</span>}
+                  {r.status === 'overpaid' && <span className="text-emerald-700">Sobrante</span>}
+                  {r.status === 'no_charge' && <span className="text-slate-600">Sin cobro</span>}
+                  {r.status === 'pending_repair' && <span className="text-amber-700">Pago pendiente</span>}
+                  {!r.is_repaired && r.expense_status === 'paid' && (
+                    <span className="ml-1.5 text-[10px] text-slate-400">· item dañado</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

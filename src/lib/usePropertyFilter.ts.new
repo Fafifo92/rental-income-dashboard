@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { listProperties } from '@/services/properties';
 import type { PropertyRow } from '@/types/database';
 
-const STORAGE_KEY = 'str_property_filter';            // legacy single-id key
+const STORAGE_KEY = 'str_property_filter';      // legacy single-id key
 const STORAGE_KEY_MULTI = 'str_property_filter_multi'; // new array key (JSON)
 
 /**
@@ -11,10 +11,10 @@ const STORAGE_KEY_MULTI = 'str_property_filter_multi'; // new array key (JSON)
  * - `propertyIds`: array de IDs seleccionadas. Vacío = sin filtro (todas).
  * - `setPropertyIds`: setter persistido en localStorage.
  *
- * Back-compat:
+ * Para back-compat con código que aún espera un solo ID se exponen:
  * - `propertyId`: primer ID si solo hay uno seleccionado, `undefined` en otro caso.
- *   Úsalo solo en flujos donde 1 propiedad es la norma; para listados/filtros prefiere
- *   `propertyIds` para no perder información cuando hay 2+ propiedades.
+ *   ⚠ Si hay 2+ seleccionadas, este derivado vale `undefined`; usa `propertyIds` para evitar
+ *   el bug "todo se ve como sin filtro".
  */
 export function usePropertyFilter() {
   const [properties, setProperties] = useState<PropertyRow[]>([]);
@@ -28,48 +28,16 @@ export function usePropertyFilter() {
         if (Array.isArray(parsed)) return parsed.filter((x): x is string => typeof x === 'string');
       }
     } catch { /* fallthrough */ }
+    // Migración del filtro single-id legado
     const legacy = localStorage.getItem(STORAGE_KEY);
     return legacy ? [legacy] : [];
   });
-
-  const persist = (ids: string[]) => {
-    if (typeof window === 'undefined') return;
-    if (ids.length === 0) {
-      localStorage.removeItem(STORAGE_KEY_MULTI);
-      localStorage.removeItem(STORAGE_KEY);
-    } else {
-      localStorage.setItem(STORAGE_KEY_MULTI, JSON.stringify(ids));
-      localStorage.setItem(STORAGE_KEY, ids[0]);
-    }
-  };
 
   useEffect(() => {
     listProperties().then(res => {
       if (!res.error && res.data) {
         setProperties(res.data);
-
-        // 1) Si la URL trae ?property=<id> (o ?property=a,b), aplica ese filtro
-        //    sobrescribiendo cualquier valor previo. Útil para deep-links desde
-        //    la página de Propiedades ("Ver reservas/gastos de esta propiedad").
-        let urlIds: string[] | null = null;
-        if (typeof window !== 'undefined') {
-          const params = new URLSearchParams(window.location.search);
-          const raw = params.get('property') ?? params.get('properties');
-          if (raw) {
-            urlIds = raw.split(',').map(s => s.trim()).filter(Boolean);
-          }
-        }
-
-        if (urlIds && urlIds.length > 0) {
-          const valid = urlIds.filter(id => res.data!.some(p => p.id === id));
-          if (valid.length > 0) {
-            setPropertyIdsState(valid);
-            persist(valid);
-            return;
-          }
-        }
-
-        // 2) Sin param en URL: limpia IDs persistidas que ya no existan
+        // Limpiar IDs huérfanos
         setPropertyIdsState(prev => {
           const valid = prev.filter(id => res.data!.some(p => p.id === id));
           if (valid.length !== prev.length) persist(valid);
@@ -79,14 +47,26 @@ export function usePropertyFilter() {
     });
   }, []);
 
+  const persist = (ids: string[]) => {
+    if (typeof window === 'undefined') return;
+    if (ids.length === 0) {
+      localStorage.removeItem(STORAGE_KEY_MULTI);
+      localStorage.removeItem(STORAGE_KEY);
+    } else {
+      localStorage.setItem(STORAGE_KEY_MULTI, JSON.stringify(ids));
+      // mantener compat con cualquier consumidor legado: guardar el primero
+      localStorage.setItem(STORAGE_KEY, ids[0]);
+    }
+  };
+
   const setPropertyIds = (ids: string[]) => {
     setPropertyIdsState(ids);
     persist(ids);
   };
 
+  // Back-compat helper. Sólo válido cuando hay exactamente UNA seleccionada.
   const propertyId = propertyIds.length === 1 ? propertyIds[0] : undefined;
   const setPropertyId = (id: string | undefined) => setPropertyIds(id ? [id] : []);
 
   return { properties, propertyIds, setPropertyIds, propertyId, setPropertyId };
 }
-

@@ -5,12 +5,13 @@ import ExpenseModal from './ExpenseModal';
 import ExpenseDetailModal from './ExpenseDetailModal';
 import BookingDetailModal from './BookingDetailModal';
 import FilterBar from './FilterBar';
-import PropertySelector from './PropertySelector';
+import PropertyMultiSelect from '@/components/PropertyMultiSelect';
 import RecurringPendingPanel from './RecurringPendingPanel';
 import SharedBillsPendingPanel from './SharedBillsPendingPanel';
 import {
   listExpenses,
   createExpense,
+  createSharedExpense,
   updateExpense,
   deleteExpense,
   type ExpenseFilters,
@@ -48,7 +49,7 @@ const EMPTY_FILTERS: ExpenseFilters = {};
 
 export default function ExpensesClient() {
   const authStatus = useAuth();
-  const { properties, propertyId, setPropertyId } = usePropertyFilter();
+  const { properties, propertyIds, setPropertyIds } = usePropertyFilter();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [dbConnected, setDbConnected] = useState(false);
@@ -64,9 +65,9 @@ export default function ExpensesClient() {
   const [tab, setTab] = useState<'all' | ExpenseSection | 'others'>('all');
   const [subFilter, setSubFilter] = useState<ExpenseSubcategory | null>(null);
 
-  const loadExpenses = useCallback(async (f: ExpenseFilters, propId?: string) => {
+  const loadExpenses = useCallback(async (f: ExpenseFilters, propIds?: string[]) => {
     setLoading(true);
-    const result = await listExpenses(propId, f);
+    const result = await listExpenses(propIds, f);
     if (result.error) {
       let demo = DEMO_EXPENSES;
       if (f.category) demo = demo.filter(e => e.category === f.category);
@@ -87,7 +88,7 @@ export default function ExpensesClient() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { loadExpenses(filters, propertyId); }, [filters, propertyId, loadExpenses]);
+  useEffect(() => { loadExpenses(filters, propertyIds); }, [filters, propertyIds, loadExpenses]);
 
   useEffect(() => {
     if (authStatus === 'authed') {
@@ -157,6 +158,26 @@ export default function ExpensesClient() {
       setExpenses(prev => [result.data!, ...prev]);
     } else {
       setExpenses(prev => [{ ...data, id: crypto.randomUUID() }, ...prev]);
+    }
+    setShowModal(false);
+    dispatchRecurringChange();
+  };
+
+  /** Bloque 6: gasto compartido entre N propiedades. */
+  const handleSaveShared = async (rows: Omit<Expense, 'id' | 'owner_id'>[]) => {
+    setSaveError('');
+    if (dbConnected) {
+      const result = await createSharedExpense(rows);
+      if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); return; }
+      setExpenses(prev => [...result.data!.expenses, ...prev]);
+    } else {
+      const groupId = crypto.randomUUID();
+      const synthesized: Expense[] = rows.map(r => ({
+        ...r,
+        id: crypto.randomUUID(),
+        expense_group_id: groupId,
+      }));
+      setExpenses(prev => [...synthesized, ...prev]);
     }
     setShowModal(false);
     dispatchRecurringChange();
@@ -258,7 +279,7 @@ export default function ExpensesClient() {
             <p className="text-slate-500 mt-1">Control de gastos fijos y variables por propiedad.</p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <PropertySelector properties={properties} value={propertyId} onChange={setPropertyId} />
+            <PropertyMultiSelect properties={properties} value={propertyIds} onChange={setPropertyIds} />
             <motion.button
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
@@ -289,7 +310,7 @@ export default function ExpensesClient() {
         {/* Facturas compartidas pendientes (vendors con N propiedades) */}
         <SharedBillsPendingPanel
           onChanged={() => {
-            loadExpenses(filters, propertyId);
+            loadExpenses(filters, propertyIds);
             if (typeof window !== 'undefined') {
               window.dispatchEvent(new CustomEvent('recurring-period-changed'));
             }
@@ -298,9 +319,9 @@ export default function ExpensesClient() {
 
         {/* Recurrentes pendientes (fuente única: tabla periods + auto-detección) */}
         <RecurringPendingPanel
-          propertyFilter={propertyId ?? null}
+          propertyFilter={propertyIds.length === 1 ? propertyIds[0] : null}
           onChanged={() => {
-            loadExpenses(filters, propertyId);
+            loadExpenses(filters, propertyIds);
             if (typeof window !== 'undefined') {
               window.dispatchEvent(new CustomEvent('recurring-period-changed'));
             }
@@ -478,6 +499,7 @@ export default function ExpensesClient() {
             } : null}
             onClose={() => { setShowModal(false); setEditing(null); setSaveError(''); }}
             onSave={handleSave}
+            onSaveShared={handleSaveShared}
             error={saveError}
             onDiscardLinked={editing?.adjustment_id ? () => handleDiscardWithAdjustment(editing) : undefined}
           />

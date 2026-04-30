@@ -12,17 +12,36 @@ import { currentYearMonth, yearMonthRange } from '@/services/recurringPeriods';
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import SharedBillPayModal from './SharedBillPayModal';
+import MoneyInput from '@/components/MoneyInput';
+import { parseMoney } from '@/lib/money';
 
-const KINDS: { value: VendorKind; label: string; icon: string }[] = [
-  { value: 'utility',     label: 'Servicio público',   icon: '💡' },
-  { value: 'admin',       label: 'Administración',     icon: '🏢' },
-  { value: 'maintenance', label: 'Mantenimiento',      icon: '🔧' },
-  { value: 'insurance',   label: 'Seguros',            icon: '🛡️' },
-  { value: 'other',       label: 'Otro',               icon: '📌' },
+const KINDS: { value: VendorKind; label: string; icon: string; description: string; group: 'utilities' | 'business' }[] = [
+  { value: 'utility',          label: 'Servicio público',     icon: '💡', description: 'Luz, agua, gas, internet — gastos de operación de cada propiedad.', group: 'utilities' },
+  { value: 'business_service', label: 'Plataforma / SaaS',    icon: '🧰', description: 'Suscripciones de plataformas de administración (Hospitable, Hostfully, esta app), marketing, hosting.', group: 'business' },
+  { value: 'admin',            label: 'Administración',       icon: '🏢', description: 'Contador, asesor legal, persona que administra la operación.', group: 'business' },
+  { value: 'tax',              label: 'Predial / Impuestos',  icon: '🧾', description: 'Predial, impuestos del rubro, retenciones, cámara de comercio.', group: 'business' },
+  { value: 'maintenance',      label: 'Mantenimiento',        icon: '🔧', description: 'Plomero, electricista, carpintería, jardinería.', group: 'business' },
+  { value: 'insurance',        label: 'Seguros',              icon: '🛡️', description: 'Pólizas de la propiedad o del negocio.', group: 'business' },
+  { value: 'other',            label: 'Otro',                 icon: '📌', description: 'Cualquier otro proveedor recurrente.', group: 'business' },
+];
+
+// Tipos visibles al CREAR/EDITAR un proveedor desde esta página.
+// Excluye 'utility' (los servicios públicos van como recurrentes por propiedad)
+// y 'cleaner' (el aseo va por su propio módulo).
+const KINDS_FORM = KINDS.filter(k => k.group === 'business');
+
+// Categorías contables válidas para gastos del negocio. Categorías por reserva
+// (Aseo, Daños, Atenciones) y "Servicios públicos" se excluyen porque NO
+// aplican a este flujo.
+const VENDOR_CATEGORIES: ExpenseCategory[] = [
+  'Administración',
+  'Mantenimiento',
+  'Otros',
 ];
 
 const kindLabel = (k: VendorKind) => KINDS.find(x => x.value === k)?.label ?? (k === 'cleaner' ? 'Aseo (legacy)' : k);
 const kindIcon  = (k: VendorKind) => KINDS.find(x => x.value === k)?.icon  ?? '📌';
+const kindDescription = (k: VendorKind) => KINDS.find(x => x.value === k)?.description ?? '';
 
 const ymLabel = (ym: string): string => {
   const [y, m] = ym.split('-');
@@ -31,8 +50,10 @@ const ymLabel = (ym: string): string => {
 };
 
 const defaultCategoryFor = (k: VendorKind): ExpenseCategory => {
-  if (k === 'utility') return 'Servicios públicos';
+  if (k === 'utility') return 'Servicios públicos'; // legacy display only
   if (k === 'admin') return 'Administración';
+  if (k === 'business_service') return 'Administración';
+  if (k === 'tax') return 'Administración';
   if (k === 'maintenance') return 'Mantenimiento';
   if (k === 'insurance') return 'Administración';
   return 'Otros';
@@ -50,6 +71,7 @@ interface Form {
   category: ExpenseCategory;
   defaultAmount: string;       // string para el input
   dayOfMonth: string;
+  startYearMonth: string;      // 'YYYY-MM' (opcional)
   isVariable: boolean;
   contact: string;
   notes: string;
@@ -58,8 +80,8 @@ interface Form {
 }
 
 const EMPTY: Form = {
-  name: '', kind: 'utility', category: 'Servicios públicos',
-  defaultAmount: '', dayOfMonth: '', isVariable: false,
+  name: '', kind: 'business_service', category: 'Administración',
+  defaultAmount: '', dayOfMonth: '', startYearMonth: '', isVariable: false,
   contact: '', notes: '', active: true, props: [],
 };
 
@@ -156,6 +178,7 @@ export default function VendorsClient(): JSX.Element {
         : defaultCategoryFor(v.kind === 'cleaner' ? 'other' : v.kind),
       defaultAmount: v.default_amount != null ? String(v.default_amount) : '',
       dayOfMonth: v.day_of_month != null ? String(v.day_of_month) : '',
+      startYearMonth: v.start_year_month ?? '',
       isVariable: v.is_variable ?? false,
       contact: v.contact ?? '',
       notes: v.notes ?? '',
@@ -205,6 +228,7 @@ export default function VendorsClient(): JSX.Element {
       category: form.category,
       default_amount: form.defaultAmount.trim() === '' ? null : Number(form.defaultAmount),
       day_of_month: form.dayOfMonth.trim() === '' ? null : Math.max(1, Math.min(31, Number(form.dayOfMonth))),
+      start_year_month: form.startYearMonth.trim() === '' ? null : form.startYearMonth.trim(),
       is_variable: form.isVariable,
       contact: form.contact.trim() || null,
       notes: form.notes.trim() || null,
@@ -232,20 +256,20 @@ export default function VendorsClient(): JSX.Element {
 
   return (
     <div>
-      <header className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-800">Servicios y proveedores</h1>
-          <p className="text-sm text-slate-500">Cada servicio define su monto mensual, las propiedades que cubre y cómo se reparte la factura. El aseo va por su propio módulo.</p>
+      <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-3xl font-bold text-slate-800">Proveedores y gastos del negocio</h1>
+          <p className="text-sm text-slate-500 mt-1">Aquí van los <strong>gastos del rubro</strong>: suscripciones SaaS, persona que administra, contador, predial, impuestos, mantenimiento o seguros. Los <strong>servicios públicos</strong> (luz, agua, gas, internet) se configuran como gasto recurrente dentro de cada propiedad. El aseo va por su propio módulo.</p>
         </div>
         <button
           onClick={openNew}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 shadow-sm"
+          className="shrink-0 inline-flex items-center gap-1.5 whitespace-nowrap px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 shadow-sm"
         >
-          + Nuevo servicio
+          <span className="text-base leading-none">+</span> Nuevo proveedor
         </button>
       </header>
 
-      {/* Filtros */}
+      {/* Filtros — sólo kinds aplicables (excluye legacy 'utility'/'cleaner') */}
       <div className="flex flex-wrap gap-2 mb-6">
         <button
           onClick={() => setFilter('all')}
@@ -255,7 +279,7 @@ export default function VendorsClient(): JSX.Element {
         >
           Todos ({vendors.length})
         </button>
-        {KINDS.map(k => (
+        {KINDS_FORM.map(k => (
           <button
             key={k.value}
             onClick={() => setFilter(k.value)}
@@ -363,6 +387,9 @@ export default function VendorsClient(): JSX.Element {
                             </td>
                           );
                         }
+                        if (v.start_year_month && ym < v.start_year_month) {
+                          return <td key={ym} className="px-2 py-1.5 text-center text-slate-300" title="Anterior a la fecha de inicio del proveedor">·</td>;
+                        }
                         if (props === 0) {
                           return <td key={ym} className="px-2 py-1.5 text-center text-slate-300">—</td>;
                         }
@@ -430,7 +457,7 @@ export default function VendorsClient(): JSX.Element {
                     type="text"
                     value={form.name}
                     onChange={e => setForm({ ...form, name: e.target.value })}
-                    placeholder="Ej: Claro, EPM, Juanita"
+                    placeholder="Ej: Hospitable, Contador Pérez, Predial 2025"
                     className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                 </div>
@@ -445,8 +472,16 @@ export default function VendorsClient(): JSX.Element {
                     }}
                     className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
                   >
-                    {KINDS.map(k => <option key={k.value} value={k.value}>{k.icon} {k.label}</option>)}
+                    {KINDS_FORM.map(k => <option key={k.value} value={k.value}>{k.icon} {k.label}</option>)}
+                    {/* Soporte legacy: si el vendor existente es utility/cleaner, lo dejamos visible al editar para no perder el valor */}
+                    {!KINDS_FORM.some(k => k.value === form.kind) && (
+                      <option value={form.kind}>
+                        {(KINDS.find(k => k.value === form.kind)?.icon ?? '🗂') + ' '}
+                        {KINDS.find(k => k.value === form.kind)?.label ?? form.kind} (legacy)
+                      </option>
+                    )}
                   </select>
+                  <p className="text-[11px] text-slate-500 mt-1 italic">{kindDescription(form.kind)}</p>
                 </div>
 
                 <div>
@@ -456,7 +491,10 @@ export default function VendorsClient(): JSX.Element {
                     onChange={e => setForm({ ...form, category: e.target.value as ExpenseCategory })}
                     className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
                   >
-                    {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    {VENDOR_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    {!VENDOR_CATEGORIES.includes(form.category) && (
+                      <option value={form.category}>{form.category} (legacy)</option>
+                    )}
                   </select>
                   <p className="text-[11px] text-slate-500 mt-1">Con esta categoría se crearán los gastos al pagar la factura.</p>
                 </div>
@@ -464,14 +502,10 @@ export default function VendorsClient(): JSX.Element {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Monto mensual estimado</label>
-                    <input
-                      type="number"
-                      value={form.defaultAmount}
-                      onChange={e => setForm({ ...form, defaultAmount: e.target.value })}
-                      min={0}
-                      step="any"
+                    <MoneyInput
+                      value={parseMoney(form.defaultAmount)}
+                      onChange={(v) => setForm({ ...form, defaultAmount: v == null ? '' : String(v) })}
                       placeholder="0"
-                      className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                     />
                   </div>
                   <div>
@@ -485,6 +519,17 @@ export default function VendorsClient(): JSX.Element {
                       className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Vigente desde (mes)</label>
+                  <input
+                    type="month"
+                    value={form.startYearMonth}
+                    onChange={e => setForm({ ...form, startYearMonth: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">Si lo dejas en blanco se generan periodos pendientes desde hace varios meses. Defínelo para que no aparezcan meses anteriores que no debes pagar.</p>
                 </div>
 
                 <label className="flex items-start gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-100">
@@ -561,14 +606,12 @@ export default function VendorsClient(): JSX.Element {
                               <div className="grid grid-cols-2 gap-2 mt-2 ml-6">
                                 <div>
                                   <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Monto fijo</label>
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    step="any"
-                                    value={sel.fixedAmount ?? ''}
-                                    onChange={e => setPropFixed(p.id, e.target.value)}
+                                  <MoneyInput
+                                    value={sel.fixedAmount ?? null}
+                                    onChange={(v) => setPropFixed(p.id, v == null ? '' : String(v))}
                                     placeholder="—"
-                                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded focus:ring-1 focus:ring-blue-400 outline-none text-right"
+                                    prefix={null}
+                                    inputClassName="text-xs text-right"
                                   />
                                 </div>
                                 <div>

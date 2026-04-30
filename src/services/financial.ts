@@ -328,11 +328,14 @@ const expandRecurringExpenses = (
 export const computeFinancials = async (
   period: Period,
   isAuthenticated = false,
-  propertyId?: string,
+  propertyIdOrIds?: string | string[],
 ): Promise<{ kpis: FinancialKPIs; monthlyPnL: MonthlyPnL[]; exportMonthly: MonthlyPnL[] }> => {
+  const propertyIds: string[] | undefined = Array.isArray(propertyIdOrIds)
+    ? (propertyIdOrIds.length > 0 ? propertyIdOrIds : undefined)
+    : (propertyIdOrIds ? [propertyIdOrIds] : undefined);
   let bookings: BookingData[] = [];
   let isDemo = false;
-  const bookingFilters = propertyId ? { propertyId } : undefined;
+  const bookingFilters = propertyIds ? { propertyIds } : undefined;
 
   // Channel fees → tratados como gasto sintético para que impacten netProfit
   const channelFeeExpenses: Expense[] = [];
@@ -384,7 +387,7 @@ export const computeFinancials = async (
 
   // Load expenses (filtered by property if set).
   // Disable synthetic injection here; computeFinancials does its own injection.
-  const expenseRes = await listExpenses(propertyId, {
+  const expenseRes = await listExpenses(propertyIds, {
     includeRecurring: false,
     includeChannelFees: false,
   });
@@ -402,8 +405,8 @@ export const computeFinancials = async (
   if (isAuthenticated) {
     const recRes = await listAllRecurringExpensesForOwner();
     if (!recRes.error && recRes.data && recRes.data.length > 0) {
-      const filtered = propertyId
-        ? recRes.data.filter(r => r.property_id === propertyId)
+      const filtered = propertyIds
+        ? recRes.data.filter(r => propertyIds.includes(r.property_id))
         : recRes.data;
 
       // Expansion window: from earliest data point (or 24 months ago) to today.

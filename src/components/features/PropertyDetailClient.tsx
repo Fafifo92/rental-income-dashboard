@@ -11,6 +11,7 @@ import type {
 import { listVendors, type Vendor } from '@/services/vendors';
 import { listAllVendorProperties } from '@/services/vendorProperties';
 import { formatCurrency } from '@/lib/utils';
+import MoneyInput from '@/components/MoneyInput';
 
 interface Props { propertyId: string; }
 
@@ -62,6 +63,11 @@ export default function PropertyDetailClient({ propertyId }: Props) {
         <a href="/properties" className="text-sm text-slate-500 hover:text-blue-600">← Propiedades</a>
         <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight mt-1">{property.name}</h2>
         {property.address && <p className="text-slate-500 mt-0.5">{property.address}</p>}
+        {property.rnt && (
+          <p className="text-xs text-slate-400 mt-1">
+            <span className="font-semibold text-slate-500">RNT:</span> {property.rnt}
+          </p>
+        )}
       </motion.div>
 
       {/* Tabs */}
@@ -97,10 +103,11 @@ function DetailsTab({ property, onSaved }: { property: PropertyRow; onSaved: () 
   const [form, setForm] = useState({
     name: property.name,
     address: property.address ?? '',
+    rnt: property.rnt ?? '',
     estrato: property.estrato ?? '',
     bedrooms: property.bedrooms ?? '',
     max_guests: property.max_guests ?? '',
-    default_cleaning_fee: property.default_cleaning_fee ?? '',
+    default_cleaning_fee: (property.default_cleaning_fee ?? null) as number | null,
     notes: property.notes ?? '',
   });
   const [saving, setSaving] = useState(false);
@@ -115,10 +122,11 @@ function DetailsTab({ property, onSaved }: { property: PropertyRow; onSaved: () 
     const res = await updateProperty(property.id, {
       name: form.name.trim(),
       address: form.address.trim() || null,
+      rnt: form.rnt.trim() || null,
       estrato: form.estrato === '' ? null : Number(form.estrato),
       bedrooms: form.bedrooms === '' ? null : Number(form.bedrooms),
       max_guests: form.max_guests === '' ? null : Number(form.max_guests),
-      default_cleaning_fee: form.default_cleaning_fee === '' ? null : Number(form.default_cleaning_fee),
+      default_cleaning_fee: form.default_cleaning_fee,
       notes: form.notes.trim() || null,
     });
     setSaving(false);
@@ -155,6 +163,22 @@ function DetailsTab({ property, onSaved }: { property: PropertyRow; onSaved: () 
         />
       </div>
 
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1.5">
+          RNT <span className="text-slate-400 font-normal">(Registro Nacional de Turismo)</span>
+        </label>
+        <input
+          type="text"
+          value={form.rnt}
+          onChange={e => setForm({ ...form, rnt: e.target.value })}
+          placeholder="Ej: 123456"
+          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+        />
+        <p className="text-xs text-slate-500 mt-1">
+          Identificador legal de la propiedad turística en Colombia.
+        </p>
+      </div>
+
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1.5">Estrato</label>
@@ -189,12 +213,10 @@ function DetailsTab({ property, onSaved }: { property: PropertyRow; onSaved: () 
         <label className="block text-sm font-medium text-slate-700 mb-1.5">
           Tarifa de aseo por defecto (COP)
         </label>
-        <input
-          type="number" min={0} step={1000}
+        <MoneyInput
           value={form.default_cleaning_fee}
-          onChange={e => setForm({ ...form, default_cleaning_fee: e.target.value })}
-          placeholder="Ej: 50000"
-          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+          onChange={v => setForm({ ...form, default_cleaning_fee: v })}
+          placeholder="Ej: 50.000"
         />
         <p className="text-xs text-slate-500 mt-1">
           Se usa como valor por defecto al asignar aseo a una reserva de esta propiedad. Se puede editar por reserva.

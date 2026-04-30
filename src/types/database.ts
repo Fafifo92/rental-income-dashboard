@@ -92,6 +92,36 @@ export type Database = {
         Update: Partial<Omit<VendorPropertyRow, 'id' | 'created_at'>>;
         Relationships: [];
       };
+      cleaner_groups: {
+        Row: CleanerGroupRow;
+        Insert: Omit<CleanerGroupRow, 'id' | 'created_at'>;
+        Update: Partial<Omit<CleanerGroupRow, 'id' | 'created_at'>>;
+        Relationships: [];
+      };
+      cleaner_group_members: {
+        Row: CleanerGroupMemberRow;
+        Insert: CleanerGroupMemberRow;
+        Update: Partial<CleanerGroupMemberRow>;
+        Relationships: [];
+      };
+      inventory_categories: {
+        Row: InventoryCategoryRow;
+        Insert: Omit<InventoryCategoryRow, 'id' | 'created_at'>;
+        Update: Partial<Omit<InventoryCategoryRow, 'id' | 'created_at'>>;
+        Relationships: [];
+      };
+      inventory_items: {
+        Row: InventoryItemRow;
+        Insert: Omit<InventoryItemRow, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<InventoryItemRow, 'id' | 'created_at' | 'updated_at'>>;
+        Relationships: [];
+      };
+      inventory_movements: {
+        Row: InventoryMovementRow;
+        Insert: Omit<InventoryMovementRow, 'id' | 'created_at'>;
+        Update: Partial<Omit<InventoryMovementRow, 'id' | 'created_at'>>;
+        Relationships: [];
+      };
       shared_bills: {
         Row: SharedBillRow;
         Insert: Omit<SharedBillRow, 'id' | 'created_at'>;
@@ -134,6 +164,8 @@ export type PropertyRow = {
   notes: string | null;
   created_at: string;
   default_cleaning_fee: number | null;
+  /** Registro Nacional de Turismo (Colombia). */
+  rnt: string | null;
 };
 
 export type PropertyRecurringExpenseRow = {
@@ -165,9 +197,11 @@ export type BankAccountRow = {
   is_active: boolean;
   notes: string | null;
   created_at: string;
+  is_credit: boolean;
+  credit_limit: number | null;
 };
 
-export type BookingAdjustmentKind = 'extra_income' | 'discount' | 'damage_charge';
+export type BookingAdjustmentKind = 'extra_income' | 'discount' | 'damage_charge' | 'platform_refund' | 'extra_guest_fee';
 
 export type BookingAdjustmentRow = {
   id: string;
@@ -177,6 +211,7 @@ export type BookingAdjustmentRow = {
   description: string | null;
   date: string;
   created_at: string;
+  bank_account_id: string | null;
 };
 
 export type ListingRow = {
@@ -238,9 +273,10 @@ export type ExpenseRow = {
   vendor_id: string | null;
   shared_bill_id: string | null;
   subcategory: string | null;
+  expense_group_id: string | null;
 };
 
-export type VendorKind = 'utility' | 'admin' | 'maintenance' | 'cleaner' | 'insurance' | 'other';
+export type VendorKind = 'utility' | 'admin' | 'business_service' | 'maintenance' | 'cleaner' | 'insurance' | 'tax' | 'other';
 
 // ── Taxonomía Fase 16 (4+3) ──
 export type ExpenseSection = 'property' | 'booking';
@@ -314,6 +350,7 @@ export type VendorRow = {
   default_amount: number | null;
   day_of_month: number | null;
   is_variable: boolean;
+  start_year_month: string | null;
 };
 
 export type VendorPropertyRow = {
@@ -382,4 +419,72 @@ export type UserNotificationSettingsRow = {
   notify_damage: boolean;
   notify_cleaner: boolean;
   updated_at: string;
+};
+
+export type CleanerGroupRow = {
+  id: string;
+  owner_id: string;
+  name: string;
+  color: string | null;
+  created_at: string;
+};
+
+export type CleanerGroupMemberRow = {
+  group_id: string;
+  cleaner_id: string;
+};
+
+export type InventoryItemStatus = 'good' | 'needs_maintenance' | 'damaged' | 'lost' | 'depleted';
+
+export type InventoryMovementType =
+  | 'added'
+  | 'used'
+  | 'damaged'
+  | 'repaired'
+  | 'restocked'
+  | 'discarded'
+  | 'lost'
+  | 'status_change';
+
+export type InventoryCategoryRow = {
+  id: string;
+  owner_id: string;
+  name: string;
+  icon: string | null;
+  created_at: string;
+};
+
+export type InventoryItemRow = {
+  id: string;
+  owner_id: string;
+  property_id: string;
+  category_id: string | null;
+  name: string;
+  description: string | null;
+  location: string | null;
+  status: InventoryItemStatus;
+  quantity: number;
+  unit: string | null;
+  min_stock: number | null;
+  is_consumable: boolean;
+  purchase_date: string | null;
+  purchase_price: number | null;
+  expected_lifetime_months: number | null;
+  photo_url: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type InventoryMovementRow = {
+  id: string;
+  owner_id: string;
+  item_id: string;
+  type: InventoryMovementType;
+  quantity_delta: number;
+  new_status: InventoryItemStatus | null;
+  notes: string | null;
+  related_booking_id: string | null;
+  related_expense_id: string | null;
+  created_at: string;
 };

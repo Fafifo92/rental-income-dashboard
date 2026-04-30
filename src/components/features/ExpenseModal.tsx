@@ -5,6 +5,8 @@ import type { PropertyRow, BankAccountRow, BookingRow, ExpenseSubcategory } from
 import { EXPENSE_SUBCATEGORY_META, SUBCATEGORY_TO_CATEGORY } from '@/types/database';
 import { listBookings } from '@/services/bookings';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
+import MoneyInput from '@/components/MoneyInput';
+import { addMoney, splitMoney } from '@/lib/money';
 
 type FormData = Omit<Expense, 'id' | 'owner_id'>;
 
@@ -13,6 +15,8 @@ interface Props {
   bankAccounts?: BankAccountRow[];
   onClose: () => void;
   onSave: (expense: FormData) => void;
+  /** Si se provee, habilita el modo "gasto compartido entre varias propiedades". */
+  onSaveShared?: (rows: FormData[]) => void;
   error?: string;
   /** Si se provee, el modal entra en modo edición. */
   initial?: FormData | null;
@@ -65,7 +69,7 @@ const composeDescription = (subtype: string, rest: string): string | null => {
   return t || null;
 };
 
-export default function ExpenseModal({ properties = [], bankAccounts = [], onClose, onSave, error, initial, prefill, onDiscardLinked }: Props) {
+export default function ExpenseModal({ properties = [], bankAccounts = [], onClose, onSave, onSaveShared, error, initial, prefill, onDiscardLinked }: Props) {
   const initialForm = initial ?? { ...INITIAL, ...(prefill ?? {}) };
   const initialParsed = parseDescription(initialForm.description ?? null);
   const [form, setForm] = useState<FormData>({ ...initialForm, description: initialParsed.rest || null });
@@ -75,6 +79,14 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const isEdit = !!initial;
   const isLinkedToDamage = isEdit && !!initial?.adjustment_id;
+
+  // ── Estado modo compartido (Bloque 6) ──────────────────────────────────
+  // Solo disponible en CREAR (no edición) y cuando hay >=2 propiedades en el catálogo.
+  const sharedAllowed = !isEdit && properties.length >= 2 && !!onSaveShared;
+  const [sharedMode, setSharedMode] = useState(false);
+  const [sharedPropIds, setSharedPropIds] = useState<string[]>([]);
+  const [sharedSplitMode, setSharedSplitMode] = useState<'equal' | 'manual'>('equal');
+  const [sharedManual, setSharedManual] = useState<Record<string, number | null>>({});
 
   const currentSection: 'property' | 'booking' | null =
     form.subcategory ? EXPENSE_SUBCATEGORY_META[form.subcategory as ExpenseSubcategory].section : null;
@@ -105,19 +117,45 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
     if (!form.date) e.date = 'La fecha es requerida';
     if (isBookingScope && !form.property_id) e.property_id = 'Selecciona la propiedad de la reserva';
     if (isBookingScope && !form.booking_id) e.booking_id = 'Vincula este gasto a una reserva';
+    if (form.status === 'paid' && !form.bank_account_id) e.bank_account_id = 'Indica de qué cuenta salió el dinero (obligatorio para gastos pagados).';
+    if (sharedMode) {
+      if (sharedPropIds.length < 2) e.property_id = 'Selecciona al menos 2 propiedades para compartir';
+      if (sharedSplitMode === 'manual') {
+        const sum = addMoney(...sharedPropIds.map(id => sharedManual[id] ?? 0));
+        if (Math.abs(sum - (form.amount ?? 0)) > 0.005) {
+          e.amount = `La suma de las partes (${sum}) no coincide con el total (${form.amount ?? 0})`;
+        }
+      }
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
   const handleSubmit = (ev: React.FormEvent) => {
     ev.preventDefault();
-    if (validate()) {
-      const merged: FormData = {
-        ...form,
-        description: composeDescription(subtype, form.description ?? ''),
-      };
-      onSave(merged);
+    if (!validate()) return;
+    const merged: FormData = {
+      ...form,
+      description: composeDescription(subtype, form.description ?? ''),
+    };
+
+    // Modo compartido: emitir N filas
+    if (sharedMode && onSaveShared) {
+      const total = merged.amount ?? 0;
+      const parts: number[] =
+        sharedSplitMode === 'equal'
+          ? splitMoney(total, sharedPropIds.length)
+          : sharedPropIds.map(id => sharedManual[id] ?? 0);
+      const rows: FormData[] = sharedPropIds.map((pid, i) => ({
+        ...merged,
+        property_id: pid,
+        amount: parts[i] ?? 0,
+      }));
+      onSaveShared(rows);
+      return;
     }
+
+    onSave(merged);
   };
 
   return (
@@ -282,8 +320,106 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
               </div>
             )}
 
+            {/* Modo compartido (Bloque 6) — solo en CREAR + propiedad scope */}
+            {sharedAllowed && !isBookingScope && (
+              <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={sharedMode}
+                    onChange={e => {
+                      setSharedMode(e.target.checked);
+                      if (!e.target.checked) {
+                        setSharedPropIds([]);
+                        setSharedManual({});
+                      }
+                    }}
+                    className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="flex-1">
+                    <span className="text-sm font-medium text-slate-700">Compartir entre varias propiedades</span>
+                    <span className="block text-[11px] text-slate-500 mt-0.5">
+                      Útil para servicios públicos (luz, agua, internet) que cubren más de una propiedad. Se creará una entrada por propiedad con la porción correspondiente, todas vinculadas como un mismo gasto.
+                    </span>
+                  </span>
+                </label>
+
+                {sharedMode && (
+                  <div className="mt-3 space-y-2.5">
+                    <div className="text-xs font-semibold text-slate-600">Propiedades involucradas *</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto bg-white border border-slate-200 rounded p-2">
+                      {properties.map(p => {
+                        const checked = sharedPropIds.includes(p.id);
+                        return (
+                          <label key={p.id} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setSharedPropIds(prev =>
+                                  prev.includes(p.id) ? prev.filter(x => x !== p.id) : [...prev, p.id]
+                                );
+                              }}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-xs text-slate-700 truncate">{p.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setSharedSplitMode('equal')}
+                        className={`px-2.5 py-1 rounded border transition ${sharedSplitMode === 'equal' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200'}`}
+                      >
+                        Reparto equitativo
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSharedSplitMode('manual')}
+                        className={`px-2.5 py-1 rounded border transition ${sharedSplitMode === 'manual' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200'}`}
+                      >
+                        Manual por propiedad
+                      </button>
+                    </div>
+
+                    {sharedSplitMode === 'manual' && sharedPropIds.length > 0 && (
+                      <div className="space-y-1.5">
+                        {sharedPropIds.map(id => {
+                          const prop = properties.find(p => p.id === id);
+                          return (
+                            <div key={id} className="flex items-center gap-2">
+                              <span className="flex-1 text-xs text-slate-600 truncate">{prop?.name ?? id}</span>
+                              <div className="w-40">
+                                <MoneyInput
+                                  value={sharedManual[id] ?? null}
+                                  onChange={v => setSharedManual(prev => ({ ...prev, [id]: v }))}
+                                  placeholder="0"
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                        <div className="text-[11px] text-slate-500 text-right">
+                          Suma actual: {addMoney(...sharedPropIds.map(id => sharedManual[id] ?? 0)).toLocaleString('es-CO')} / Total: {(form.amount ?? 0).toLocaleString('es-CO')}
+                        </div>
+                      </div>
+                    )}
+
+                    {sharedSplitMode === 'equal' && sharedPropIds.length > 0 && (form.amount ?? 0) > 0 && (
+                      <div className="text-[11px] text-slate-500">
+                        Cada propiedad asume aprox. {((form.amount ?? 0) / sharedPropIds.length).toLocaleString('es-CO', { maximumFractionDigits: 2 })} (los centavos restantes se ajustan en la primera).
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Propiedad */}
-            {properties.length > 0 && (
+            {properties.length > 0 && !sharedMode && (
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">
                   Propiedad {isBookingScope && <span className="text-rose-600">*</span>}
@@ -303,18 +439,12 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
             {/* Monto */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Monto (COP) *</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-medium">$</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={1000}
-                  value={form.amount || ''}
-                  onChange={e => set('amount', parseFloat(e.target.value) || 0)}
-                  placeholder="150,000"
-                  className={`w-full pl-7 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition ${errors.amount ? 'border-red-400' : 'border-slate-200'}`}
-                />
-              </div>
+              <MoneyInput
+                value={form.amount || null}
+                onChange={(v) => set('amount', v ?? 0)}
+                placeholder="150.000"
+                error={!!errors.amount}
+              />
               {errors.amount && <p className="text-xs text-red-500 mt-1">{errors.amount}</p>}
             </div>
 
@@ -388,12 +518,16 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
             {bankAccounts.length > 0 && (
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                  Pagado desde <span className="text-slate-400 font-normal">(opcional)</span>
+                  Pagado desde {form.status === 'paid'
+                    ? <span className="text-rose-600">*</span>
+                    : <span className="text-slate-400 font-normal">(opcional)</span>}
                 </label>
                 <select
                   value={form.bank_account_id ?? ''}
                   onChange={e => set('bank_account_id', e.target.value || null)}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none transition"
+                  className={`w-full px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none transition ${
+                    form.status === 'paid' && !form.bank_account_id ? 'border-rose-300' : 'border-slate-200'
+                  }`}
                 >
                   <option value="">— Sin asignar —</option>
                   {bankAccounts.map(a => (
@@ -402,6 +536,9 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
                     </option>
                   ))}
                 </select>
+                {form.status === 'paid' && !form.bank_account_id && (
+                  <p className="text-[11px] text-rose-600 mt-1">Obligatorio cuando el gasto está pagado: indica de qué cuenta salió el dinero.</p>
+                )}
               </div>
             )}
 

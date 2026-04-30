@@ -18,6 +18,8 @@ export interface Vendor {
   default_amount: number | null;
   day_of_month: number | null;
   is_variable: boolean;
+  /** Formato 'YYYY-MM'. Si está seteado, no se generarán periodos previos. */
+  start_year_month: string | null;
 }
 
 const toVendor = (row: VendorRow): Vendor => ({
@@ -33,6 +35,7 @@ const toVendor = (row: VendorRow): Vendor => ({
   default_amount: row.default_amount,
   day_of_month: row.day_of_month,
   is_variable: row.is_variable ?? false,
+  start_year_month: row.start_year_month ?? null,
 });
 
 export const listVendors = async (

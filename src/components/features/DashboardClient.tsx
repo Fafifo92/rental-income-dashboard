@@ -7,13 +7,15 @@ import PeriodSelector from './PeriodSelector';
 import CSVUploader from './CSVUploader';
 import ExportMenu from './ExportMenu';
 import AlertsPanel from './AlertsPanel';
-import PropertySelector from './PropertySelector';
+import PropertyMultiSelect from '@/components/PropertyMultiSelect';
 import { computeFinancials } from '@/services/financial';
 import type { Period, FinancialKPIs, MonthlyPnL } from '@/services/financial';
 import type { ParsedBooking } from '@/services/etl';
 import { useAuth } from '@/lib/useAuth';
 import { usePropertyFilter } from '@/lib/usePropertyFilter';
 import { formatCurrency } from '@/lib/utils';
+import { listInventoryItems, getDamageReconciliations, computeInventoryKpis, STATUS_LABEL, type DamageReconciliation } from '@/services/inventory';
+import type { InventoryItemRow } from '@/types/database';
 
 // ─── Break-even Alert ─────────────────────────────────────────────────────────
 
@@ -66,7 +68,7 @@ function PLPanel({ kpis }: { kpis: FinancialKPIs }) {
 
 export default function DashboardClient() {
   const authStatus = useAuth();
-  const { properties, propertyId, setPropertyId } = usePropertyFilter();
+  const { properties, propertyIds, setPropertyIds } = usePropertyFilter();
   const [period, setPeriod]               = useState<Period>('last-3-months');
   const [kpis, setKpis]                   = useState<FinancialKPIs | null>(null);
   const [monthlyPnL, setMonthlyPnL]       = useState<MonthlyPnL[]>([]);
@@ -79,7 +81,7 @@ export default function DashboardClient() {
     if (authStatus === 'checking') return;
     let cancelled = false;
     setLoading(true);
-    computeFinancials(period, authStatus === 'authed', propertyId).then(result => {
+    computeFinancials(period, authStatus === 'authed', propertyIds).then(result => {
       if (cancelled) return;
       setKpis(result.kpis);
       setMonthlyPnL(result.monthlyPnL);
@@ -87,7 +89,7 @@ export default function DashboardClient() {
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [period, authStatus, propertyId]);
+  }, [period, authStatus, propertyIds]);
 
   if (authStatus === 'checking') {
     return (
@@ -120,7 +122,7 @@ export default function DashboardClient() {
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <PropertySelector properties={properties} value={propertyId} onChange={setPropertyId} />
+            <PropertyMultiSelect properties={properties} value={propertyIds} onChange={setPropertyIds} />
             <PeriodSelector value={period} onChange={setPeriod} />
             {!loading && kpis && (
               <ExportMenu kpis={kpis} monthly={exportMonthly} period={period} />
@@ -135,6 +137,9 @@ export default function DashboardClient() {
 
         {/* Alerts */}
         {!loading && kpis && <AlertsPanel kpis={kpis} monthly={monthlyPnL} />}
+
+        {/* Bloque 16 — Items con problemas */}
+        {!loading && <InventoryProblemsWidget />}
 
         {/* Empty state for new authenticated users */}
         {!loading && authStatus === 'authed' && kpis && kpis.totalBookings === 0 && (
@@ -320,5 +325,111 @@ export default function DashboardClient() {
         )}
       </AnimatePresence>
     </>
+  );
+}
+
+// ---------- Bloque 16 — Widget "Items con problemas" ----------
+function InventoryProblemsWidget(): JSX.Element | null {
+  const [items, setItems] = useState<InventoryItemRow[]>([]);
+  const [recon, setRecon] = useState<DamageReconciliation[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    Promise.all([listInventoryItems({}), getDamageReconciliations()]).then(([i, r]) => {
+      if (!mounted) return;
+      setItems(i.data ?? []);
+      setRecon(r.data ?? []);
+      setLoading(false);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  if (loading) return null;
+
+  const kpis = computeInventoryKpis(items);
+  const openRecon = recon.filter(r =>
+    r.status === 'pending_recovery' || r.status === 'overpaid' || r.status === 'no_charge',
+  );
+  const totalProblems = kpis.damaged + kpis.needsMaintenance + kpis.lowStock + kpis.depleted;
+
+  if (totalProblems === 0 && openRecon.length === 0) return null;
+
+  const problemItems = items
+    .filter(it => it.status === 'damaged' || it.status === 'needs_maintenance' || it.status === 'depleted')
+    .slice(0, 6);
+  const totalUnreconciled = openRecon
+    .filter(r => r.status === 'pending_recovery')
+    .reduce((s, r) => s + Math.abs(r.diff), 0);
+
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6"
+    >
+      <header className="flex items-start justify-between gap-3 mb-4">
+        <div>
+          <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">📦 Items con problemas</h2>
+          <p className="text-xs text-slate-500">Inventario que requiere atención y daños sin reconciliar.</p>
+        </div>
+        <a href="/inventory" className="text-xs text-blue-600 hover:underline whitespace-nowrap">Ver inventario →</a>
+      </header>
+
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
+        <ProblemKPI label="Dañados" value={kpis.damaged} tone="red" />
+        <ProblemKPI label="Mantenimiento" value={kpis.needsMaintenance} tone="amber" />
+        <ProblemKPI label="Stock bajo" value={kpis.lowStock} tone="orange" />
+        <ProblemKPI label="Agotados" value={kpis.depleted} tone="rose" />
+        <ProblemKPI label="Sin reconciliar" value={openRecon.length} tone="slate" />
+      </div>
+
+      {totalUnreconciled > 0 && (
+        <div className="bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 mb-3 text-xs text-rose-800">
+          ⚠ Falta recuperar <strong>{formatCurrency(totalUnreconciled)}</strong> en daños cobrados de menos al huésped/plataforma.
+        </div>
+      )}
+
+      {problemItems.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-[10px] uppercase text-slate-500 bg-slate-50">
+              <tr>
+                <th className="text-left py-1.5 px-2">Item</th>
+                <th className="text-left py-1.5 px-2">Categoría</th>
+                <th className="text-right py-1.5 px-2">Cantidad</th>
+                <th className="text-left py-1.5 px-2">Estado</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {problemItems.map(it => (
+                <tr key={it.id}>
+                  <td className="py-1.5 px-2 font-medium text-slate-800">{it.name}</td>
+                  <td className="py-1.5 px-2 text-slate-500">{it.location ?? '—'}</td>
+                  <td className="py-1.5 px-2 text-right tabular-nums">{Number(it.quantity)}</td>
+                  <td className="py-1.5 px-2 text-slate-600">{STATUS_LABEL[it.status]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </motion.section>
+  );
+}
+
+function ProblemKPI({ label, value, tone }: { label: string; value: number; tone: 'red' | 'amber' | 'orange' | 'rose' | 'slate' }) {
+  const toneClass = {
+    red:    'bg-red-50 text-red-700 border-red-100',
+    amber:  'bg-amber-50 text-amber-700 border-amber-100',
+    orange: 'bg-orange-50 text-orange-700 border-orange-100',
+    rose:   'bg-rose-50 text-rose-700 border-rose-100',
+    slate:  'bg-slate-50 text-slate-700 border-slate-200',
+  }[tone];
+  return (
+    <div className={`border rounded-lg px-3 py-2 ${toneClass}`}>
+      <div className="text-[10px] uppercase font-semibold opacity-80">{label}</div>
+      <div className="text-xl font-bold tabular-nums">{value}</div>
+    </div>
   );
 }

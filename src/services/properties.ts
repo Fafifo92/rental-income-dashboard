@@ -25,6 +25,7 @@ export const createProperty = async (
   name: string,
   address?: string,
   baseCurrency = 'COP',
+  rnt?: string | null,
 ): Promise<ServiceResult<PropertyRow>> => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado — inicia sesión primero' };
@@ -41,6 +42,7 @@ export const createProperty = async (
       max_guests: null,
       notes: null,
       default_cleaning_fee: null,
+      rnt: rnt ?? null,
     })
     .select()
     .single();

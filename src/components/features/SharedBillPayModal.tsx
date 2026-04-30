@@ -7,6 +7,8 @@ import { listProperties } from '@/services/properties';
 import { createSharedBill } from '@/services/sharedBills';
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
+import { addMoney } from '@/lib/money';
+import MoneyInput from '@/components/MoneyInput';
 
 const ymLabel = (ym: string): string => {
   const [y, m] = ym.split('-');
@@ -29,8 +31,8 @@ export default function SharedBillPayModal({
   const isVariable = vendor.is_variable === true;
   const [vps, setVps] = useState<VendorPropertyRow[]>([]);
   const [properties, setProperties] = useState<PropertyRow[]>([]);
-  const [amount, setAmount] = useState(String(estimatedAmount || ''));
-  const [perProp, setPerProp] = useState<Record<string, string>>({});
+  const [amount, setAmount] = useState<number | null>(estimatedAmount || null);
+  const [perProp, setPerProp] = useState<Record<string, number | null>>({});
   const [date, setDate] = useState(() => {
     const [y, m] = yearMonth.split('-').map(Number);
     const today = new Date();
@@ -64,11 +66,11 @@ export default function SharedBillPayModal({
 
   const propName = (id: string) => properties.find(p => p.id === id)?.name ?? id.slice(0, 8);
 
-  const parsedAmount = Number(amount) || 0;
+  const parsedAmount = amount ?? 0;
 
-  // Suma de los montos por propiedad (modo variable)
+  // Suma de los montos por propiedad (modo variable) — aritmética en centavos.
   const perPropSum = useMemo(() => {
-    return Object.values(perProp).reduce((s, v) => s + (Number(v) || 0), 0);
+    return addMoney(...Object.values(perProp));
   }, [perProp]);
 
   // Si modo variable: total = suma; si fijo: usa amount manual y previo
@@ -78,8 +80,8 @@ export default function SharedBillPayModal({
     [parsedAmount, vps, isVariable],
   );
 
-  const setPropAmount = (propId: string, raw: string) => {
-    setPerProp(p => ({ ...p, [propId]: raw }));
+  const setPropAmount = (propId: string, v: number | null) => {
+    setPerProp(p => ({ ...p, [propId]: v }));
   };
 
   const handleSave = async () => {
@@ -92,19 +94,21 @@ export default function SharedBillPayModal({
     if (isVariable) {
       const map = new Map<string, number>();
       for (const vp of vps) {
-        const v = Number(perProp[vp.property_id]);
-        if (!Number.isFinite(v) || v < 0) {
+        const v = perProp[vp.property_id];
+        if (v == null || !Number.isFinite(v) || v < 0) {
           setErr(`Falta el monto de "${propName(vp.property_id)}".`);
           return;
         }
         map.set(vp.property_id, v);
       }
-      total = [...map.values()].reduce((s, v) => s + v, 0);
+      total = addMoney(...map.values());
       if (total <= 0) { setErr('La suma de montos por propiedad debe ser > 0.'); return; }
       perPropertyAmounts = map;
     } else {
       if (parsedAmount <= 0) { setErr('El monto total debe ser mayor a 0.'); return; }
     }
+
+    if (!bankId) { setErr('Indica de qué cuenta bancaria salió el dinero (obligatorio para pagos).'); return; }
 
     setSaving(true);
     const res = await createSharedBill({
@@ -112,7 +116,7 @@ export default function SharedBillPayModal({
       yearMonth,
       totalAmount: total,
       paidDate: date,
-      bankAccountId: bankId || null,
+      bankAccountId: bankId,
       category,
       notes: notes.trim() || null,
       perPropertyAmounts,
@@ -148,14 +152,7 @@ export default function SharedBillPayModal({
           {!isVariable && (
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Monto total de la factura</label>
-              <input
-                type="number"
-                value={amount}
-                onChange={e => setAmount(e.target.value)}
-                min={0}
-                step="any"
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              />
+              <MoneyInput value={amount} onChange={setAmount} />
               {estimatedAmount > 0 && (
                 <p className="text-[11px] text-slate-500 mt-1">Estimado: {formatCurrency(estimatedAmount)}</p>
               )}
@@ -185,15 +182,19 @@ export default function SharedBillPayModal({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Cuenta bancaria (opcional)</label>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Cuenta bancaria <span className="text-rose-600">*</span></label>
             <select
+              required
               value={bankId}
               onChange={e => setBankId(e.target.value)}
-              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+              className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white ${
+                !bankId ? 'border-rose-300' : ''
+              }`}
             >
-              <option value="">— Sin especificar —</option>
+              <option value="">— Selecciona la cuenta —</option>
               {banks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
+            <p className="text-[11px] text-slate-500 mt-1">Obligatorio: necesitamos saber de qué cuenta sale el dinero.</p>
           </div>
 
           <div>
@@ -217,14 +218,12 @@ export default function SharedBillPayModal({
                 {vps.map(vp => (
                   <div key={vp.property_id} className="flex items-center gap-2 px-3 py-1.5">
                     <span className="text-sm text-slate-700 flex-1 truncate">{propName(vp.property_id)}</span>
-                    <input
-                      type="number"
-                      value={perProp[vp.property_id] ?? ''}
-                      onChange={e => setPropAmount(vp.property_id, e.target.value)}
-                      min={0}
-                      step="any"
+                    <MoneyInput
+                      value={perProp[vp.property_id] ?? null}
+                      onChange={(v) => setPropAmount(vp.property_id, v)}
                       placeholder="0"
-                      className="w-32 px-2 py-1 text-sm border border-slate-300 rounded-md text-right focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="w-36"
+                      inputClassName="text-right"
                     />
                   </div>
                 ))}

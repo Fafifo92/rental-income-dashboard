@@ -37,7 +37,7 @@ export const deleteBookingAdjustment = async (
   return { data: true, error: null };
 };
 
-/** Devuelve el impacto neto: extra_income + damage_charge − discount */
+/** Devuelve el impacto neto: todos suman (entran como ingreso), excepto `discount` que resta. */
 export const netAdjustment = (adj: BookingAdjustmentRow[]): number =>
   adj.reduce((s, a) => {
     const v = Number(a.amount) || 0;
