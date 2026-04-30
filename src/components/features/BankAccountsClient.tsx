@@ -54,6 +54,7 @@ export default function BankAccountsClient() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [historyAccount, setHistoryAccount] = useState<BankAccountRow | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -151,8 +152,6 @@ export default function BankAccountsClient() {
     if (res.error) { alert(res.error); return; }
     await load();
   };
-
-  const [historyAccount, setHistoryAccount] = useState<BankAccountRow | null>(null);
 
   const totalBalance = balances
     .filter(b => b.account.is_active)
