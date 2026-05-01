@@ -7,7 +7,7 @@ import PeriodSelector from './PeriodSelector';
 import CSVUploader from './CSVUploader';
 import ExportMenu from './ExportMenu';
 import AlertsPanel from './AlertsPanel';
-import PropertyMultiSelect from '@/components/PropertyMultiSelect';
+import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
 import { computeFinancials } from '@/services/financial';
 import type { Period, FinancialKPIs, MonthlyPnL } from '@/services/financial';
 import type { ParsedBooking } from '@/services/etl';
@@ -68,7 +68,7 @@ function PLPanel({ kpis }: { kpis: FinancialKPIs }) {
 
 export default function DashboardClient() {
   const authStatus = useAuth();
-  const { properties, propertyIds, setPropertyIds } = usePropertyFilter();
+  const { properties, propertyIds, setPropertyIds, groups, tags, tagAssigns } = usePropertyFilter();
   const [period, setPeriod]               = useState<Period>('last-3-months');
   const [kpis, setKpis]                   = useState<FinancialKPIs | null>(null);
   const [monthlyPnL, setMonthlyPnL]       = useState<MonthlyPnL[]>([]);
@@ -122,7 +122,7 @@ export default function DashboardClient() {
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <PropertyMultiSelect properties={properties} value={propertyIds} onChange={setPropertyIds} />
+            <PropertyMultiSelect properties={properties} value={propertyIds} onChange={setPropertyIds} groups={groups} tags={tags} tagAssigns={tagAssigns} />
             <PeriodSelector value={period} onChange={setPeriod} />
             {!loading && kpis && (
               <ExportMenu kpis={kpis} monthly={exportMonthly} period={period} />

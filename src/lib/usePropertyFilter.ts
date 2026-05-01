@@ -1,92 +1,79 @@
 import { useState, useEffect } from 'react';
 import { listProperties } from '@/services/properties';
-import type { PropertyRow } from '@/types/database';
-
-const STORAGE_KEY = 'str_property_filter';            // legacy single-id key
-const STORAGE_KEY_MULTI = 'str_property_filter_multi'; // new array key (JSON)
+import { listPropertyGroups } from '@/services/propertyGroups';
+import { listPropertyTags, listAllTagAssignments } from '@/services/propertyTags';
+import type {
+  PropertyRow,
+  PropertyGroupRow,
+  PropertyTagRow,
+  PropertyTagAssignmentRow,
+} from '@/types/database';
 
 /**
- * Hook de filtro multi-propiedad (Bloque 7).
+ * Hook de filtro multi-propiedad.
  *
  * - `propertyIds`: array de IDs seleccionadas. Vacío = sin filtro (todas).
- * - `setPropertyIds`: setter persistido en localStorage.
+ *   Se resetea a [] en cada recarga de página (no persiste).
+ * - `setPropertyIds`: setter en memoria.
  *
  * Back-compat:
  * - `propertyId`: primer ID si solo hay uno seleccionado, `undefined` en otro caso.
- *   Úsalo solo en flujos donde 1 propiedad es la norma; para listados/filtros prefiere
- *   `propertyIds` para no perder información cuando hay 2+ propiedades.
+ *
+ * Extras (organización):
+ * - `groups`, `tags`, `tagAssigns`: cargados en paralelo. Permiten al filtro
+ *   buscar/seleccionar propiedades por grupo o etiqueta.
  */
 export function usePropertyFilter() {
   const [properties, setProperties] = useState<PropertyRow[]>([]);
+  const [groups, setGroups] = useState<PropertyGroupRow[]>([]);
+  const [tags, setTags] = useState<PropertyTagRow[]>([]);
+  const [tagAssigns, setTagAssigns] = useState<PropertyTagAssignmentRow[]>([]);
 
-  const [propertyIds, setPropertyIdsState] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return [];
-    try {
-      const multi = localStorage.getItem(STORAGE_KEY_MULTI);
-      if (multi) {
-        const parsed = JSON.parse(multi);
-        if (Array.isArray(parsed)) return parsed.filter((x): x is string => typeof x === 'string');
-      }
-    } catch { /* fallthrough */ }
-    const legacy = localStorage.getItem(STORAGE_KEY);
-    return legacy ? [legacy] : [];
-  });
-
-  const persist = (ids: string[]) => {
-    if (typeof window === 'undefined') return;
-    if (ids.length === 0) {
-      localStorage.removeItem(STORAGE_KEY_MULTI);
-      localStorage.removeItem(STORAGE_KEY);
-    } else {
-      localStorage.setItem(STORAGE_KEY_MULTI, JSON.stringify(ids));
-      localStorage.setItem(STORAGE_KEY, ids[0]);
-    }
-  };
+  const [propertyIds, setPropertyIdsState] = useState<string[]>([]);
 
   useEffect(() => {
-    listProperties().then(res => {
-      if (!res.error && res.data) {
-        setProperties(res.data);
+    Promise.all([
+      listProperties(),
+      listPropertyGroups(),
+      listPropertyTags(),
+      listAllTagAssignments(),
+    ]).then(([propRes, gRes, tRes, aRes]) => {
+      if (gRes.data) setGroups(gRes.data);
+      if (tRes.data) setTags(tRes.data);
+      if (aRes.data) setTagAssigns(aRes.data);
 
-        // 1) Si la URL trae ?property=<id> (o ?property=a,b), aplica ese filtro
-        //    sobrescribiendo cualquier valor previo. Útil para deep-links desde
-        //    la página de Propiedades ("Ver reservas/gastos de esta propiedad").
-        let urlIds: string[] | null = null;
-        if (typeof window !== 'undefined') {
-          const params = new URLSearchParams(window.location.search);
-          const raw = params.get('property') ?? params.get('properties');
-          if (raw) {
-            urlIds = raw.split(',').map(s => s.trim()).filter(Boolean);
-          }
-        }
+      if (propRes.error || !propRes.data) return;
+      setProperties(propRes.data);
 
-        if (urlIds && urlIds.length > 0) {
-          const valid = urlIds.filter(id => res.data!.some(p => p.id === id));
+      // Si la URL trae ?property=<id> (o ?property=a,b), aplica ese filtro.
+      // Útil para deep-links desde la página de Propiedades.
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const raw = params.get('property') ?? params.get('properties');
+        if (raw) {
+          const urlIds = raw.split(',').map(s => s.trim()).filter(Boolean);
+          const valid = urlIds.filter(id => propRes.data!.some(p => p.id === id));
           if (valid.length > 0) {
             setPropertyIdsState(valid);
-            persist(valid);
-            return;
           }
         }
-
-        // 2) Sin param en URL: limpia IDs persistidas que ya no existan
-        setPropertyIdsState(prev => {
-          const valid = prev.filter(id => res.data!.some(p => p.id === id));
-          if (valid.length !== prev.length) persist(valid);
-          return valid;
-        });
       }
     });
   }, []);
 
-  const setPropertyIds = (ids: string[]) => {
-    setPropertyIdsState(ids);
-    persist(ids);
-  };
+  const setPropertyIds = (ids: string[]) => setPropertyIdsState(ids);
 
   const propertyId = propertyIds.length === 1 ? propertyIds[0] : undefined;
   const setPropertyId = (id: string | undefined) => setPropertyIds(id ? [id] : []);
 
-  return { properties, propertyIds, setPropertyIds, propertyId, setPropertyId };
+  return {
+    properties,
+    propertyIds,
+    setPropertyIds,
+    propertyId,
+    setPropertyId,
+    groups,
+    tags,
+    tagAssigns,
+  };
 }
-

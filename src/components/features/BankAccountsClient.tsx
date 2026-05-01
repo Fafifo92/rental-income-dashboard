@@ -23,12 +23,11 @@ const BANKS = ['Bancolombia', 'Caja Social', 'Davivienda', 'BBVA', 'Scotiabank C
 type FormState = {
   name: string;
   bank: string;
-  account_type: 'ahorros' | 'corriente' | 'billetera' | 'otro';
+  account_type: 'ahorros' | 'corriente' | 'billetera' | 'crédito' | 'otro';
   account_number_mask: string;
   currency: string;
   opening_balance: number | null;
   notes: string;
-  is_credit: boolean;
   credit_limit: number | null;
 };
 
@@ -40,7 +39,6 @@ const EMPTY_FORM: FormState = {
   currency: 'COP',
   opening_balance: 0,
   notes: '',
-  is_credit: false,
   credit_limit: null,
 };
 
@@ -103,12 +101,11 @@ export default function BankAccountsClient() {
     setForm({
       name: acc.name,
       bank: acc.bank ?? '',
-      account_type: acc.account_type ?? 'ahorros',
+      account_type: acc.is_credit ? 'crédito' : (acc.account_type ?? 'ahorros'),
       account_number_mask: acc.account_number_mask ?? '',
       currency: acc.currency,
       opening_balance: Number(acc.opening_balance) || 0,
       notes: acc.notes ?? '',
-      is_credit: !!acc.is_credit,
       credit_limit: acc.credit_limit != null ? Number(acc.credit_limit) : null,
     });
     setError(null);
@@ -129,8 +126,8 @@ export default function BankAccountsClient() {
       opening_balance: form.opening_balance ?? 0,
       notes: form.notes || null,
       is_active: true,
-      is_credit: form.is_credit,
-      credit_limit: form.is_credit ? form.credit_limit : null,
+      is_credit: form.account_type === 'crédito',
+      credit_limit: form.account_type === 'crédito' ? form.credit_limit : null,
     };
     const res = editing
       ? await updateBankAccount(editing.id, payload)
@@ -395,12 +392,13 @@ export default function BankAccountsClient() {
                     <label className="block text-sm font-medium text-slate-700 mb-1.5">Tipo</label>
                     <select
                       value={form.account_type}
-                      onChange={e => setForm({ ...form, account_type: e.target.value as FormState['account_type'] })}
+                      onChange={e => setForm({ ...form, account_type: e.target.value as FormState['account_type'], credit_limit: e.target.value !== 'crédito' ? null : form.credit_limit })}
                       className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
                     >
                       <option value="ahorros">Ahorros</option>
                       <option value="corriente">Corriente</option>
                       <option value="billetera">Billetera</option>
+                      <option value="crédito">Crédito</option>
                       <option value="otro">Otro</option>
                     </select>
                   </div>
@@ -440,37 +438,26 @@ export default function BankAccountsClient() {
                     allowNegative
                   />
                   <p className="text-xs text-slate-400 mt-1">
-                    Saldo actual cuando registras esta cuenta. Los payouts y gastos futuros se suman/restan.
+                    {form.account_type === 'crédito'
+                      ? 'Deuda actual al registrar la tarjeta. Pon un valor negativo si ya tienes saldo usado.'
+                      : 'Saldo actual cuando registras esta cuenta. Los payouts y gastos futuros se suman/restan.'}
                   </p>
                 </div>
 
-                {/* Bloque 4: tipo débito vs crédito */}
-                <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
-                  <label className="flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={form.is_credit}
-                      onChange={e => setForm({ ...form, is_credit: e.target.checked, credit_limit: e.target.checked ? form.credit_limit : null })}
-                      className="mt-0.5 w-4 h-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                {/* Cupo de crédito: solo visible cuando el tipo es Crédito */}
+                {form.account_type === 'crédito' && (
+                  <div className="border border-rose-200 rounded-lg p-3 bg-rose-50">
+                    <p className="text-[11px] text-rose-600 mb-2">
+                      Las cuentas de crédito permiten quedar en saldo negativo (deuda).
+                    </p>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Cupo total (opcional)</label>
+                    <MoneyInput
+                      value={form.credit_limit}
+                      onChange={(v) => setForm({ ...form, credit_limit: v })}
+                      placeholder="2.000.000"
                     />
-                    <span className="flex-1">
-                      <span className="text-sm font-medium text-slate-700">Es cuenta de crédito (tarjeta)</span>
-                      <span className="block text-[11px] text-slate-500 mt-0.5">
-                        Las cuentas de crédito permiten quedar en saldo negativo (deuda). Las de ahorros / corriente / billetera bloquean gastos cuando no hay saldo.
-                      </span>
-                    </span>
-                  </label>
-                  {form.is_credit && (
-                    <div className="mt-3">
-                      <label className="block text-xs font-semibold text-slate-600 mb-1">Cupo total</label>
-                      <MoneyInput
-                        value={form.credit_limit}
-                        onChange={(v) => setForm({ ...form, credit_limit: v })}
-                        placeholder="2.000.000"
-                      />
-                    </div>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Notas</label>

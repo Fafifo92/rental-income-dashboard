@@ -43,6 +43,7 @@ export const createProperty = async (
       notes: null,
       default_cleaning_fee: null,
       rnt: rnt ?? null,
+      group_id: null,
     })
     .select()
     .single();

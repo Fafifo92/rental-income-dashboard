@@ -10,7 +10,7 @@ import DamageFromExpensesFlow from './DamageFromExpensesFlow';
 import PropertyExpenseForm from './expense-forms/PropertyExpenseForm';
 import CleaningSuppliesForm from './expense-forms/CleaningSuppliesForm';
 import VendorExpenseForm from './expense-forms/VendorExpenseForm';
-import PropertyMultiSelect from '@/components/PropertyMultiSelect';
+import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
 import RecurringPendingPanel from './RecurringPendingPanel';
 import SharedBillsPendingPanel from './SharedBillsPendingPanel';
 import {
@@ -55,7 +55,7 @@ const EMPTY_FILTERS: ExpenseFilters = {};
 
 export default function ExpensesClient() {
   const authStatus = useAuth();
-  const { properties, propertyIds, setPropertyIds } = usePropertyFilter();
+  const { properties, propertyIds, setPropertyIds, groups, tags, tagAssigns } = usePropertyFilter();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [dbConnected, setDbConnected] = useState(false);
@@ -336,7 +336,7 @@ export default function ExpensesClient() {
             <p className="text-slate-500 mt-1">Control de gastos fijos y variables por propiedad.</p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <PropertyMultiSelect properties={properties} value={propertyIds} onChange={setPropertyIds} />
+            <PropertyMultiSelect properties={properties} value={propertyIds} onChange={setPropertyIds} groups={groups} tags={tags} tagAssigns={tagAssigns} />
             <motion.button
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
@@ -606,6 +606,10 @@ export default function ExpensesClient() {
             onClose={() => { setShowVendorForm(false); setSaveError(''); }}
             onSave={async (data) => {
               const ok = await handleSave(data);
+              if (ok) setShowVendorForm(false);
+            }}
+            onSaveMultiple={async (rows) => {
+              const ok = await handleSaveShared(rows);
               if (ok) setShowVendorForm(false);
             }}
           />

@@ -1,9 +1,10 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { VendorKind, PropertyRow, VendorPropertyRow, BankAccountRow, SharedBillRow, ExpenseCategory } from '@/types/database';
+import type { VendorKind, PropertyRow, VendorPropertyRow, BankAccountRow, SharedBillRow, ExpenseCategory, CreditPoolRow, CreditPoolConsumptionRule } from '@/types/database';
 import { EXPENSE_CATEGORIES } from '@/types/database';
 import { listVendors, createVendor, updateVendor, deleteVendor, type Vendor } from '@/services/vendors';
+import { listCreditPools, createCreditPool, updateCreditPool, type CreateCreditPoolInput } from '@/services/creditPools';
 import { listVendorProperties, setVendorProperties, listAllVendorProperties } from '@/services/vendorProperties';
 import { listProperties } from '@/services/properties';
 import { listBankAccounts } from '@/services/bankAccounts';
@@ -30,14 +31,6 @@ const KINDS: { value: VendorKind; label: string; icon: string; description: stri
 // y 'cleaner' (el aseo va por su propio módulo).
 const KINDS_FORM = KINDS.filter(k => k.group === 'business');
 
-// Categorías contables válidas para gastos del negocio. Categorías por reserva
-// (Aseo, Daños, Atenciones) y "Servicios públicos" se excluyen porque NO
-// aplican a este flujo.
-const VENDOR_CATEGORIES: ExpenseCategory[] = [
-  'Administración',
-  'Mantenimiento',
-  'Otros',
-];
 
 const kindLabel = (k: VendorKind) => KINDS.find(x => x.value === k)?.label ?? (k === 'cleaner' ? 'Aseo (legacy)' : k);
 const kindIcon  = (k: VendorKind) => KINDS.find(x => x.value === k)?.icon  ?? '📌';
@@ -77,12 +70,26 @@ interface Form {
   notes: string;
   active: boolean;
   props: PropShare[];
+  poolEnabled: boolean;
+  poolCreditsTotal: string;
+  poolConsumptionRule: CreditPoolConsumptionRule;
+  poolCreditsPerUnit: string;
+  poolChildWeight: string;
+  poolActivatedAt: string;
+  poolExpiresAt: string;
 }
 
 const EMPTY: Form = {
   name: '', kind: 'business_service', category: 'Administración',
   defaultAmount: '', dayOfMonth: '', startYearMonth: '', isVariable: false,
   contact: '', notes: '', active: true, props: [],
+  poolEnabled: false,
+  poolCreditsTotal: '',
+  poolConsumptionRule: 'per_person_per_night',
+  poolCreditsPerUnit: '1',
+  poolChildWeight: '1',
+  poolActivatedAt: new Date().toISOString().slice(0, 10),
+  poolExpiresAt: '',
 };
 
 export default function VendorsClient(): JSX.Element {
@@ -100,6 +107,7 @@ export default function VendorsClient(): JSX.Element {
   const [err, setErr] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Vendor | null>(null);
   const [paying, setPaying] = useState<{ vendor: Vendor; ym: string; estimated: number } | null>(null);
+  const [editingPool, setEditingPool] = useState<CreditPoolRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -119,6 +127,22 @@ export default function VendorsClient(): JSX.Element {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Cuando se llega a /vendors?new=1 (desde el botón de los formularios de
+  // gasto), abre directamente el modal de "Nuevo proveedor".
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('new') === '1') {
+      setEditing(null);
+      setForm(EMPTY);
+      setErr(null);
+      setModalOpen(true);
+      // limpiar la query para que no se reabra al refrescar
+      url.searchParams.delete('new');
+      window.history.replaceState({}, '', url.pathname + url.search);
+    }
+  }, []);
 
   const filtered = useMemo(
     () => filter === 'all' ? vendors : vendors.filter(v => v.kind === filter),
@@ -161,7 +185,7 @@ export default function VendorsClient(): JSX.Element {
     await load();
   };
 
-  const openNew = () => { setEditing(null); setForm(EMPTY); setErr(null); setModalOpen(true); };
+  const openNew = () => { setEditing(null); setForm(EMPTY); setErr(null); setEditingPool(null); setModalOpen(true); };
   const openEdit = async (v: Vendor) => {
     setEditing(v);
     const vpRes = await listVendorProperties(v.id);
@@ -184,8 +208,37 @@ export default function VendorsClient(): JSX.Element {
       notes: v.notes ?? '',
       active: v.active,
       props,
+      poolEnabled: false,
+      poolCreditsTotal: '',
+      poolConsumptionRule: 'per_person_per_night',
+      poolCreditsPerUnit: '1',
+      poolChildWeight: '1',
+      poolActivatedAt: new Date().toISOString().slice(0, 10),
+      poolExpiresAt: '',
     });
     setErr(null);
+    // Load linked credit pool for insurance vendors
+    if (v.kind === 'insurance') {
+      const cpRes = await listCreditPools();
+      const existingPool = cpRes.data?.find(p => p.vendor_id === v.id && p.status !== 'archived') ?? null;
+      setEditingPool(existingPool);
+      if (existingPool) {
+        setForm(f => ({
+          ...f,
+          poolEnabled: true,
+          poolCreditsTotal: String(existingPool.credits_total),
+          poolConsumptionRule: existingPool.consumption_rule,
+          poolCreditsPerUnit: String(existingPool.credits_per_unit),
+          poolChildWeight: String(existingPool.child_weight),
+          poolActivatedAt: existingPool.activated_at,
+          poolExpiresAt: existingPool.expires_at ?? '',
+        }));
+      } else {
+        setEditingPool(null);
+      }
+    } else {
+      setEditingPool(null);
+    }
     setModalOpen(true);
   };
 
@@ -241,6 +294,26 @@ export default function VendorsClient(): JSX.Element {
 
     const vendorId = res.data.id;
     const vpRes = await setVendorProperties(vendorId, form.props);
+    // If insurance vendor with pool enabled → create or update credit pool
+    if (form.kind === 'insurance' && form.poolEnabled && Number(form.poolCreditsTotal) > 0) {
+      const poolPayload: CreateCreditPoolInput = {
+        vendor_id: vendorId,
+        name: form.name.trim(),
+        credits_total: Number(form.poolCreditsTotal),
+        total_price: Number(form.defaultAmount) || 0,
+        consumption_rule: form.poolConsumptionRule,
+        credits_per_unit: Number(form.poolCreditsPerUnit) || 1,
+        child_weight: Number(form.poolChildWeight) ?? 1,
+        activated_at: form.poolActivatedAt,
+        expires_at: form.poolExpiresAt || null,
+        notes: null,
+      };
+      if (editingPool) {
+        await updateCreditPool(editingPool.id, poolPayload);
+      } else {
+        await createCreditPool(poolPayload);
+      }
+    }
     setSaving(false);
     if (vpRes.error) { setErr(`Servicio guardado pero falló la asignación de propiedades: ${vpRes.error}`); return; }
     setModalOpen(false);
@@ -448,6 +521,13 @@ export default function VendorsClient(): JSX.Element {
                 {editing ? 'Editar proveedor' : 'Nuevo proveedor'}
               </h3>
 
+              {editing && (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                  ℹ️ Al editar este proveedor <b>no se modifican los gastos ya registrados</b>.
+                  El nuevo precio o datos solo aplicarán a futuros pagos.
+                </p>
+              )}
+
               {err && <p className="text-xs text-red-600 mb-3">{err}</p>}
 
               <div className="space-y-3">
@@ -484,24 +564,15 @@ export default function VendorsClient(): JSX.Element {
                   <p className="text-[11px] text-slate-500 mt-1 italic">{kindDescription(form.kind)}</p>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Categoría contable *</label>
-                  <select
-                    value={form.category}
-                    onChange={e => setForm({ ...form, category: e.target.value as ExpenseCategory })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
-                  >
-                    {VENDOR_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                    {!VENDOR_CATEGORIES.includes(form.category) && (
-                      <option value={form.category}>{form.category} (legacy)</option>
-                    )}
-                  </select>
-                  <p className="text-[11px] text-slate-500 mt-1">Con esta categoría se crearán los gastos al pagar la factura.</p>
-                </div>
+                <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                  💼 Los gastos de este proveedor se registrarán en la categoría <b>{defaultCategoryFor(form.kind)}</b>.
+                </p>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Monto mensual estimado</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">
+                      {form.kind === 'insurance' ? 'Precio de la bolsa (COP)' : 'Monto mensual estimado'}
+                    </label>
                     <MoneyInput
                       value={parseMoney(form.defaultAmount)}
                       onChange={(v) => setForm({ ...form, defaultAmount: v == null ? '' : String(v) })}
@@ -520,6 +591,103 @@ export default function VendorsClient(): JSX.Element {
                     />
                   </div>
                 </div>
+
+                {form.kind === 'insurance' && (
+                  <div className="border border-amber-200 rounded-xl bg-amber-50 p-4 space-y-3">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.poolEnabled}
+                        onChange={e => setForm(f => ({ ...f, poolEnabled: e.target.checked }))}
+                        className="w-4 h-4 accent-amber-600"
+                      />
+                      <span className="text-sm font-semibold text-amber-900">Configurar como bolsa de créditos</span>
+                    </label>
+                    <p className="text-[11px] text-amber-700">
+                      Activa esto si este seguro funciona por créditos prepagados que se descuentan al hacer check-in de cada reserva.
+                    </p>
+                    {form.poolEnabled && (
+                      <div className="space-y-3 pt-1">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Total de créditos *</label>
+                            <input
+                              type="number" min={1}
+                              value={form.poolCreditsTotal}
+                              onChange={e => setForm(f => ({ ...f, poolCreditsTotal: e.target.value }))}
+                              placeholder="Ej: 1000"
+                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Créditos por unidad</label>
+                            <input
+                              type="number" min={0.01} step={0.01}
+                              value={form.poolCreditsPerUnit}
+                              onChange={e => setForm(f => ({ ...f, poolCreditsPerUnit: e.target.value }))}
+                              placeholder="1"
+                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">Regla de consumo</label>
+                          <select
+                            value={form.poolConsumptionRule}
+                            onChange={e => setForm(f => ({ ...f, poolConsumptionRule: e.target.value as CreditPoolConsumptionRule }))}
+                            className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none bg-white"
+                          >
+                            <option value="per_person_per_night">Por persona y noche</option>
+                            <option value="per_person_per_booking">Por persona (toda la reserva)</option>
+                            <option value="per_booking">Por reserva (fijo)</option>
+                          </select>
+                        </div>
+                        {form.poolConsumptionRule !== 'per_booking' && (
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Peso de niños (0–1)</label>
+                            <input
+                              type="number" min={0} max={1} step={0.1}
+                              value={form.poolChildWeight}
+                              onChange={e => setForm(f => ({ ...f, poolChildWeight: e.target.value }))}
+                              placeholder="1"
+                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                            <p className="text-[10px] text-slate-500 mt-0.5">1 = niños cuentan igual que adultos, 0.5 = mitad de créditos</p>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Activar desde *</label>
+                            <input
+                              type="date"
+                              value={form.poolActivatedAt}
+                              onChange={e => setForm(f => ({ ...f, poolActivatedAt: e.target.value }))}
+                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">Vence (opcional)</label>
+                            <input
+                              type="date"
+                              value={form.poolExpiresAt}
+                              onChange={e => setForm(f => ({ ...f, poolExpiresAt: e.target.value }))}
+                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-amber-700">
+                          💡 El precio de la bolsa se toma del campo "Monto mensual estimado" de arriba.
+                        </p>
+                        {editingPool && (
+                          <div className="text-[11px] text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                            Bolsa activa: <b>{editingPool.credits_used}</b> / {editingPool.credits_total} créditos usados
+                            {editingPool.status === 'depleted' && <span className="ml-2 text-red-600 font-semibold">· AGOTADA</span>}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Vigente desde (mes)</label>

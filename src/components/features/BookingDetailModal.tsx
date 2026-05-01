@@ -10,6 +10,7 @@ import {
   updateBookingOperational, type BookingCleaning,
 } from '@/services/cleanings';
 import { listVendors, type Vendor } from '@/services/vendors';
+import { consumeCreditsForCheckin } from '@/services/creditPools';
 import type { Expense } from '@/types';
 import type {
   PropertyRow, BankAccountRow, BookingAdjustmentRow, BookingAdjustmentKind,
@@ -179,6 +180,12 @@ export default function BookingDetailModal({
 
     setOpFlags(prev => ({ ...prev, [field]: next }));
     await updateBookingOperational(booking.id, { [field]: next });
+
+    // Al hacer check-in (manual), descuenta créditos del seguro/bolsa activa
+    // si aplica. Idempotente: no dobla el descuento si ya se hizo.
+    if (field === 'checkin_done' && next) {
+      try { await consumeCreditsForCheckin(booking.id); } catch { /* no-op */ }
+    }
 
     // Auto-marcar aseos pendientes como hechos cuando se marca el check-out.
     if (field === 'checkout_done' && next) {

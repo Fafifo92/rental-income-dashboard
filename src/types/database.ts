@@ -122,10 +122,40 @@ export type Database = {
         Update: Partial<Omit<InventoryMovementRow, 'id' | 'created_at'>>;
         Relationships: [];
       };
+      credit_pools: {
+        Row: CreditPoolRow;
+        Insert: Omit<CreditPoolRow, 'id' | 'created_at'>;
+        Update: Partial<Omit<CreditPoolRow, 'id' | 'created_at'>>;
+        Relationships: [];
+      };
+      credit_pool_consumptions: {
+        Row: CreditPoolConsumptionRow;
+        Insert: Omit<CreditPoolConsumptionRow, 'id' | 'created_at'>;
+        Update: Partial<Omit<CreditPoolConsumptionRow, 'id' | 'created_at'>>;
+        Relationships: [];
+      };
       shared_bills: {
         Row: SharedBillRow;
         Insert: Omit<SharedBillRow, 'id' | 'created_at'>;
         Update: Partial<Omit<SharedBillRow, 'id' | 'created_at'>>;
+        Relationships: [];
+      };
+      property_groups: {
+        Row: PropertyGroupRow;
+        Insert: Omit<PropertyGroupRow, 'id' | 'created_at'>;
+        Update: Partial<Omit<PropertyGroupRow, 'id' | 'created_at'>>;
+        Relationships: [];
+      };
+      property_tags: {
+        Row: PropertyTagRow;
+        Insert: Omit<PropertyTagRow, 'id' | 'created_at'>;
+        Update: Partial<Omit<PropertyTagRow, 'id' | 'created_at'>>;
+        Relationships: [];
+      };
+      property_tag_assignments: {
+        Row: PropertyTagAssignmentRow;
+        Insert: Omit<PropertyTagAssignmentRow, 'created_at'> & { created_at?: string };
+        Update: Partial<PropertyTagAssignmentRow>;
         Relationships: [];
       };
     };
@@ -166,6 +196,31 @@ export type PropertyRow = {
   default_cleaning_fee: number | null;
   /** Registro Nacional de Turismo (Colombia). */
   rnt: string | null;
+  group_id: string | null;
+};
+
+export type PropertyGroupRow = {
+  id: string;
+  owner_id: string;
+  name: string;
+  color: string;
+  sort_order: number;
+  created_at: string;
+};
+
+export type PropertyTagRow = {
+  id: string;
+  owner_id: string;
+  name: string;
+  color: string;
+  created_at: string;
+};
+
+export type PropertyTagAssignmentRow = {
+  property_id: string;
+  tag_id: string;
+  owner_id: string;
+  created_at: string;
 };
 
 export type PropertyRecurringExpenseRow = {
@@ -190,7 +245,7 @@ export type BankAccountRow = {
   owner_id: string;
   name: string;
   bank: string | null;
-  account_type: 'ahorros' | 'corriente' | 'billetera' | 'otro' | null;
+  account_type: 'ahorros' | 'corriente' | 'billetera' | 'crédito' | 'otro' | null;
   account_number_mask: string | null;
   currency: string;
   opening_balance: number;
@@ -486,5 +541,44 @@ export type InventoryMovementRow = {
   notes: string | null;
   related_booking_id: string | null;
   related_expense_id: string | null;
+  created_at: string;
+};
+
+// ─── Credit pools (seguros por créditos / bolsas) ───────────────────────────
+
+export type CreditPoolConsumptionRule =
+  | 'per_person_per_night'
+  | 'per_person_per_booking'
+  | 'per_booking';
+
+export type CreditPoolStatus = 'active' | 'depleted' | 'archived';
+
+export type CreditPoolRow = {
+  id: string;
+  owner_id: string;
+  vendor_id: string | null;
+  name: string;
+  credits_total: number;
+  credits_used: number;
+  total_price: number;
+  consumption_rule: CreditPoolConsumptionRule;
+  credits_per_unit: number;
+  child_weight: number;
+  activated_at: string;
+  expires_at: string | null;
+  status: CreditPoolStatus;
+  notes: string | null;
+  created_at: string;
+};
+
+export type CreditPoolConsumptionRow = {
+  id: string;
+  owner_id: string;
+  pool_id: string;
+  booking_id: string;
+  units: number;
+  credits_used: number;
+  occurred_at: string;
+  notes: string | null;
   created_at: string;
 };

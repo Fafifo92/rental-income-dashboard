@@ -18,7 +18,6 @@ export const DEFAULT_CATEGORIES: Array<{ name: string; icon: string }> = [
   { name: 'Utensilio',        icon: '🍴' },
   { name: 'Lencería',         icon: '🛏️' },
   { name: 'Decoración',       icon: '🖼️' },
-  { name: 'Insumo de aseo',   icon: '🧴' },
   { name: 'Otro',             icon: '📦' },
 ];
 
@@ -35,7 +34,25 @@ export const listInventoryCategories = async (): Promise<ServiceResult<Inventory
 export const ensureDefaultCategories = async (): Promise<ServiceResult<InventoryCategoryRow[]>> => {
   const list = await listInventoryCategories();
   if (list.error || !list.data) return list;
-  if (list.data.length > 0) return list;
+
+  // Limpieza retroactiva: eliminar la antigua categoría "Insumo de aseo" si
+  // ya no tiene items asociados. Si tiene items, los dejamos para no borrar
+  // datos del usuario y que pueda re-asignarlos manualmente.
+  const legacy = list.data.find(c => c.name.trim().toLowerCase() === 'insumo de aseo');
+  if (legacy) {
+    const { count } = await supabase
+      .from('inventory_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('category_id', legacy.id);
+    if (!count || count === 0) {
+      await supabase.from('inventory_categories').delete().eq('id', legacy.id);
+    }
+  }
+
+  // Re-listar tras posible borrado
+  const refreshed = legacy ? await listInventoryCategories() : list;
+  if (refreshed.error || !refreshed.data) return refreshed;
+  if (refreshed.data.length > 0) return refreshed;
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };

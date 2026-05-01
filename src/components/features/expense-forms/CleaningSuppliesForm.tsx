@@ -187,7 +187,17 @@ export default function CleaningSuppliesForm({
 
       {who === 'cleaner' && (
         <div>
-          <label className="block text-xs font-semibold text-slate-600 mb-1">Personal de aseo *</label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-xs font-semibold text-slate-600">Personal de aseo *</label>
+            <a
+              href="/vendors?new=1"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-semibold text-cyan-600 hover:underline"
+            >
+              + Nuevo personal ↗
+            </a>
+          </div>
           <select
             value={cleanerId ?? ''}
             onChange={e => setCleanerId(e.target.value || null)}
@@ -198,7 +208,7 @@ export default function CleaningSuppliesForm({
           </select>
           {cleaners.length === 0 && (
             <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
-              No tienes personal de aseo registrado. Agrégalo en <a href="/aseo" className="underline font-semibold">/aseo</a>.
+              No tienes personal de aseo registrado. Usa el botón <b>+ Nuevo personal</b>.
             </p>
           )}
           {errors.cleaner && <p className="text-xs text-red-500 mt-1">{errors.cleaner}</p>}

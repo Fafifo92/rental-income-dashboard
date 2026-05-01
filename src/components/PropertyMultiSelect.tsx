@@ -1,128 +1,233 @@
-import { useEffect, useRef, useState } from 'react';
-import type { PropertyRow } from '@/types/database';
+import { useMemo, useState } from 'react';
+import type {
+  PropertyRow,
+  PropertyGroupRow,
+  PropertyTagRow,
+  PropertyTagAssignmentRow,
+} from '@/types/database';
 
 interface Props {
   properties: PropertyRow[];
-  /** IDs seleccionadas. Vacío = todas las propiedades. */
+  groups?: PropertyGroupRow[];
+  tags?: PropertyTagRow[];
+  tagAssignments?: PropertyTagAssignmentRow[];
   value: string[];
   onChange: (ids: string[]) => void;
+  error?: string;
   className?: string;
-  placeholder?: string;
 }
 
 /**
- * Selector multi-propiedad con popover, búsqueda y atajos "Todas" / "Limpiar".
- * Empty array = "Todas las propiedades" (sin filtro).
+ * Multi-selector visual de propiedades estilo grid de tarjetas.
+ *
+ * - Búsqueda por nombre.
+ * - Filtro por etiquetas (AND: la propiedad debe tener todas las etiquetas activas).
+ * - Renderiza por grupos cuando se proveen `groups`.
  */
 export default function PropertyMultiSelect({
   properties,
+  groups,
+  tags,
+  tagAssignments,
   value,
   onChange,
+  error,
   className = '',
-  placeholder = 'Todas las propiedades',
 }: Props) {
-  const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const ref = useRef<HTMLDivElement>(null);
+  const [activeTagIds, setActiveTagIds] = useState<string[]>([]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [open]);
+  const selected = useMemo(() => new Set(value), [value]);
 
-  if (properties.length === 0) return null;
+  // Index: property_id -> Set<tag_id>
+  const propTagsIndex = useMemo(() => {
+    const idx = new Map<string, Set<string>>();
+    (tagAssignments ?? []).forEach(a => {
+      let s = idx.get(a.property_id);
+      if (!s) { s = new Set(); idx.set(a.property_id, s); }
+      s.add(a.tag_id);
+    });
+    return idx;
+  }, [tagAssignments]);
 
-  const selected = new Set(value);
-  const filtered = search.trim()
-    ? properties.filter(p => p.name.toLowerCase().includes(search.trim().toLowerCase()))
-    : properties;
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return properties.filter(p => {
+      if (q && !p.name.toLowerCase().includes(q)) return false;
+      if (activeTagIds.length > 0) {
+        const ts = propTagsIndex.get(p.id);
+        if (!ts) return false;
+        for (const tid of activeTagIds) if (!ts.has(tid)) return false;
+      }
+      return true;
+    });
+  }, [properties, search, activeTagIds, propTagsIndex]);
 
   const toggle = (id: string) => {
     const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
+    if (next.has(id)) next.delete(id); else next.add(id);
     onChange(Array.from(next));
   };
 
-  const label = (() => {
-    if (value.length === 0) return placeholder;
-    if (value.length === 1) {
-      return properties.find(p => p.id === value[0])?.name ?? '1 propiedad';
-    }
-    if (value.length === properties.length) return 'Todas las propiedades';
-    return `${value.length} propiedades`;
-  })();
+  const toggleTag = (tid: string) => {
+    setActiveTagIds(prev => prev.includes(tid) ? prev.filter(t => t !== tid) : [...prev, tid]);
+  };
 
-  return (
-    <div ref={ref} className={`relative ${className}`}>
+  const visibleIds = filtered.map(p => p.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selected.has(id));
+
+  const renderCard = (p: PropertyRow) => {
+    const isSelected = selected.has(p.id);
+    return (
       <button
         type="button"
-        onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none text-slate-700 transition min-w-[180px]"
+        key={p.id}
+        onClick={() => toggle(p.id)}
+        className={`text-left rounded-xl border px-3 py-2.5 text-xs transition ${
+          isSelected
+            ? 'border-violet-500 bg-violet-50 ring-2 ring-violet-200'
+            : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+        }`}
       >
-        <span className="flex-1 text-left truncate">{label}</span>
-        <svg width="14" height="14" viewBox="0 0 20 20" className="text-slate-400 flex-shrink-0">
-          <path fill="currentColor" d="M5 7l5 6 5-6z" />
-        </svg>
-      </button>
-
-      {open && (
-        <div className="absolute z-30 mt-1 w-72 max-h-80 overflow-hidden bg-white border border-slate-200 rounded-lg shadow-lg flex flex-col">
-          <div className="p-2 border-b border-slate-100">
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar propiedad…"
-              className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded focus:ring-1 focus:ring-blue-400 outline-none"
-              autoFocus
-            />
-          </div>
-          <div className="flex items-center justify-between px-2 py-1.5 border-b border-slate-100 text-[11px] gap-2">
-            <button
-              type="button"
-              onClick={() => onChange(properties.map(p => p.id))}
-              className="text-blue-600 hover:underline font-medium"
-            >
-              Seleccionar todas
-            </button>
-            <button
-              type="button"
-              onClick={() => onChange([])}
-              className="text-slate-500 hover:underline"
-            >
-              Limpiar
-            </button>
-          </div>
-          <div className="overflow-y-auto flex-1">
-            {filtered.length === 0 ? (
-              <div className="px-3 py-6 text-center text-xs text-slate-400">Sin resultados</div>
-            ) : (
-              filtered.map(p => {
-                const checked = selected.has(p.id);
-                return (
-                  <label
-                    key={p.id}
-                    className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggle(p.id)}
-                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="flex-1 truncate text-slate-700">{p.name}</span>
-                  </label>
-                );
-              })
+        <div className="flex items-center gap-2">
+          <span
+            className={`w-3.5 h-3.5 rounded border flex-shrink-0 flex items-center justify-center ${
+              isSelected ? 'bg-violet-600 border-violet-600' : 'border-slate-300 bg-white'
+            }`}
+          >
+            {isSelected && (
+              <svg viewBox="0 0 20 20" className="w-3 h-3 text-white" fill="currentColor">
+                <path d="M7.5 13.5L4 10l1.4-1.4 2.1 2.1L14.6 4l1.4 1.4z" />
+              </svg>
             )}
-          </div>
+          </span>
+          <span className={`flex-1 truncate font-medium ${isSelected ? 'text-violet-900' : 'text-slate-700'}`}>
+            {p.name}
+          </span>
+        </div>
+      </button>
+    );
+  };
+
+  // Group rendering
+  const sortedGroups = useMemo(() => {
+    if (!groups) return [];
+    return [...groups].sort((a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name));
+  }, [groups]);
+
+  const renderGrouped = () => {
+    const sections: React.ReactNode[] = [];
+    sortedGroups.forEach(g => {
+      const items = filtered.filter(p => p.group_id === g.id);
+      if (items.length === 0) return;
+      sections.push(
+        <div key={`hdr-${g.id}`} className="col-span-full text-[11px] font-bold uppercase tracking-wide text-slate-500 mt-1">
+          {g.name}
+        </div>,
+      );
+      items.forEach(p => sections.push(renderCard(p)));
+    });
+    const ungrouped = filtered.filter(p => !p.group_id);
+    if (ungrouped.length > 0) {
+      sections.push(
+        <div key="hdr-none" className="col-span-full text-[11px] font-bold uppercase tracking-wide text-slate-500 mt-1">
+          Sin grupo
+        </div>,
+      );
+      ungrouped.forEach(p => sections.push(renderCard(p)));
+    }
+    return sections;
+  };
+
+  const useGroups = (groups?.length ?? 0) > 0;
+
+  return (
+    <div className={className}>
+      {/* Toolbar */}
+      <div className="flex flex-wrap gap-2 items-center mb-2">
+        <div className="relative flex-1 min-w-[180px]">
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar propiedad…"
+            className="w-full pl-7 pr-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-violet-500 outline-none"
+          />
+        </div>
+        <div className="flex items-center gap-1 ml-auto">
+          <button
+            type="button"
+            onClick={() => onChange(Array.from(new Set([...value, ...visibleIds])))}
+            disabled={allVisibleSelected || visibleIds.length === 0}
+            className="px-2 py-1 text-[11px] font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded hover:bg-violet-100 disabled:opacity-50"
+          >
+            Todas
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange(value.filter(id => !visibleIds.includes(id)))}
+            disabled={visibleIds.length === 0}
+            className="px-2 py-1 text-[11px] font-semibold text-slate-600 bg-slate-100 border border-slate-200 rounded hover:bg-slate-200 disabled:opacity-50"
+          >
+            Ninguna
+          </button>
+        </div>
+      </div>
+
+      {/* Tag chips */}
+      {(tags?.length ?? 0) > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {tags!.map(t => {
+            const active = activeTagIds.includes(t.id);
+            return (
+              <button
+                type="button"
+                key={t.id}
+                onClick={() => toggleTag(t.id)}
+                className={`px-2 py-0.5 text-[11px] font-medium rounded-full border transition ${
+                  active
+                    ? 'bg-violet-600 text-white border-violet-600'
+                    : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                }`}
+              >
+                {t.name}
+              </button>
+            );
+          })}
+          {activeTagIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setActiveTagIds([])}
+              className="px-2 py-0.5 text-[11px] text-slate-500 hover:underline"
+            >
+              limpiar filtros
+            </button>
+          )}
         </div>
       )}
+
+      {/* Grid */}
+      <div
+        className={`rounded-lg ${error ? 'ring-1 ring-red-400' : ''}`}
+      >
+        {filtered.length === 0 ? (
+          <div className="text-center text-xs text-slate-400 py-6 border border-dashed border-slate-200 rounded-lg">
+            Sin resultados
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+            {useGroups ? renderGrouped() : filtered.map(renderCard)}
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between mt-1.5">
+        <p className="text-[11px] text-slate-500">
+          {value.length} de {properties.length} seleccionada{properties.length === 1 ? '' : 's'}
+        </p>
+        {error && <p className="text-xs text-red-500">{error}</p>}
+      </div>
     </div>
   );
 }

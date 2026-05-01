@@ -2,21 +2,28 @@
 /**
  * Campos compartidos entre los formularios dedicados de gasto.
  */
-import type { PropertyRow, BankAccountRow } from '@/types/database';
+import type { PropertyRow, BankAccountRow, PropertyGroupRow } from '@/types/database';
 import MoneyInput from '@/components/MoneyInput';
 
 export type ExpenseStatus = 'pending' | 'paid' | 'partial';
 
 export function PropertyPicker({
-  properties, value, onChange, required, error, helper,
+  properties, groups, value, onChange, required, error, helper,
 }: {
   properties: PropertyRow[];
+  groups?: PropertyGroupRow[];
   value: string | null;
   onChange: (v: string | null) => void;
   required?: boolean;
   error?: string;
   helper?: string;
 }) {
+  const sortedGroups = (groups ?? []).slice().sort(
+    (a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name),
+  );
+  const useGroups = sortedGroups.length > 0;
+  const ungrouped = useGroups ? properties.filter(p => !p.group_id) : properties;
+
   return (
     <div>
       <label className="block text-xs font-semibold text-slate-600 mb-1">
@@ -29,7 +36,23 @@ export function PropertyPicker({
         className={`w-full px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none ${error ? 'border-red-400' : 'border-slate-200'}`}
       >
         <option value="">— Selecciona —</option>
-        {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        {useGroups &&
+          sortedGroups.map(g => {
+            const props = properties.filter(p => p.group_id === g.id);
+            if (props.length === 0) return null;
+            return (
+              <optgroup key={g.id} label={g.name}>
+                {props.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </optgroup>
+            );
+          })}
+        {useGroups
+          ? (ungrouped.length > 0 && (
+              <optgroup label="Sin grupo">
+                {ungrouped.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </optgroup>
+            ))
+          : ungrouped.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select>
       {helper && <p className="text-[10px] text-slate-400 mt-1">{helper}</p>}
       {error && <p className="text-xs text-red-500 mt-1">{error}</p>}

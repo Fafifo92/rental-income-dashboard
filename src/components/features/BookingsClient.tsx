@@ -10,6 +10,7 @@ import { listProperties } from '@/services/properties';
 import { findOrCreateListing } from '@/services/listings';
 import { listBankAccounts } from '@/services/bankAccounts';
 import { listListings } from '@/services/listings';
+import { runAutoCheckins } from '@/services/creditPools';
 import type { BookingRow, PropertyRow, BankAccountRow, ListingRow } from '@/types/database';
 import type { ParsedBooking } from '@/services/etl';
 import { formatCurrency } from '@/lib/utils';
@@ -17,7 +18,7 @@ import { useAuth } from '@/lib/useAuth';
 import { usePropertyFilter } from '@/lib/usePropertyFilter';
 import DataTable from './DataTable';
 import CSVUploader from './CSVUploader';
-import PropertyMultiSelect from '@/components/PropertyMultiSelect';
+import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
 import BookingPayoutModal from './BookingPayoutModal';
 import BookingDetailModal from './BookingDetailModal';
 import ConfirmDeleteChallenge from './ConfirmDeleteChallenge';
@@ -123,7 +124,7 @@ const bookingHelper = createColumnHelper<DisplayBooking>();
 export default function BookingsClient() {
   // ── ALL HOOKS — must come before any conditional returns ──────────────────
   const authStatus = useAuth();
-  const { properties: allProperties, propertyIds, setPropertyIds } = usePropertyFilter();
+  const { properties: allProperties, propertyIds, setPropertyIds, groups, tags, tagAssigns } = usePropertyFilter();
   const [bookings, setBookings]     = useState<DisplayBooking[]>([]);
   const [loading, setLoading]       = useState(true);
   const [isDemo, setIsDemo]         = useState(false);
@@ -187,8 +188,14 @@ export default function BookingsClient() {
       listProperties().then(res => { if (!res.error) setProperties(res.data ?? []); });
       listBankAccounts().then(res => { if (!res.error) setBankAccounts((res.data ?? []).filter(a => a.is_active)); });
       listListings().then(res => { if (!res.error) setListings(res.data ?? []); });
+      // Check-in automático "lazy": al cargar la app, busca reservas confirmadas
+      // cuyo check-in ya pasó y no está marcado, las marca y consume créditos
+      // del seguro activo. Recarga la lista al terminar si hubo cambios.
+      runAutoCheckins().then(res => {
+        if (res.processed > 0) load({ ...filters, propertyIds });
+      }).catch(() => { /* silent */ });
     }
-  }, [authStatus]);
+  }, [authStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const applySearch = useCallback(
     () => setFilters(prev => ({ ...prev, search })),
@@ -598,7 +605,7 @@ export default function BookingsClient() {
           <p className="text-slate-500 mt-1">Historial de reservas importadas desde Airbnb.</p>
         </div>
         <div className="flex flex-wrap gap-2 items-center">
-          <PropertyMultiSelect properties={allProperties} value={propertyIds} onChange={setPropertyIds} />
+          <PropertyMultiSelect properties={allProperties} value={propertyIds} onChange={setPropertyIds} groups={groups} tags={tags} tagAssigns={tagAssigns} />
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
             onClick={() => { setEditingId(null); setEditingListingId(null); setOverlapAck(false); setFormWarning(''); setForm(EMPTY_FORM); setFormError(''); setShowModal(true); }}
@@ -763,7 +770,7 @@ export default function BookingsClient() {
                     <select value={form.status} onChange={e => handleFormChange('status', e.target.value)}
                       className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white">
                       <option value="Reservada">Reservada</option>
-                      <option value="Inicia hoy">🟢 Inicia hoy</option>
+                      <option value="Inicia hoy">Inicia hoy</option>
                       <option value="Completada">Completada</option>
                       <option value="Cancelada">Cancelada</option>
                     </select>
