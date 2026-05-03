@@ -25,6 +25,8 @@ import ConfirmDeleteChallenge from './ConfirmDeleteChallenge';
 import MoneyInput from '@/components/MoneyInput';
 import { parseMoney } from '@/lib/money';
 import { getBookingStatus, statusUI } from '@/lib/bookingStatus';
+import { todayISO as todayISOFromUtils } from '@/lib/dateUtils';
+import { toast } from '@/lib/toast';
 import { CalendarCheck, Pencil, HandCoins, Trash2 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -47,6 +49,8 @@ interface DisplayBooking {
   payout_bank_account_id?: string | null;
   payout_date?: string | null;
   notes?: string | null;
+  num_adults?: number | null;
+  num_children?: number | null;
   checkin_done?: boolean;
   checkout_done?: boolean;
   inventory_checked?: boolean;
@@ -90,6 +94,8 @@ const fromRow = (row: BookingRow): DisplayBooking => ({
   payout_date: row.payout_date ?? null,
   listing_id: row.listing_id ?? null,
   notes: row.notes ?? null,
+  num_adults: row.num_adults ?? null,
+  num_children: row.num_children ?? null,
   checkin_done: row.checkin_done ?? false,
   checkout_done: row.checkout_done ?? false,
   inventory_checked: row.inventory_checked ?? false,
@@ -110,7 +116,41 @@ const fromDemo = (b: ParsedBooking, i: number): DisplayBooking => ({
 });
 
 const EMPTY_FILTERS: BookingFilters = {};
-const todayISO = (): string => new Date().toISOString().split('T')[0];
+
+// Usa la timezone configurada por el usuario (desde localStorage / dateUtils).
+const todayISO = (): string => todayISOFromUtils();
+
+// Formatea una fecha arbitraria como YYYY-MM-DD usando componentes locales.
+const localISO = (d: Date = new Date()): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+// Calcula el primer día de check-in según la hora local actual.
+// Si es después de las 6 PM, sugiere mañana; si no, hoy.
+const getSmartDefaultStartDate = (): { start_date: string; end_date: string; num_nights: string } => {
+  const now = new Date();
+  const hour = now.getHours(); // hora local ✓
+
+  let startDate: string;
+  if (hour >= 18) {
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    startDate = localISO(tomorrow); // fecha local de mañana ✓
+  } else {
+    startDate = localISO(now);
+  }
+
+  // Calcular check-out usando constructor local (no UTC string) para evitar offset
+  const [sy, sm, sd] = startDate.split('-').map(Number);
+  const endD = new Date(sy, sm - 1, sd + 2);
+  const endDate = localISO(endD);
+
+  return { start_date: startDate, end_date: endDate, num_nights: '2' };
+};
+
 const EMPTY_FORM: BookingForm = {
   guest_name: '', confirmation_code: '', start_date: '', end_date: '',
   num_nights: '', total_revenue: '', status: 'Reservada', listing_name: '', property_id: '',
@@ -134,7 +174,6 @@ export default function BookingsClient() {
   const [showImporter, setShowImporter] = useState(false);
   const [form, setForm]               = useState<BookingForm>(EMPTY_FORM);
   const [formLoading, setFormLoading] = useState(false);
-  const [formError, setFormError]     = useState('');
   const [formWarning, setFormWarning] = useState('');
   const [editingListingId, setEditingListingId] = useState<string | null>(null);
   const [overlapAck, setOverlapAck] = useState(false);
@@ -210,8 +249,7 @@ export default function BookingsClient() {
     setForm(prev => {
       const updated = { ...prev, [field]: value };
 
-      // Si pasa a "Inicia hoy" → fija check-in a hoy y lo bloquea (la fecha
-      // se recalcula a hoy y, si end_date está vacío o es anterior, se ajusta).
+      // Si pasa a "Inicia hoy" → fija check-in a hoy y lo bloquea.
       if (field === 'status' && value === 'Inicia hoy') {
         const today = todayISO();
         updated.start_date = today;
@@ -230,15 +268,43 @@ export default function BookingsClient() {
         }
         return updated;
       }
+      // Si pasa a "Completada" → limpia fechas futuras.
+      if (field === 'status' && value === 'Completada') {
+        const today = todayISO();
+        if (updated.end_date && updated.end_date > today) {
+          updated.end_date = '';
+          updated.num_nights = '';
+        }
+        if (updated.start_date && updated.start_date > today) {
+          updated.start_date = '';
+          updated.end_date = '';
+          updated.num_nights = '';
+        }
+        return updated;
+      }
+      // Si pasa a "Reservada" → limpia fechas pasadas.
+      if (field === 'status' && value === 'Reservada') {
+        const today = todayISO();
+        if (updated.start_date && updated.start_date < today) {
+          updated.start_date = '';
+          updated.end_date = '';
+          updated.num_nights = '';
+        }
+        return updated;
+      }
       // Si está en "Inicia hoy", bloquear cambios manuales del check-in.
       if (field === 'start_date' && prev.status === 'Inicia hoy') {
         return prev;
       }
 
-      // ── Bidirectional date ↔ nights sync ─────────────────────────────
+      // ── Bidirectional date ↔ nights sync (with status-based clamping) ──────
       if (field === 'start_date') {
-        const s = value;
-        // If end is before new start (or empty), reset end to start + current nights
+        let s = value;
+        const today = todayISO();
+        // Clamp start_date según estado
+        if (updated.status === 'Reservada' && s && s < today) s = today;
+        if (updated.status === 'Completada' && s && s > today) s = today;
+        updated.start_date = s;
         const nights = parseInt(updated.num_nights) || 0;
         if (s && (!updated.end_date || updated.end_date < s)) {
           if (nights > 0) {
@@ -254,9 +320,17 @@ export default function BookingsClient() {
           ));
           updated.num_nights = String(n);
         }
+        // Si después del sync end_date viola la restricción, limpiarla
+        if (updated.status === 'Completada' && updated.end_date && updated.end_date > today) {
+          updated.end_date = '';
+          updated.num_nights = '';
+        }
       } else if (field === 'end_date') {
-        const e = value;
-        // Guard: end cannot be before start. If user picks earlier, snap end = start + 1.
+        let e = value;
+        const today = todayISO();
+        // Clamp end_date según estado
+        if (updated.status === 'Completada' && e && e > today) e = today;
+        updated.end_date = e;
         if (e && updated.start_date && e < updated.start_date) {
           const snap = new Date(updated.start_date);
           snap.setDate(snap.getDate() + 1);
@@ -264,7 +338,7 @@ export default function BookingsClient() {
           updated.num_nights = '1';
         } else if (e && updated.start_date) {
           const n = Math.max(0, Math.round(
-            (new Date(e).getTime() - new Date(updated.start_date).getTime()) / 86_400_000,
+            (new Date(updated.end_date).getTime() - new Date(updated.start_date).getTime()) / 86_400_000,
           ));
           updated.num_nights = String(n);
         }
@@ -284,15 +358,28 @@ export default function BookingsClient() {
 
   const handleSubmit = useCallback(async () => {
     if (!form.start_date || !form.end_date || !form.total_revenue) {
-      setFormError('Completa los campos obligatorios: Check-in, Check-out e Ingresos.');
+      toast.error('Completa los campos obligatorios: Check-in, Check-out e Ingresos.');
       return;
     }
     if (form.end_date <= form.start_date) {
-      setFormError('El check-out debe ser posterior al check-in.');
+      toast.error('El check-out debe ser posterior al check-in.');
+      return;
+    }
+    // Validaciones de coherencia status ↔ fechas
+    const today = todayISO();
+    if (form.status === 'Completada' && form.end_date > today) {
+      toast.error('Una reserva Completada debe tener fecha de check-out igual o anterior a hoy.');
+      return;
+    }
+    if (form.status === 'Completada' && form.start_date > today) {
+      toast.error('Una reserva Completada debe tener fecha de check-in en el pasado.');
+      return;
+    }
+    if (form.status === 'Reservada' && form.start_date < today) {
+      toast.error('Una reserva Reservada debe tener fecha de check-in igual o posterior a hoy.');
       return;
     }
     setFormLoading(true);
-    setFormError('');
     setFormWarning('');
     const nights  = parseInt(form.num_nights) || 0;
     const revenue = parseMoney(form.total_revenue) ?? 0;
@@ -306,7 +393,7 @@ export default function BookingsClient() {
         if (editingListingId) {
           const overlap = await checkBookingOverlap(editingListingId, form.start_date, form.end_date, editingId);
           if (!overlap.ok) {
-            setFormError(overlap.error);
+            toast.error(overlap.error);
             setFormLoading(false);
             return;
           }
@@ -329,7 +416,8 @@ export default function BookingsClient() {
           num_children: parseInt(form.num_children) || 0,
           notes: form.notes || null,
         });
-        if (res.error) { setFormError(res.error); setFormLoading(false); return; }
+        if (res.error) { toast.error(res.error); setFormLoading(false); return; }
+        toast.success('Reserva actualizada');
       } else if (authStatus !== 'authed') {
         saveDemoBookings([{
           confirmation_code: code,
@@ -341,19 +429,20 @@ export default function BookingsClient() {
           listing_name: form.listing_name || 'Manual',
           revenue,
         }]);
+        toast.success('Reserva guardada (demo)');
       } else {
         const propertyId = form.property_id || properties[0]?.id;
         if (!propertyId) {
-          setFormError('Crea una propiedad primero desde la sección Propiedades.');
+          toast.error('Crea una propiedad primero desde la sección Propiedades.');
           setFormLoading(false);
           return;
         }
         const listingRes = await findOrCreateListing(propertyId, form.listing_name || 'Manual');
-        if (listingRes.error || !listingRes.data) { setFormError(listingRes.error ?? 'No se pudo crear el listing'); setFormLoading(false); return; }
+        if (listingRes.error || !listingRes.data) { toast.error(listingRes.error ?? 'No se pudo crear el listing'); setFormLoading(false); return; }
         // Validar solape antes de insertar
         const overlap = await checkBookingOverlap(listingRes.data.id, form.start_date, form.end_date);
         if (!overlap.ok) {
-          setFormError(overlap.error);
+          toast.error(overlap.error);
           setFormLoading(false);
           return;
         }
@@ -376,7 +465,8 @@ export default function BookingsClient() {
           num_children: parseInt(form.num_children) || 0,
           notes: form.notes || undefined,
         });
-        if (res.error) { setFormError(res.error); setFormLoading(false); return; }
+        if (res.error) { toast.error(res.error); setFormLoading(false); return; }
+        toast.success('Reserva creada');
       }
       setShowModal(false);
       setEditingId(null);
@@ -385,7 +475,7 @@ export default function BookingsClient() {
       setForm(EMPTY_FORM);
       await load({ ...filters, propertyIds });
     } catch {
-      setFormError('Error inesperado al guardar.');
+      toast.error('Error inesperado al guardar.');
     }
     setFormLoading(false);
   }, [form, editingId, editingListingId, overlapAck, authStatus, properties, filters, propertyIds, load]);
@@ -408,14 +498,14 @@ export default function BookingsClient() {
       num_children: '0',
       notes: '',
     });
-    setFormError('');
     setShowModal(true);
   }, []);
 
   const handleConfirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
     const res = await deleteBooking(deleteTarget.id);
-    if (res.error) { setFormError(res.error); return; }
+    if (res.error) { toast.error(res.error); return; }
+    toast.success('Reserva eliminada');
     setDeleteTarget(null);
     await load({ ...filters, propertyIds });
   }, [deleteTarget, filters, propertyIds, load]);
@@ -435,23 +525,22 @@ export default function BookingsClient() {
         const ui = statusUI[derived];
         return (
           <span
-            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${ui.className}`}
+            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border whitespace-nowrap ${ui.className}`}
             title={info.getValue() || ui.label}
           >
-            <span aria-hidden>{ui.emoji}</span>{ui.label}
+            {ui.label}
           </span>
         );
       },
     }),
     bookingHelper.accessor('guest_name', {
       header: 'Huésped',
-      meta: { className: 'whitespace-nowrap' },
       cell: info => {
         const b = info.row.original;
         return (
-          <div className="flex flex-col">
-            <span className="font-medium text-slate-800">{b.guest_name}</span>
-            <span className="font-mono text-[10px] text-slate-400">{b.confirmation_code}</span>
+          <div className="flex flex-col min-w-0 max-w-[180px] sm:max-w-[220px]">
+            <span className="font-medium text-slate-800 truncate" title={b.guest_name}>{b.guest_name}</span>
+            <span className="font-mono text-[10px] text-slate-400 truncate">{b.confirmation_code}</span>
           </div>
         );
       },
@@ -578,11 +667,27 @@ export default function BookingsClient() {
   const completed    = bookings.filter(b => !b.status.toLowerCase().includes('cancel'));
   const totalRevenue = completed.reduce((s, b) => s + b.total_revenue, 0);
   const totalNights  = completed.reduce((s, b) => s + b.num_nights, 0);
+
+  // Ingresos confirmados: reservas con banco de payout asignado (payout real recibido)
+  const confirmed = completed.filter(b => b.payout_bank_account_id);
+  const receivedPayout = confirmed.reduce((s, b) => s + (b.net_payout ?? b.total_revenue), 0);
+  // Ingresos esperados: reservas activas sin banco asignado (pendientes de confirmar)
+  const expectedPayout = completed.filter(b => !b.payout_bank_account_id).reduce((s, b) => s + b.total_revenue, 0);
+  // Reservas pasadas sin payout confirmado (datos incompletos)
+  const today = new Date(); today.setHours(0,0,0,0);
+  const incompleteCount = completed.filter(b => !b.payout_bank_account_id && b.end_date && new Date(b.end_date) < today).length;
+
   const kpis = [
-    { label: 'Total Reservas',      value: bookings.length.toString(),                             color: 'text-blue-600',   bg: 'bg-blue-50'   },
-    { label: 'Ingresos (completadas)', value: formatCurrency(totalRevenue),                        color: 'text-green-600',  bg: 'bg-green-50'  },
-    { label: 'Noches Totales',      value: totalNights.toString(),                                 color: 'text-purple-600', bg: 'bg-purple-50' },
-    { label: 'ADR (Tarifa Diaria)', value: totalNights > 0 ? formatCurrency(totalRevenue / totalNights) : '—', color: 'text-orange-600', bg: 'bg-orange-50' },
+    { label: 'Total Reservas', value: bookings.length.toString(), color: 'text-blue-600', bg: 'bg-blue-50', sub: null },
+    {
+      label: 'Payout confirmado',
+      value: formatCurrency(receivedPayout),
+      color: 'text-green-700',
+      bg: 'bg-green-50',
+      sub: expectedPayout > 0 ? `Por cobrar: ${formatCurrency(expectedPayout)}` : null,
+    },
+    { label: 'Noches Totales', value: totalNights.toString(), color: 'text-purple-600', bg: 'bg-purple-50', sub: null },
+    { label: 'ADR (Tarifa Diaria)', value: totalNights > 0 ? formatCurrency(totalRevenue / totalNights) : '—', color: 'text-orange-600', bg: 'bg-orange-50', sub: null },
   ];
 
   // ── RENDER ────────────────────────────────────────────────────────────────
@@ -608,7 +713,15 @@ export default function BookingsClient() {
           <PropertyMultiSelect properties={allProperties} value={propertyIds} onChange={setPropertyIds} groups={groups} tags={tags} tagAssigns={tagAssigns} />
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-            onClick={() => { setEditingId(null); setEditingListingId(null); setOverlapAck(false); setFormWarning(''); setForm(EMPTY_FORM); setFormError(''); setShowModal(true); }}
+            onClick={() => {
+              setEditingId(null);
+              setEditingListingId(null);
+              setOverlapAck(false);
+              setFormWarning('');
+              const smartDates = getSmartDefaultStartDate();
+              setForm({ ...EMPTY_FORM, ...smartDates });
+              setShowModal(true);
+            }}
             className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
           >
             + Nueva reserva
@@ -625,17 +738,34 @@ export default function BookingsClient() {
 
       {/* KPI Cards */}
       {!loading && bookings.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-          {kpis.map((kpi, i) => (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+            {kpis.map((kpi, i) => (
+              <motion.div
+                key={kpi.label}
+                initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}
+                className={`p-5 border rounded-xl shadow-sm ${kpi.bg}`}
+              >
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{kpi.label}</p>
+                <p className={`text-2xl font-bold mt-1 ${kpi.color}`}>{kpi.value}</p>
+                {kpi.sub && (
+                  <p className="text-xs text-amber-600 font-medium mt-1">{kpi.sub}</p>
+                )}
+              </motion.div>
+            ))}
+          </div>
+          {incompleteCount > 0 && (
             <motion.div
-              key={kpi.label}
-              initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}
-              className={`p-5 border rounded-xl shadow-sm ${kpi.bg}`}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              className="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm"
             >
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{kpi.label}</p>
-              <p className={`text-2xl font-bold mt-1 ${kpi.color}`}>{kpi.value}</p>
+              <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+              <span className="text-amber-800">
+                <strong>{incompleteCount}</strong> reserva{incompleteCount !== 1 ? 's' : ''} pasada{incompleteCount !== 1 ? 's' : ''} sin payout confirmado —{' '}
+                asigna la cuenta bancaria desde el botón de payout en cada reserva para tener datos exactos.
+              </span>
             </motion.div>
-          ))}
+          )}
         </div>
       )}
 
@@ -816,13 +946,18 @@ export default function BookingsClient() {
                       <input type="date" value={form.start_date}
                         onChange={e => handleFormChange('start_date', e.target.value)}
                         disabled={form.status === 'Inicia hoy'}
+                        min={form.status === 'Reservada' ? todayISO() : undefined}
+                        max={(form.status === 'Completada' || form.status === 'En curso') ? todayISO() : undefined}
                         className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white disabled:bg-emerald-50 disabled:cursor-not-allowed"
                       />
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-slate-600 mb-1">Check-out *</label>
                       <input type="date" value={form.end_date}
-                        min={form.start_date || undefined}
+                        min={form.status === 'En curso'
+                          ? (() => { const t = new Date(todayISO()); t.setDate(t.getDate() + 1); return t.toISOString().split('T')[0]; })()
+                          : (form.start_date || undefined)}
+                        max={form.status === 'Completada' ? todayISO() : undefined}
                         onChange={e => handleFormChange('end_date', e.target.value)}
                         disabled={!form.start_date}
                         className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
@@ -906,11 +1041,6 @@ export default function BookingsClient() {
                 {formWarning && (
                   <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                     {formWarning}
-                  </p>
-                )}
-                {formError && (
-                  <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                    {formError}
                   </p>
                 )}
               </div>

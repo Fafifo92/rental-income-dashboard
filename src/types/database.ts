@@ -473,6 +473,7 @@ export type UserNotificationSettingsRow = {
   notify_shared_bills: boolean;
   notify_damage: boolean;
   notify_cleaner: boolean;
+  timezone: string;
   updated_at: string;
 };
 

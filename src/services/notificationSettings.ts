@@ -16,6 +16,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: Omit<UserNotificationSettingsRow, 'u
   notify_shared_bills: true,
   notify_damage:       true,
   notify_cleaner:      true,
+  timezone:            'America/Bogota',
 };
 
 /** Obtiene (o crea por defecto) la configuración del usuario autenticado. */

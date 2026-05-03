@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
+import { Globe } from 'lucide-react';
 import { useAuth } from '@/lib/useAuth';
 import {
   getNotificationSettings,
@@ -7,6 +8,7 @@ import {
   CADENCE_LABELS,
 } from '@/services/notificationSettings';
 import type { UserNotificationSettingsRow, NotificationCadence } from '@/types/database';
+import { COMMON_TIMEZONES, setCachedTimezone } from '@/lib/dateUtils';
 
 export default function NotificationsClient() {
   const authStatus = useAuth(true);
@@ -21,7 +23,11 @@ export default function NotificationsClient() {
     (async () => {
       const res = await getNotificationSettings();
       if (res.error) setError(res.error);
-      else setSettings(res.data);
+      else if (res.data) {
+        setSettings(res.data);
+        // Sincronizar timezone al localStorage para que todayISO() lo use de inmediato
+        if (res.data.timezone) setCachedTimezone(res.data.timezone);
+      }
       setLoading(false);
     })();
   }, [authStatus]);
@@ -31,6 +37,8 @@ export default function NotificationsClient() {
     setSavingKey(String(key));
     const optimistic = { ...settings, [key]: value } as UserNotificationSettingsRow;
     setSettings(optimistic);
+    // Si cambia la timezone, actualizar caché de localStorage al instante
+    if (key === 'timezone' && typeof value === 'string') setCachedTimezone(value);
     const res = await updateNotificationSettings({ [key]: value });
     if (res.error) {
       setError(res.error);
@@ -67,6 +75,33 @@ export default function NotificationsClient() {
       </motion.div>
 
       <div className="space-y-6">
+        {/* Configuración regional */}
+        <Section title="Configuración regional" subtitle="Afecta los cálculos de fechas y alertas en toda la app.">
+          <div className="space-y-1 p-4">
+            <LabeledField label={<span className="flex items-center gap-1.5"><Globe size={14} className="text-slate-500" />Zona horaria</span>}>
+              <select
+                value={settings.timezone ?? 'America/Bogota'}
+                onChange={e => patch('timezone', e.target.value)}
+                className="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white min-w-[240px]"
+                disabled={savingKey === 'timezone'}
+              >
+                {COMMON_TIMEZONES.map(tz => (
+                  <option key={tz.value} value={tz.value}>{tz.label}</option>
+                ))}
+              </select>
+              {savingKey === 'timezone' && (
+                <span className="text-xs text-slate-400 ml-2 animate-pulse">Guardando…</span>
+              )}
+            </LabeledField>
+            <p className="text-xs text-slate-400 mt-2">
+              Determina qué se considera "hoy" al registrar reservas, calcular estados y mostrar alertas.
+              La hora actual en tu zona: <span className="font-medium text-slate-600">
+                {new Intl.DateTimeFormat('es-CO', { timeZone: settings.timezone ?? 'America/Bogota', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date())}
+              </span>
+            </p>
+          </div>
+        </Section>
+
         {/* Canales */}
         <Section title="Canales de entrega">
           <ToggleRow
@@ -176,7 +211,7 @@ export default function NotificationsClient() {
   );
 }
 
-function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
       <div className="px-5 py-4 border-b border-slate-100">
@@ -232,7 +267,7 @@ function ToggleRow({
   );
 }
 
-function LabeledField({ label, children }: { label: string; children: React.ReactNode }) {
+function LabeledField({ label, children }: { label: string | ReactNode; children: ReactNode }) {
   return (
     <div className="flex items-center gap-3">
       <label className="text-sm font-medium text-slate-700 w-44">{label}</label>

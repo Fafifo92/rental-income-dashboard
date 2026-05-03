@@ -6,6 +6,8 @@
  * lógica.
  */
 
+import { todayISO as todayISOFromUtils } from '@/lib/dateUtils';
+
 export type DerivedBookingStatus =
   | 'cancelled'
   | 'upcoming'      // start_date > today
@@ -22,7 +24,7 @@ export interface BookingStatusInput {
   cancelled_at?: string | null;
 }
 
-const todayISO = (): string => new Date().toISOString().slice(0, 10);
+const todayISO = (): string => todayISOFromUtils();
 
 export const isCancelled = (b: BookingStatusInput): boolean => {
   if (b.cancelled_at) return true;
@@ -52,11 +54,25 @@ export interface StatusUI {
 }
 
 export const statusUI: Record<DerivedBookingStatus, StatusUI> = {
-  cancelled:       { label: 'Cancelada',  emoji: '✖️', className: 'bg-red-100 text-red-700 border-red-200' },
-  upcoming:        { label: 'Próxima',    emoji: '📅', className: 'bg-blue-100 text-blue-700 border-blue-200' },
-  in_progress:     { label: 'En curso',   emoji: '🏠', className: 'bg-violet-100 text-violet-700 border-violet-200' },
-  completed:       { label: 'Completada', emoji: '✅', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-  past_unverified: { label: 'Sin verificar', emoji: '⚠️', className: 'bg-amber-100 text-amber-700 border-amber-200' },
+  cancelled:       { label: 'Cancelada',     emoji: '', className: 'bg-red-100 text-red-700 border-red-200' },
+  upcoming:        { label: 'Próxima',       emoji: '', className: 'bg-blue-100 text-blue-700 border-blue-200' },
+  in_progress:     { label: 'En curso',      emoji: '', className: 'bg-violet-100 text-violet-700 border-violet-200' },
+  completed:       { label: 'Completada',    emoji: '', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  past_unverified: { label: 'Sin verificar', emoji: '', className: 'bg-amber-100 text-amber-700 border-amber-200' },
+};
+
+/**
+ * Indica si una reserva ya empezó (o terminó). Sólo en ese caso tiene sentido
+ * registrar daños del inventario o de la propiedad: no podemos cobrarle al
+ * huésped algo que aún no ocurrió.
+ */
+export const hasBookingStarted = (
+  b: BookingStatusInput,
+  today: string = todayISO(),
+): boolean => {
+  if (isCancelled(b)) return false;
+  const start = b.start_date ?? '';
+  return !!start && start <= today;
 };
 
 /**

@@ -15,6 +15,7 @@ import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import SharedBillPayModal from './SharedBillPayModal';
 import MoneyInput from '@/components/MoneyInput';
 import { parseMoney } from '@/lib/money';
+import { toast } from '@/lib/toast';
 
 const KINDS: { value: VendorKind; label: string; icon: string; description: string; group: 'utilities' | 'business' }[] = [
   { value: 'utility',          label: 'Servicio público',     icon: '💡', description: 'Luz, agua, gas, internet — gastos de operación de cada propiedad.', group: 'utilities' },
@@ -180,7 +181,8 @@ export default function VendorsClient(): JSX.Element {
   const handleDeleteBill = async (b: SharedBillRow) => {
     if (!confirm(`Eliminar la factura de ${ymLabel(b.year_month)}? Se borrarán los gastos derivados.`)) return;
     const res = await deleteSharedBill(b.id);
-    if (res.error) { alert(res.error); return; }
+    if (res.error) { toast.error(res.error); return; }
+    toast.success('Factura eliminada');
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('recurring-period-changed'));
     await load();
   };
@@ -322,7 +324,8 @@ export default function VendorsClient(): JSX.Element {
 
   const handleDelete = async (v: Vendor) => {
     const res = await deleteVendor(v.id);
-    if (res.error) { alert(res.error); return; }
+    if (res.error) { toast.error(res.error); return; }
+    toast.success(`"${v.name}" eliminado`);
     setConfirmDelete(null);
     await load();
   };

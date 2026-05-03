@@ -123,7 +123,7 @@ export default function DamageReportModal({
         className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <div className="px-6 py-4 border-b border-slate-100">
-          <h3 className="text-lg font-bold text-slate-800">⚠ Registrar daño</h3>
+          <h3 className="text-lg font-bold text-slate-800">Registrar daño</h3>
           <p className="text-xs text-slate-500 mt-0.5">
             Reserva <strong className="font-mono">{booking.confirmation_code}</strong>
             {booking.guest_name && <> · {booking.guest_name}</>}

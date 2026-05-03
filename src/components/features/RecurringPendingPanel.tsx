@@ -5,6 +5,7 @@ import { listBankAccounts } from '@/services/bankAccounts';
 import type { BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import MarkPaidModal from './MarkPaidModal';
+import { toast } from '@/lib/toast';
 
 const ymLabel = (ym: string): string => {
   const [y, m] = ym.split('-');
@@ -46,7 +47,8 @@ export default function RecurringPendingPanel({
     const note = prompt(`Marcar "${p.recurring.category}" de ${ymLabel(p.yearMonth)} como no aplicable. Razón (opcional):`);
     if (note === null) return;
     const res = await markPeriodSkipped({ recurringId: p.recurring.id, yearMonth: p.yearMonth, note: note || null });
-    if (res.error) { alert(res.error); return; }
+    if (res.error) { toast.error(res.error); return; }
+    toast.success('Periodo marcado como no aplicable');
     await load();
     onChanged?.();
   };

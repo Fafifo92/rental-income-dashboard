@@ -32,10 +32,10 @@ export default function AseoClient(): JSX.Element {
   const [banks, setBanks] = useState<BankAccountRow[]>([]);
   const [groups, setGroups] = useState<CleanerGroup[]>([]);
   const [looseSupplies, setLooseSupplies] = useState<Map<string, { amount: number; count: number }>>(new Map());
-  const [groupFilter, setGroupFilter] = useState<string | 'all' | 'none'>('all');
+  const [tagFilters, setTagFilters] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [newModal, setNewModal] = useState(false);
-  const [form, setForm] = useState<{ name: string; contact: string; groupIds: string[] }>({ name: '', contact: '', groupIds: [] });
+  const [form, setForm] = useState<{ name: string; contact: string; tagIds: string[] }>({ name: '', contact: '', tagIds: [] });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [detail, setDetail] = useState<Vendor | null>(null);
@@ -83,8 +83,8 @@ export default function AseoClient(): JSX.Element {
     return out;
   }, [balances, looseSupplies]);
 
-  // Mapa cleanerId -> groupIds (derivado de groups[].member_ids)
-  const cleanerGroupsMap = useMemo(() => {
+  // Mapa cleanerId -> tags (derivado de groups[].member_ids)
+  const cleanerTagsMap = useMemo(() => {
     const m = new Map<string, CleanerGroup[]>();
     for (const g of groups) {
       for (const cid of g.member_ids) {
@@ -97,13 +97,14 @@ export default function AseoClient(): JSX.Element {
   }, [groups]);
 
   const filteredCleaners = useMemo(() => {
-    if (groupFilter === 'all') return cleaners;
-    if (groupFilter === 'none') return cleaners.filter(c => !cleanerGroupsMap.has(c.id));
-    const g = groups.find(x => x.id === groupFilter);
-    if (!g) return cleaners;
-    const setIds = new Set(g.member_ids);
-    return cleaners.filter(c => setIds.has(c.id));
-  }, [cleaners, groupFilter, groups, cleanerGroupsMap]);
+    if (tagFilters.length === 0) return cleaners;
+    const showUntagged = tagFilters.includes('__none__');
+    return cleaners.filter(c => {
+      const cTags = cleanerTagsMap.get(c.id) ?? [];
+      if (showUntagged && cTags.length === 0) return true;
+      return cTags.some(t => tagFilters.includes(t.id));
+    });
+  }, [cleaners, tagFilters, cleanerTagsMap]);
 
   const handleCreate = async () => {
     if (!form.name.trim()) { setErr('El nombre es obligatorio.'); return; }
@@ -121,33 +122,33 @@ export default function AseoClient(): JSX.Element {
       start_year_month: null,
     });
     if (res.error || !res.data) { setSaving(false); setErr(res.error ?? 'Error'); return; }
-    if (form.groupIds.length > 0) {
-      await setCleanerGroupMembership(res.data.id, form.groupIds);
+    if (form.tagIds.length > 0) {
+      await setCleanerGroupMembership(res.data.id, form.tagIds);
     }
     setSaving(false);
     setNewModal(false);
-    setForm({ name: '', contact: '', groupIds: [] });
+    setForm({ name: '', contact: '', tagIds: [] });
     setErr(null);
     await load();
   };
 
-  const handleCreateGroup = async (name: string): Promise<string | null> => {
+  const handleCreateTag = async (name: string): Promise<string | null> => {
     const res = await createCleanerGroup(name);
     if (res.error || !res.data) return null;
     await load();
     return res.data.id;
   };
 
-  const handleDeleteGroup = async (id: string) => {
-    if (!confirm('¿Eliminar grupo? Las personas seguirán existiendo.')) return;
+  const handleDeleteTag = async (id: string) => {
+    if (!confirm('¿Eliminar etiqueta? Las personas seguirán existiendo.')) return;
     await deleteCleanerGroup(id);
-    if (groupFilter === id) setGroupFilter('all');
+    setTagFilters(prev => prev.filter(t => t !== id));
     await load();
   };
 
   const handleSaveEdit = async (
     cleaner: Vendor,
-    patch: { name: string; contact: string; active: boolean; groupIds: string[] },
+    patch: { name: string; contact: string; active: boolean; tagIds: string[] },
   ): Promise<string | null> => {
     const res = await updateVendor(cleaner.id, {
       name: patch.name.trim(),
@@ -155,7 +156,7 @@ export default function AseoClient(): JSX.Element {
       active: patch.active,
     });
     if (res.error) return res.error;
-    await setCleanerGroupMembership(cleaner.id, patch.groupIds);
+    await setCleanerGroupMembership(cleaner.id, patch.tagIds);
     await load();
     return null;
   };
@@ -215,21 +216,31 @@ export default function AseoClient(): JSX.Element {
         <KPICard label="Total adeudado" value={formatCurrency(totalOwed)} tone="red" highlight />
       </div>
 
-      {/* Bloque 2: filtros por grupo */}
+      {/* Bloque 2: filtros por etiqueta (multi-select) */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide mr-1">Grupo:</span>
-        <GroupChip active={groupFilter === 'all'} onClick={() => setGroupFilter('all')} label={`Todos (${cleaners.length})`} />
-        <GroupChip active={groupFilter === 'none'} onClick={() => setGroupFilter('none')} label="Sin grupo" />
+        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide mr-1">Etiqueta:</span>
+        {tagFilters.length > 0 && (
+          <TagChip active onClick={() => setTagFilters([])} label={`Limpiar filtros (${filteredCleaners.length})`} color="#64748b" />
+        )}
+        {tagFilters.length === 0 && (
+          <TagChip active={false} onClick={() => {}} label={`Todos (${cleaners.length})`} />
+        )}
+        <TagChip
+          active={tagFilters.includes('__none__')}
+          onClick={() => setTagFilters(prev => prev.includes('__none__') ? prev.filter(t => t !== '__none__') : [...prev, '__none__'])}
+          label="Sin etiqueta"
+        />
         {groups.map(g => (
-          <GroupChip
+          <TagChip
             key={g.id}
-            active={groupFilter === g.id}
-            onClick={() => setGroupFilter(g.id)}
+            active={tagFilters.includes(g.id)}
+            onClick={() => setTagFilters(prev => prev.includes(g.id) ? prev.filter(t => t !== g.id) : [...prev, g.id])}
             label={`${g.name} (${g.member_ids.length})`}
             color={g.color ?? undefined}
-            onDelete={() => handleDeleteGroup(g.id)}
+            onDelete={() => handleDeleteTag(g.id)}
           />
         ))}
+        <NewTagInline onCreateTag={handleCreateTag} />
       </div>
 
       {/* Bloque 9: explicación del flujo de liquidación */}
@@ -264,7 +275,7 @@ export default function AseoClient(): JSX.Element {
             const looseCount = cb?.loose_count ?? 0;
             const owed = cleaningOwed + looseOwed;
             const canPay = (b?.done_unpaid_count ?? 0) > 0 || looseCount > 0;
-            const cGroups = cleanerGroupsMap.get(c.id) ?? [];
+            const cTags = cleanerTagsMap.get(c.id) ?? [];
             return (
               <motion.div
                 key={c.id}
@@ -284,15 +295,15 @@ export default function AseoClient(): JSX.Element {
                       <div>
                         <div className="font-semibold text-slate-800 leading-tight">{c.name}</div>
                         <div className="text-xs text-slate-500">{c.contact ?? 'sin contacto'}</div>
-                        {cGroups.length > 0 && (
+                        {cTags.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1">
-                            {cGroups.map(g => (
+                            {cTags.map(t => (
                               <span
-                                key={g.id}
+                                key={t.id}
                                 className="px-1.5 py-0.5 text-[10px] font-semibold rounded"
-                                style={{ backgroundColor: (g.color ?? '#64748b') + '22', color: g.color ?? '#475569' }}
+                                style={{ backgroundColor: (t.color ?? '#64748b') + '22', color: t.color ?? '#475569' }}
                               >
-                                {g.name}
+                                {t.name}
                               </span>
                             ))}
                           </div>
@@ -379,7 +390,7 @@ export default function AseoClient(): JSX.Element {
             saving={saving}
             err={err}
             groups={groups}
-            onCreateGroup={handleCreateGroup}
+            onCreateTag={handleCreateTag}
             onClose={() => setNewModal(false)}
             onCreate={handleCreate}
           />
@@ -423,7 +434,7 @@ export default function AseoClient(): JSX.Element {
         {editing && (
           <EditCleanerModal
             cleaner={editing}
-            initialGroupIds={cleanerGroupsMap.get(editing.id)?.map(g => g.id) ?? []}
+            initialTagIds={cleanerTagsMap.get(editing.id)?.map(g => g.id) ?? []}
             groups={groups}
             onClose={() => setEditing(null)}
             onSave={async (patch) => {
@@ -465,38 +476,38 @@ function KPICard({ label, value, tone, highlight }: { label: string; value: stri
 }
 
 function NewCleanerModal({
-  form, setForm, saving, err, groups, onCreateGroup, onClose, onCreate,
+  form, setForm, saving, err, groups, onCreateTag, onClose, onCreate,
 }: {
-  form: { name: string; contact: string; groupIds: string[] };
-  setForm: (f: { name: string; contact: string; groupIds: string[] }) => void;
+  form: { name: string; contact: string; tagIds: string[] };
+  setForm: (f: { name: string; contact: string; tagIds: string[] }) => void;
   saving: boolean;
   err: string | null;
   groups: CleanerGroup[];
-  onCreateGroup: (name: string) => Promise<string | null>;
+  onCreateTag: (name: string) => Promise<string | null>;
   onClose: () => void;
   onCreate: () => void;
 }) {
   const backdrop = useBackdropClose(onClose);
-  const [newGroupName, setNewGroupName] = useState('');
-  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
+  const [creatingTag, setCreatingTag] = useState(false);
 
-  const toggleGroup = (id: string) => {
+  const toggleTag = (id: string) => {
     setForm({
       ...form,
-      groupIds: form.groupIds.includes(id)
-        ? form.groupIds.filter(g => g !== id)
-        : [...form.groupIds, id],
+      tagIds: form.tagIds.includes(id)
+        ? form.tagIds.filter(g => g !== id)
+        : [...form.tagIds, id],
     });
   };
 
-  const addGroup = async () => {
-    if (!newGroupName.trim()) return;
-    setCreatingGroup(true);
-    const id = await onCreateGroup(newGroupName.trim());
-    setCreatingGroup(false);
+  const addTag = async () => {
+    if (!newTagName.trim()) return;
+    setCreatingTag(true);
+    const id = await onCreateTag(newTagName.trim());
+    setCreatingTag(false);
     if (id) {
-      setForm({ ...form, groupIds: [...form.groupIds, id] });
-      setNewGroupName('');
+      setForm({ ...form, tagIds: [...form.tagIds, id] });
+      setNewTagName('');
     }
   };
 
@@ -536,17 +547,17 @@ function NewCleanerModal({
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Grupos (opcional)</label>
-            <p className="text-[11px] text-slate-500 mb-2">Agrupa por región o cualquier criterio. Una persona puede estar en varios grupos.</p>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Etiquetas (opcional)</label>
+            <p className="text-[11px] text-slate-500 mb-2">Filtra por región, confianza u otros criterios. Una persona puede tener varias etiquetas.</p>
             {groups.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {groups.map(g => {
-                  const on = form.groupIds.includes(g.id);
+                  const on = form.tagIds.includes(g.id);
                   return (
                     <button
                       key={g.id}
                       type="button"
-                      onClick={() => toggleGroup(g.id)}
+                      onClick={() => toggleTag(g.id)}
                       className={`px-2 py-1 text-xs font-semibold rounded-full border transition ${
                         on ? 'text-white' : 'text-slate-600 bg-white hover:bg-slate-50 border-slate-300'
                       }`}
@@ -561,16 +572,16 @@ function NewCleanerModal({
             <div className="flex gap-2">
               <input
                 type="text"
-                value={newGroupName}
-                onChange={e => setNewGroupName(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addGroup(); } }}
-                placeholder="Nuevo grupo (ej: Norte, Cartagena)"
+                value={newTagName}
+                onChange={e => setNewTagName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
+                placeholder="Nueva etiqueta (ej: Villavicencio, Confianza)"
                 className="flex-1 px-2 py-1.5 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               />
               <button
                 type="button"
-                onClick={addGroup}
-                disabled={creatingGroup || !newGroupName.trim()}
+                onClick={addTag}
+                disabled={creatingTag || !newTagName.trim()}
                 className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-700 rounded-lg hover:bg-slate-800 disabled:opacity-50"
               >
                 + Crear
@@ -593,7 +604,7 @@ function NewCleanerModal({
   );
 }
 
-function GroupChip({
+function TagChip({
   active, onClick, label, color, onDelete,
 }: {
   active: boolean;
@@ -616,13 +627,65 @@ function GroupChip({
           type="button"
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
           className={`pr-2 ${active ? 'text-white/80 hover:text-white' : 'text-slate-400 hover:text-red-600'}`}
-          title="Eliminar grupo"
-          aria-label="Eliminar grupo"
+          title="Eliminar etiqueta"
+          aria-label="Eliminar etiqueta"
         >
           ×
         </button>
       )}
     </span>
+  );
+}
+
+function NewTagInline({ onCreateTag }: { onCreateTag: (name: string) => Promise<string | null> }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [creating, setCreating] = useState(false);
+
+  const create = async () => {
+    if (!name.trim()) return;
+    setCreating(true);
+    await onCreateTag(name.trim());
+    setCreating(false);
+    setName('');
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="px-2 py-1 text-xs font-semibold text-slate-500 border border-dashed border-slate-300 rounded-full hover:border-slate-400 hover:text-slate-700 transition"
+      >
+        + Nueva etiqueta
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        autoFocus
+        type="text"
+        value={name}
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); create(); }
+          if (e.key === 'Escape') setOpen(false);
+        }}
+        placeholder="ej: Villavicencio"
+        className="px-2 py-1 text-xs border rounded-full w-36 focus:ring-2 focus:ring-blue-400 outline-none"
+      />
+      <button
+        type="button"
+        onClick={create}
+        disabled={creating || !name.trim()}
+        className="px-2 py-1 text-xs font-semibold text-white bg-blue-600 rounded-full hover:bg-blue-700 disabled:opacity-50"
+      >
+        {creating ? '…' : 'Crear'}
+      </button>
+      <button type="button" onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>
+    </div>
   );
 }
 
@@ -685,24 +748,24 @@ function DetailModal({
             <h3 className="text-xl font-bold text-slate-800">🧹 {cleaner.name}</h3>
             <p className="text-sm text-slate-500">Historial de aseos ({rows.length})</p>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center text-xs">
-            <div className="bg-slate-50 rounded-lg px-3 py-2 min-w-[110px]">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 text-center text-xs items-start">
+            <div className="bg-slate-50 rounded-lg px-3 py-2 min-h-[72px] flex flex-col justify-center">
               <div className="text-[10px] uppercase text-slate-500 font-semibold">Total facturado</div>
               <div className="text-base font-bold text-slate-800">{formatCurrency(totalEarned)}</div>
             </div>
-            <div className="bg-emerald-50 rounded-lg px-3 py-2 min-w-[110px]">
+            <div className="bg-emerald-50 rounded-lg px-3 py-2 min-h-[72px] flex flex-col justify-center">
               <div className="text-[10px] uppercase text-emerald-600 font-semibold">Pagado</div>
               <div className="text-base font-bold text-emerald-700">{formatCurrency(totalPaid)}</div>
             </div>
-            <div className="bg-amber-50 rounded-lg px-3 py-2 min-w-[110px]">
+            <div className="bg-amber-50 rounded-lg px-3 py-2 min-h-[72px] flex flex-col justify-center">
               <div className="text-[10px] uppercase text-amber-600 font-semibold">Sin pagar</div>
               <div className="text-base font-bold text-amber-700">{formatCurrency(totalUnpaid)}</div>
             </div>
-            <div className="bg-indigo-50 rounded-lg px-3 py-2 min-w-[110px]">
+            <div className="bg-indigo-50 rounded-lg px-3 py-2 min-h-[72px] flex flex-col justify-center">
               <div className="text-[10px] uppercase text-indigo-600 font-semibold">Insumos reemb.</div>
               <div className="text-base font-bold text-indigo-700">{formatCurrency(totalSuppliesReimb)}</div>
             </div>
-            <div className="bg-cyan-50 rounded-lg px-3 py-2 min-w-[110px]" title="Insumos comprados por la persona, sin asignar a una reserva">
+            <div className="bg-cyan-50 rounded-lg px-3 py-2 min-h-[72px] flex flex-col justify-center" title="Insumos comprados por la persona, sin asignar a una reserva">
               <div className="text-[10px] uppercase text-cyan-600 font-semibold">Insumos sueltos</div>
               <div className="text-base font-bold text-cyan-700">{formatCurrency(totalLoosePending)}</div>
               <div className="text-[10px] text-cyan-600">pend · pagado: {formatCurrency(totalLoosePaid)}</div>
@@ -980,29 +1043,29 @@ function PayoutModal({
 // Edit & Delete cleaner modals (Bloque 15A)
 // ─────────────────────────────────────────────────────────────────
 function EditCleanerModal({
-  cleaner, initialGroupIds, groups, onClose, onSave,
+  cleaner, initialTagIds, groups, onClose, onSave,
 }: {
   cleaner: Vendor;
-  initialGroupIds: string[];
+  initialTagIds: string[];
   groups: CleanerGroup[];
   onClose: () => void;
-  onSave: (patch: { name: string; contact: string; active: boolean; groupIds: string[] }) => Promise<string | null>;
+  onSave: (patch: { name: string; contact: string; active: boolean; tagIds: string[] }) => Promise<string | null>;
 }) {
   const [name, setName] = useState(cleaner.name);
   const [contact, setContact] = useState(cleaner.contact ?? '');
   const [active, setActive] = useState(cleaner.active);
-  const [groupIds, setGroupIds] = useState<string[]>(initialGroupIds);
+  const [tagIds, setTagIds] = useState<string[]>(initialTagIds);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const backdrop = useBackdropClose(onClose);
 
   const toggle = (id: string) =>
-    setGroupIds(g => g.includes(id) ? g.filter(x => x !== id) : [...g, id]);
+    setTagIds(g => g.includes(id) ? g.filter(x => x !== id) : [...g, id]);
 
   const submit = async () => {
     if (!name.trim()) { setErr('El nombre es obligatorio'); return; }
     setSaving(true); setErr(null);
-    const e = await onSave({ name, contact, active, groupIds });
+    const e = await onSave({ name, contact, active, tagIds });
     setSaving(false);
     if (e) setErr(e);
   };
@@ -1037,22 +1100,23 @@ function EditCleanerModal({
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-2">Grupos</label>
+            <label className="block text-xs font-semibold text-slate-600 mb-2">Etiquetas</label>
             <div className="flex flex-wrap gap-2">
               {groups.map(g => {
-                const on = groupIds.includes(g.id);
+                const on = tagIds.includes(g.id);
                 return (
                   <button
                     type="button" key={g.id} onClick={() => toggle(g.id)}
                     className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${
-                      on ? 'border-blue-500 text-blue-700 bg-blue-50' : 'border-slate-200 text-slate-600 bg-white hover:bg-slate-50'
+                      on ? 'text-white' : 'border-slate-200 text-slate-600 bg-white hover:bg-slate-50'
                     }`}
+                    style={on ? { backgroundColor: g.color ?? '#475569', borderColor: g.color ?? '#475569' } : undefined}
                   >
-                    {g.name}
+                    {on ? '✓ ' : ''}{g.name}
                   </button>
                 );
               })}
-              {groups.length === 0 && <span className="text-xs text-slate-400">Sin grupos creados todavía.</span>}
+              {groups.length === 0 && <span className="text-xs text-slate-400">Sin etiquetas creadas todavía.</span>}
             </div>
           </div>
           <label className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg cursor-pointer">

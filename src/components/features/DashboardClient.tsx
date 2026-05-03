@@ -7,9 +7,10 @@ import PeriodSelector from './PeriodSelector';
 import CSVUploader from './CSVUploader';
 import ExportMenu from './ExportMenu';
 import AlertsPanel from './AlertsPanel';
+import IncomeExpenseTab from './IncomeExpenseTab';
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
 import { computeFinancials } from '@/services/financial';
-import type { Period, FinancialKPIs, MonthlyPnL } from '@/services/financial';
+import type { Period, FinancialKPIs, MonthlyPnL, PayoutBreakdown } from '@/services/financial';
 import type { ParsedBooking } from '@/services/etl';
 import { useAuth } from '@/lib/useAuth';
 import { usePropertyFilter } from '@/lib/usePropertyFilter';
@@ -22,12 +23,17 @@ import type { InventoryItemRow } from '@/types/database';
 // ─── P&L Waterfall panel ──────────────────────────────────────────────────────
 
 function PLPanel({ kpis }: { kpis: FinancialKPIs }) {
-  const rows: Array<{ label: string; value: number; variant: 'revenue' | 'expense' | 'total' }> = [
-    { label: 'Ingreso Bruto',       value: kpis.grossRevenue,           variant: 'revenue' },
-    { label: 'Gastos Fijos',        value: -kpis.totalFixedExpenses,    variant: 'expense' },
-    { label: 'Margen Contribución', value: kpis.contributionMargin,     variant: 'total' },
-    { label: 'Gastos Variables',    value: -kpis.totalVariableExpenses, variant: 'expense' },
-    { label: 'Utilidad Neta',       value: kpis.netProfit,              variant: 'total' },
+  const bookingRevenue = kpis.grossRevenue - (kpis.netAdjustmentIncome ?? 0);
+  const rows: Array<{ label: string; value: number; variant: 'revenue' | 'expense' | 'total' | 'adj' }> = [
+    { label: 'Ingresos por reservas', value: bookingRevenue,               variant: 'revenue' },
+    ...(kpis.netAdjustmentIncome && kpis.netAdjustmentIncome !== 0
+      ? [{ label: 'Ajustes (daños cobrados, extras, etc.)', value: kpis.netAdjustmentIncome, variant: 'adj' as const }]
+      : []),
+    { label: 'Ingreso Bruto Total',  value: kpis.grossRevenue,            variant: 'total' },
+    { label: 'Gastos Variables',     value: -kpis.totalVariableExpenses,   variant: 'expense' },
+    { label: 'Margen Contribución',  value: kpis.contributionMargin,      variant: 'total' },
+    { label: 'Gastos Fijos',         value: -kpis.totalFixedExpenses,     variant: 'expense' },
+    { label: 'Utilidad Neta',        value: kpis.netProfit,               variant: 'total' },
   ];
   return (
     <div className="p-6 bg-white border rounded-xl shadow-sm">
@@ -46,12 +52,19 @@ function PLPanel({ kpis }: { kpis: FinancialKPIs }) {
                   : 'bg-red-50 font-bold text-red-800'
                 : row.variant === 'expense'
                   ? 'text-red-700'
-                  : 'text-blue-700 font-medium'
+                  : row.variant === 'adj'
+                    ? row.value >= 0 ? 'text-emerald-700 text-xs' : 'text-rose-700 text-xs'
+                    : 'text-blue-700 font-medium'
             }`}
           >
             <span>{row.label}</span>
-            <span className={row.variant === 'expense' ? 'text-red-600' : undefined}>
-              {row.variant === 'expense' ? '−' : ''}{formatCurrency(Math.abs(row.value))}
+            <span className={
+              row.variant === 'expense' ? 'text-red-600'
+              : row.variant === 'adj' ? (row.value >= 0 ? 'text-emerald-600' : 'text-rose-600')
+              : undefined
+            }>
+              {row.variant === 'expense' ? '−' : row.variant === 'adj' && row.value >= 0 ? '+' : ''}
+              {formatCurrency(Math.abs(row.value))}
             </span>
           </motion.div>
         ))}
@@ -70,26 +83,34 @@ export default function DashboardClient() {
   const authStatus = useAuth();
   const { properties, propertyIds, setPropertyIds, groups, tags, tagAssigns } = usePropertyFilter();
   const [period, setPeriod]               = useState<Period>('last-3-months');
+  const [customRange, setCustomRange]     = useState<{ from: string; to: string } | undefined>(undefined);
   const [kpis, setKpis]                   = useState<FinancialKPIs | null>(null);
   const [monthlyPnL, setMonthlyPnL]       = useState<MonthlyPnL[]>([]);
   const [exportMonthly, setExportMonthly] = useState<MonthlyPnL[]>([]);
+  const [payoutBreakdown, setPayoutBreakdown] = useState<PayoutBreakdown | null>(null);
+  const [granularity, setGranularity]     = useState<import('@/services/financial').ChartGranularity>('week');
+  const [activeTab, setActiveTab]         = useState<'resumen' | 'ingresos-egresos'>('resumen');
   const [loading, setLoading]             = useState(true);
   const [showUploader, setShowUploader]   = useState(false);
   const [importedBookings, setImportedBookings] = useState<ParsedBooking[]>([]);
 
   useEffect(() => {
     if (authStatus === 'checking') return;
+    // Don't fire for 'custom' until a valid range is set
+    if (period === 'custom' && (!customRange?.from || !customRange?.to)) return;
     let cancelled = false;
     setLoading(true);
-    computeFinancials(period, authStatus === 'authed', propertyIds).then(result => {
+    computeFinancials(period, authStatus === 'authed', propertyIds, customRange).then(result => {
       if (cancelled) return;
       setKpis(result.kpis);
       setMonthlyPnL(result.monthlyPnL);
       setExportMonthly(result.exportMonthly);
+      setPayoutBreakdown(result.payoutBreakdown);
+      setGranularity(result.granularity);
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [period, authStatus, propertyIds]);
+  }, [period, authStatus, propertyIds, customRange]);
 
   if (authStatus === 'checking') {
     return (
@@ -123,13 +144,34 @@ export default function DashboardClient() {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <PropertyMultiSelect properties={properties} value={propertyIds} onChange={setPropertyIds} groups={groups} tags={tags} tagAssigns={tagAssigns} />
-            <PeriodSelector value={period} onChange={setPeriod} />
+            <PeriodSelector value={period} onChange={setPeriod} customRange={customRange} onCustomRangeChange={setCustomRange} />
             {!loading && kpis && (
               <ExportMenu kpis={kpis} monthly={exportMonthly} period={period} />
             )}
           </div>
         </motion.div>
 
+        {/* Tabs */}
+        <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit">
+          {(['resumen', 'ingresos-egresos'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${
+                activeTab === tab
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {tab === 'resumen' ? 'Resumen' : 'Ingresos vs Egresos'}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'ingresos-egresos' && kpis && payoutBreakdown ? (
+          <IncomeExpenseTab payout={payoutBreakdown} kpis={kpis} granularity={granularity} />
+        ) : (
+          <>
         {/* KPI Grid */}
         <section>
           {loading || !kpis ? <KPISkeleton /> : <DashboardSummary kpis={kpis} />}
@@ -181,6 +223,9 @@ export default function DashboardClient() {
             <OccupancyChart
               data={monthlyPnL}
               breakEvenOccupancy={kpis?.breakEvenOccupancy ?? 0}
+              granularity={granularity}
+              totalNights={kpis?.totalNights ?? 0}
+              availableNights={kpis?.availableNights ?? 0}
             />
           </div>
 
@@ -314,6 +359,8 @@ export default function DashboardClient() {
             </motion.section>
           )}
         </AnimatePresence>
+          </>
+        )}
       </main>
 
       <AnimatePresence>

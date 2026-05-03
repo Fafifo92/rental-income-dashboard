@@ -5,6 +5,7 @@ import { FileText, Pencil, Trash2 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import type { Expense } from '@/types';
 import DataTable from './DataTable';
+import { cleanDamageDescription } from '@/lib/damageDescription';
 
 const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
   paid:    { label: 'Pagado',    className: 'bg-green-100 text-green-700'   },
@@ -99,7 +100,7 @@ export default function ExpensesList({ expenses, loading = false, onDelete, onEd
           const isCleaningGroup = (row.subcategory ?? '').toLowerCase() === 'cleaning';
           return (
             <span className="flex items-center gap-1.5">
-              <span className="truncate">{info.getValue() ?? '—'}</span>
+              <span className="truncate">{cleanDamageDescription(info.getValue() as string | null) || '—'}</span>
               {row.expense_group_id && !isCleaningGroup && (
                 <span
                   title="Gasto compartido entre varias propiedades"

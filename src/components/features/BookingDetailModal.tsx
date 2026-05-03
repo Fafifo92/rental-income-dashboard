@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { listExpenses, createExpense, updateExpense, deleteExpense } from '@/services/expenses';
+import { listExpenses, updateExpense, deleteExpense } from '@/services/expenses';
+import { hasBookingStarted } from '@/lib/bookingStatus';
+import { cleanDamageDescription } from '@/lib/damageDescription';
+import { toast } from '@/lib/toast';
 import { updateBooking } from '@/services/bookings';
 import {
   listBookingAdjustments, createBookingAdjustment, deleteBookingAdjustment, netAdjustment,
@@ -17,7 +20,6 @@ import type {
 } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { useBackdropClose, makeBackdropHandlers } from '@/lib/useBackdropClose';
-import ExpenseModal from './ExpenseModal';
 import DamageReportModal from './DamageReportModal';
 import MoneyInput from '@/components/MoneyInput';
 import { getDamageReconciliations, type DamageReconciliation } from '@/services/inventory';
@@ -38,6 +40,8 @@ interface BookingLite {
   payout_date?: string | null;
   listing_id?: string | null;
   notes?: string | null;
+  num_adults?: number | null;
+  num_children?: number | null;
   // Fase 11 — banderas operativas
   checkin_done?: boolean;
   checkout_done?: boolean;
@@ -59,9 +63,7 @@ export default function BookingDetailModal({
 }: Props) {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showAddExpense, setShowAddExpense] = useState(false);
   const [showLinkExisting, setShowLinkExisting] = useState(false);
-  const [saveError, setSaveError] = useState<string | undefined>();
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Bloque C — ajustes
@@ -82,6 +84,18 @@ export default function BookingDetailModal({
 
   const propertyId = resolvePropertyId?.(booking.listing_id) ?? null;
   const property = propertyId ? properties.find(p => p.id === propertyId) : null;
+
+  const bookingStarted = useMemo(() => hasBookingStarted({
+    start_date: booking.start_date,
+    end_date: booking.end_date,
+    cancelled_at: (booking as any).cancelled_at,
+    status: booking.status,
+  }), [booking.start_date, booking.end_date, (booking as any).cancelled_at, booking.status]);
+  const damageDisabledReason = !propertyId
+    ? 'No se puede resolver la propiedad de esta reserva'
+    : !bookingStarted
+      ? 'Solo se puede registrar un daño cuando la reserva está en curso o ya terminó'
+      : null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -120,15 +134,81 @@ export default function BookingDetailModal({
     : gross - fees;
   const realProfit = netPayout + netAdj - totalExpenses;
 
-  const handleSaveExpense = useCallback(async (data: Omit<Expense, 'id' | 'owner_id'>) => {
-    const res = await createExpense({ ...data, booking_id: booking.id });
-    if (res.error) { setSaveError(res.error); return; }
-    setSaveError(undefined);
-    setShowAddExpense(false);
+  /**
+   * Agrupa cada daño con sus cobros para reconciliación financiera.
+   *  - repair_cost: lo que costó arreglar (expense.amount)
+   *  - charged: suma de los `damage_charge` adjustments del mismo daño,
+   *    desglosado por origen (huésped / plataforma)
+   *  - diff = repair_cost - charged
+   *      > 0 → faltó cobrar (te quita dinero)
+   *      < 0 → cobraste de más (queda a tu favor)
+   *      = 0 → cuadrado
+   *
+   * El matching usa el item_name extraído de la descripción (los `damage_charge`
+   * adjustments creados por `reportDamage` siempre tienen el formato
+   * `Cobro huésped|plataforma – Daño: <item_name>...`).
+   */
+  const damageGroups = useMemo(() => {
+    const damageExpenses = expenses.filter(e => (e.subcategory ?? '').toLowerCase() === 'damage');
+    const damageChargeAdjs = adjustments.filter(a => a.kind === 'damage_charge');
+    return damageExpenses.map(exp => {
+      const visible = cleanDamageDescription(exp.description);
+      const m = visible.match(/^(?:Reposición\/reparación|Daño en propiedad):\s*(.+?)(?:\s+—\s+|$)/i);
+      const itemName = (m?.[1] ?? '').trim();
+      const expTag = `[exp:${exp.id}]`;
+      const matches = damageChargeAdjs.filter(a => {
+        if (exp.adjustment_id && a.id === exp.adjustment_id) return true;
+        const desc = (a.description ?? '').toLowerCase();
+        // Robust: match by embedded expense-ID tag (added since v2)
+        if ((a.description ?? '').includes(expTag)) return true;
+        // Fallback: text-based match when itemName is available
+        if (itemName && desc.includes(itemName.toLowerCase())) return true;
+        return false;
+      });
+      const fromGuest = matches
+        .filter(a => /cobro huésped/i.test(a.description ?? ''))
+        .reduce((s, a) => s + Number(a.amount), 0);
+      const fromPlatform = matches
+        .filter(a => /cobro plataforma/i.test(a.description ?? ''))
+        .reduce((s, a) => s + Number(a.amount), 0);
+      const fromOther = matches
+        .filter(a => !/cobro (huésped|plataforma)/i.test(a.description ?? ''))
+        .reduce((s, a) => s + Number(a.amount), 0);
+      const charged = fromGuest + fromPlatform + fromOther;
+      const repairCost = Number(exp.amount) || 0;
+      const diff = repairCost - charged;
+      // If the expense was manually marked 'paid', treat as acknowledged
+      const isAcknowledged = exp.status === 'paid';
+      return { expense: exp, itemName: itemName || visible || 'Daño', repairCost, fromGuest, fromPlatform, fromOther, charged, diff, matches, isAcknowledged };
+    });
+  }, [expenses, adjustments]);
+
+  const handleChargeDifference = useCallback(async (g: typeof damageGroups[number]) => {
+    if (g.diff <= 0) return;
+    const res = await createBookingAdjustment({
+      booking_id: booking.id,
+      kind: 'damage_charge',
+      amount: g.diff,
+      description: `Cobro pendiente – Daño: ${g.itemName} [exp:${g.expense.id}] (diferencia no cobrada)`,
+      date: new Date().toISOString().slice(0, 10),
+      bank_account_id: null,
+    });
+    if (res.error) { toast.error(res.error); return; }
+    toast.success('Ajuste creado por la diferencia.');
     await load();
   }, [booking.id, load]);
 
-  const handleLinkExisting = useCallback(async (expenseId: string) => {
+  const handleAcknowledgeDamage = useCallback(async (g: typeof damageGroups[number]) => {
+    if (g.diff <= 0) return;
+    // Mark the expense as paid/acknowledged — the financial loss is already reflected
+    // in the fact that repair_cost > charged. Creating a 'discount' adj would double-count the loss.
+    const res = await updateExpense(g.expense.id, { status: 'paid' });
+    if (res.error) { toast.error(`No se pudo actualizar el estado: ${res.error}`); return; }
+    toast.success('Diferencia asumida. El gasto queda marcado como resuelto.');
+    await load();
+  }, [load]);
+
+  const handleLinkExisting= useCallback(async (expenseId: string) => {
     const res = await updateExpense(expenseId, { booking_id: booking.id });
     if (!res.error) {
       setShowLinkExisting(false);
@@ -147,7 +227,7 @@ export default function BookingDetailModal({
     const linkedExp = expenses.find(e => e.adjustment_id === id);
     if (linkedExp) {
       const resExp = await deleteExpense(linkedExp.id);
-      if (resExp.error) { setSaveError(`No se pudo borrar el gasto vinculado: ${resExp.error}`); return; }
+      if (resExp.error) { toast.error(`No se pudo borrar el gasto vinculado: ${resExp.error}`); return; }
     }
     const res = await deleteBookingAdjustment(id);
     if (!res.error) { setDeletingAdjId(null); await load(); }
@@ -298,6 +378,9 @@ export default function BookingDetailModal({
               <InfoRow label="Noches" value={String(booking.num_nights)} />
               <InfoRow label="Estado" value={booking.status} />
               <InfoRow label="Propiedad" value={property?.name ?? '—'} />
+              <InfoRow label="Canal" value={booking.channel ?? '—'} />
+              <InfoRow label="Adultos" value={String(booking.num_adults ?? 1)} />
+              <InfoRow label="Niños" value={String(booking.num_children ?? 0)} />
               <InfoRow label="Payout real" value={booking.payout_date ?? 'Pendiente'} />
             </div>
 
@@ -428,23 +511,14 @@ export default function BookingDetailModal({
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-800">Gastos vinculados a esta reserva</h3>
-                  <p className="text-xs text-slate-500">Daños, reparaciones, amenities extra, etc.</p>
+                  <p className="text-xs text-slate-500">Daños, reparaciones, amenities extra que ya existen como gasto.</p>
                 </div>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setShowLinkExisting(true)}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg transition"
                   >
-                    🔗 Vincular existente
-                  </button>
-                  <button
-                    onClick={() => setShowAddExpense(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                    </svg>
-                    Nuevo gasto
+                    Vincular gasto existente
                   </button>
                 </div>
               </div>
@@ -473,7 +547,7 @@ export default function BookingDetailModal({
                           <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{e.date}</td>
                           <td className="px-3 py-2">
                             <div className="font-medium text-slate-800">{e.category}</div>
-                            {e.description && <div className="text-xs text-slate-500">{e.description}</div>}
+                            {(() => { const d = cleanDamageDescription(e.description); return d ? <div className="text-xs text-slate-500">{d}</div> : null; })()}
                           </td>
                           <td className="px-3 py-2 text-slate-600">{e.vendor ?? '—'}</td>
                           <td className="px-3 py-2 text-right font-semibold text-rose-600 tabular-nums whitespace-nowrap">
@@ -523,11 +597,11 @@ export default function BookingDetailModal({
                 <div className="flex gap-2">
                   <button
                     onClick={() => setShowDamageReport(true)}
-                    disabled={!propertyId}
-                    title={propertyId ? 'Registrar un daño (inventario o estructura)' : 'No se puede resolver la propiedad de esta reserva'}
+                    disabled={!!damageDisabledReason}
+                    title={damageDisabledReason ?? 'Registrar un daño (inventario o estructura)'}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition"
                   >
-                    ⚠ Registrar daño
+                    Registrar daño
                   </button>
                   <button
                     onClick={() => setShowAddAdjustment(true)}
@@ -550,7 +624,7 @@ export default function BookingDetailModal({
                 <p className="text-[11px] text-slate-500 mb-2 italic">
                   💡 Los ajustes son del lado del huésped (lo que cobras o descuentas).
                   Para registrar un <strong>daño</strong> (inventario o estructura) usa el botón{' '}
-                  <strong>"⚠ Registrar daño"</strong>: queda atado a esta reserva, evita duplicados y vincula al inventario cuando aplica.
+                  <strong>"Registrar daño"</strong>: queda atado a esta reserva, evita duplicados y vincula al inventario cuando aplica.
                 </p>
                 <div className="border border-slate-200 rounded-lg overflow-hidden">
                   <table className="w-full text-sm">
@@ -572,7 +646,7 @@ export default function BookingDetailModal({
                           <tr key={a.id} className="border-t border-slate-100 hover:bg-slate-50/50">
                             <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{a.date}</td>
                             <td className="px-3 py-2">
-                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${ADJ_KIND_STYLE[a.kind]}`}>
+                              <span className={`inline-flex whitespace-nowrap text-xs font-semibold px-2 py-0.5 rounded-full ${ADJ_KIND_STYLE[a.kind]}`}>
                                 {ADJ_KIND_LABEL[a.kind]}
                               </span>
                             </td>
@@ -580,7 +654,7 @@ export default function BookingDetailModal({
                               {a.description ?? '—'}
                               {linkedExpense && (
                                 <div className="mt-1 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 inline-flex items-center gap-1">
-                                  ⚠️ Gasto reparación: {formatCurrency(Number(linkedExpense.amount))}
+                                  Gasto reparación: {formatCurrency(Number(linkedExpense.amount))}
                                   <span className="font-semibold uppercase">· {linkedExpense.status}</span>
                                 </div>
                               )}
@@ -624,7 +698,106 @@ export default function BookingDetailModal({
               )}
             </div>
 
-            {/* 🔧 Daños del inventario — Bloque 16 */}
+            {/* Reconciliación de daños — comparación cobrado vs costo real */}
+            {damageGroups.length > 0 && (
+              <div className="px-4 sm:px-7 py-4 sm:py-5 border-t border-slate-100">
+                <div className="mb-3">
+                  <h3 className="text-sm font-semibold text-slate-800">Reconciliación de daños</h3>
+                  <p className="text-xs text-slate-500">Compara lo cobrado al huésped o a la plataforma con lo que realmente costó reparar.</p>
+                </div>
+                <div className="space-y-3">
+                  {damageGroups.map((g, i) => {
+                    const isShortfall = g.diff > 0.5 && !g.isAcknowledged;
+                    const isSurplus = g.diff < -0.5;
+                    const isBalanced = !isShortfall && !isSurplus;
+                    const banner = isShortfall
+                      ? 'border-rose-200 bg-rose-50'
+                      : isSurplus
+                        ? 'border-emerald-200 bg-emerald-50'
+                        : 'border-slate-200 bg-slate-50';
+                    return (
+                      <div key={g.expense.id ?? i} className={`border rounded-lg p-3 ${banner}`}>
+                        <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-slate-800 truncate">{g.itemName}</div>
+                            <div className="text-[11px] text-slate-500">
+                              {g.expense.category} · estado:{' '}
+                              <span className="font-semibold uppercase">{g.expense.status}</span>
+                            </div>
+                          </div>
+                          <div className="text-right text-xs">
+                            <div className="text-slate-500">Costo real</div>
+                            <div className="font-bold text-rose-700 tabular-nums">{formatCurrency(g.repairCost)}</div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs mb-2">
+                          <div className="bg-white/60 border border-slate-200 rounded px-2 py-1.5">
+                            <div className="text-[10px] uppercase tracking-wide text-slate-500">Cobrado huésped</div>
+                            <div className="font-semibold text-emerald-700 tabular-nums">{formatCurrency(g.fromGuest)}</div>
+                          </div>
+                          <div className="bg-white/60 border border-slate-200 rounded px-2 py-1.5">
+                            <div className="text-[10px] uppercase tracking-wide text-slate-500">Cobrado plataforma</div>
+                            <div className="font-semibold text-emerald-700 tabular-nums">{formatCurrency(g.fromPlatform)}</div>
+                          </div>
+                          <div className="bg-white/60 border border-slate-200 rounded px-2 py-1.5">
+                            <div className="text-[10px] uppercase tracking-wide text-slate-500">Total cobrado</div>
+                            <div className="font-semibold text-emerald-700 tabular-nums">{formatCurrency(g.charged)}</div>
+                          </div>
+                          <div className="bg-white/60 border border-slate-200 rounded px-2 py-1.5">
+                            <div className="text-[10px] uppercase tracking-wide text-slate-500">Diferencia</div>
+                            <div className={`font-bold tabular-nums ${isShortfall ? 'text-rose-700' : isSurplus ? 'text-emerald-700' : 'text-slate-600'}`}>
+                              {g.diff > 0 ? '−' : g.diff < 0 ? '+' : ''}{formatCurrency(Math.abs(g.diff))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {isBalanced && !g.isAcknowledged && (
+                          <p className="text-xs text-slate-600">Cuadrado: lo cobrado coincide con el costo real.</p>
+                        )}
+                        {g.isAcknowledged && g.diff > 0.5 && (
+                          <p className="text-xs text-slate-600">
+                            Pérdida asumida: {formatCurrency(g.diff)} no cobrado, registrado como resuelto.
+                          </p>
+                        )}
+                        {isSurplus && (
+                          <p className="text-xs text-emerald-800">
+                            Cobraste {formatCurrency(Math.abs(g.diff))} más de lo que costó reparar. El excedente ya quedó como ingreso del ajuste.
+                          </p>
+                        )}
+                        {isShortfall && (
+                          <div className="space-y-2">
+                            <p className="text-xs text-rose-800">
+                              Faltó cobrar {formatCurrency(g.diff)}. Esto reduce tu utilidad real de la reserva.
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleChargeDifference(g)}
+                                className="px-3 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition"
+                                title="Crea un ajuste por la diferencia. Úsalo si vas a cobrar al huésped o a la plataforma."
+                              >
+                                Cobrar la diferencia
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleAcknowledgeDamage(g)}
+                                className="px-3 py-1.5 text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg transition"
+                                title="Marca el gasto como resuelto sin cobrar. La pérdida ya está reflejada en el costo real."
+                              >
+                                Asumir como pérdida
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Daños del inventario — Bloque 16 */}
             <BookingDamagesSection bookingId={booking.id} />
           </div>
 
@@ -648,7 +821,7 @@ export default function BookingDetailModal({
                   className="px-4 py-2 text-sm font-semibold text-amber-700 bg-amber-100 hover:bg-amber-200 rounded-lg inline-flex items-center gap-1.5"
                   title="Faltan tareas operativas"
                 >
-                  ⚠ Marcar completada
+                  Marcar completada
                 </button>
               )}
             </div>
@@ -656,25 +829,7 @@ export default function BookingDetailModal({
           </div>
         </motion.div>
 
-        {/* Modal para agregar gasto — pre-llena booking_id + property_id */}
-        <AnimatePresence>
-          {showAddExpense && (
-            <ExpenseModal
-              properties={properties}
-              bankAccounts={bankAccounts}
-              onClose={() => { setShowAddExpense(false); setSaveError(undefined); }}
-              onSave={handleSaveExpense}
-              error={saveError}
-              prefill={{
-                booking_id: booking.id,
-                property_id: propertyId,
-                category: 'Mantenimiento',
-                type: 'variable',
-                date: booking.end_date || new Date().toISOString().split('T')[0],
-              }}
-            />
-          )}
-        </AnimatePresence>
+        {/* Modal para agregar gasto eliminado: ahora solo se permite vincular gastos existentes huérfanos */}
 
         {/* Link existing expense picker */}
         <AnimatePresence>
@@ -700,7 +855,7 @@ export default function BookingDetailModal({
 
         {/* Damage report modal — punto único para registrar daños */}
         <AnimatePresence>
-          {showDamageReport && propertyId && (
+          {showDamageReport && propertyId && bookingStarted && (
             <DamageReportModal
               propertyId={propertyId}
               propertyName={property?.name ?? undefined}
@@ -936,7 +1091,7 @@ function AdjustmentFormModal({
             Servicios públicos, aseo o gastos del negocio NO van aquí.
           </p>
           <p className="text-[11px] text-amber-700 mt-1">
-            ¿Es un <strong>daño</strong>? Cierra esto y usa el botón <strong>"⚠ Registrar daño"</strong>.
+            ¿Es un <strong>daño</strong>? Cierra esto y usa el botón <strong>"Registrar daño"</strong>.
           </p>
         </div>
         <form onSubmit={submit} className="p-6 space-y-4">
@@ -1260,7 +1415,7 @@ function CompleteBookingModal({
             </div>
           ) : (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800 space-y-1">
-              <div className="font-semibold">⚠ Quedan {missing.length} tareas pendientes.</div>
+              <div className="font-semibold">Quedan {missing.length} tareas pendientes.</div>
               <div className="text-xs">
                 Puedes completar la reserva de todos modos, pero quedará <strong>cerrada con pendientes</strong>. Las banderas faltantes seguirán visibles para que las termines luego.
               </div>
@@ -1318,7 +1473,7 @@ function BookingDamagesSection({ bookingId }: { bookingId: string }): JSX.Elemen
     <div className="bg-rose-50/40 border border-rose-200 rounded-xl p-4 mt-4">
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
-          <h3 className="text-sm font-bold text-rose-800 flex items-center gap-1.5">🔧 Daños del inventario ({rows.length})</h3>
+          <h3 className="text-sm font-bold text-rose-800 flex items-center gap-1.5">Daños del inventario ({rows.length})</h3>
           <p className="text-[11px] text-rose-700/80">Items reportados como dañados durante esta reserva.</p>
         </div>
         <div className="text-right text-xs">

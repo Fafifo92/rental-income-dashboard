@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ExpensesList from './ExpensesList';
 import ExpenseModal from './ExpenseModal';
+import DamageExpenseEditModal from './DamageExpenseEditModal';
 import ExpenseDetailModal from './ExpenseDetailModal';
 import BookingDetailModal from './BookingDetailModal';
 import FilterBar from './FilterBar';
@@ -13,6 +14,7 @@ import VendorExpenseForm from './expense-forms/VendorExpenseForm';
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
 import RecurringPendingPanel from './RecurringPendingPanel';
 import SharedBillsPendingPanel from './SharedBillsPendingPanel';
+import { toast } from '@/lib/toast';
 import {
   listExpenses,
   createExpense,
@@ -27,6 +29,7 @@ import { listListings } from '@/services/listings';
 import { deleteBookingAdjustment } from '@/services/bookingAdjustments';
 import { supabase } from '@/lib/supabase/client';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
+import { cleanDamageDescription } from '@/lib/damageDescription';
 import type { Expense } from '@/types';
 import type { BankAccountRow, BookingRow, ListingRow, ExpenseSection, ExpenseSubcategory } from '@/types/database';
 import { EXPENSE_SUBCATEGORY_META } from '@/types/database';
@@ -155,25 +158,27 @@ export default function ExpensesClient() {
       // EDITAR
       if (dbConnected) {
         const result = await updateExpense(editing.id, data);
-        if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); return false; }
+        if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); toast.error(result.error ?? 'Error al guardar'); return false; }
         setExpenses(prev => prev.map(e => e.id === editing.id ? result.data! : e));
       } else {
         setExpenses(prev => prev.map(e => e.id === editing.id ? { ...e, ...data } : e));
       }
       setEditing(null);
       setShowModal(false);
+      toast.success('Gasto actualizado');
       return true;
     }
     // CREAR
     if (dbConnected) {
       const result = await createExpense(data);
-      if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); return false; }
+      if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); toast.error(result.error ?? 'Error al guardar'); return false; }
       setExpenses(prev => [result.data!, ...prev]);
     } else {
       setExpenses(prev => [{ ...data, id: crypto.randomUUID() }, ...prev]);
     }
     setShowModal(false);
     dispatchRecurringChange();
+    toast.success('Gasto registrado');
     return true;
   };
 
@@ -182,7 +187,7 @@ export default function ExpensesClient() {
     setSaveError('');
     if (dbConnected) {
       const result = await createSharedExpense(rows);
-      if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); return false; }
+      if (result.error || !result.data) { setSaveError(result.error ?? 'Error'); toast.error(result.error ?? 'Error al guardar'); return false; }
       setExpenses(prev => [...result.data!.expenses, ...prev]);
     } else {
       const groupId = crypto.randomUUID();
@@ -195,6 +200,7 @@ export default function ExpensesClient() {
     }
     setShowModal(false);
     dispatchRecurringChange();
+    toast.success('Gasto compartido registrado');
     return true;
   };
 
@@ -228,15 +234,16 @@ export default function ExpensesClient() {
     setSaveError('');
     if (expense.adjustment_id) {
       const resAdj = await deleteBookingAdjustment(expense.adjustment_id);
-      if (resAdj.error) { setSaveError(`No se pudo eliminar el ajuste: ${resAdj.error}`); return; }
+      if (resAdj.error) { setSaveError(`No se pudo eliminar el ajuste: ${resAdj.error}`); toast.error(`No se pudo eliminar el ajuste: ${resAdj.error}`); return; }
     }
     if (dbConnected) {
       const res = await deleteExpense(expense.id);
-      if (res.error) { setSaveError(res.error); return; }
+      if (res.error) { setSaveError(res.error); toast.error(res.error); return; }
     }
     setExpenses(prev => prev.filter(e => e.id !== expense.id));
     setEditing(null);
     setShowModal(false);
+    toast.success('Gasto descartado');
   };
 
   const handleDeleteRequest = (id: string) => {
@@ -273,11 +280,12 @@ export default function ExpensesClient() {
     if (!deleteTarget) return;
     if (dbConnected) {
       const result = await deleteExpense(deleteTarget.id);
-      if (result.error) return;
+      if (result.error) { toast.error(result.error); return; }
     }
     setExpenses(prev => prev.filter(e => e.id !== deleteTarget.id));
     setDeleteTarget(null);
     dispatchRecurringChange();
+    toast.success('Gasto eliminado');
   };
 
   const totalFixed = expenses.filter(e => e.type === 'fixed').reduce((s, e) => s + e.amount, 0);
@@ -436,9 +444,9 @@ export default function ExpensesClient() {
                             )}
                           </div>
                           <p className="text-xs text-slate-400 mt-0.5">{e.date}</p>
-                          {e.description && (
-                            <p className="text-xs text-slate-600 mt-1 line-clamp-2">{e.description}</p>
-                          )}
+                          {(() => { const d = cleanDamageDescription(e.description); return d ? (
+                            <p className="text-xs text-slate-600 mt-1 line-clamp-2">{d}</p>
+                          ) : null; })()}
                         </div>
                         <p className="font-bold text-yellow-700 text-sm whitespace-nowrap">{formatCurrency(e.amount)}</p>
                       </div>
@@ -615,7 +623,27 @@ export default function ExpensesClient() {
           />
         )}
 
-        {showModal && (
+        {showModal && editing && (editing.subcategory ?? '').toLowerCase() === 'damage' ? (
+          <DamageExpenseEditModal
+            expense={editing}
+            properties={properties}
+            bankAccounts={bankAccounts}
+            onClose={() => { setShowModal(false); setEditing(null); setSaveError(''); }}
+            onSave={async (patch) => {
+              if (dbConnected) {
+                const res = await updateExpense(editing.id, patch);
+                if (res.error || !res.data) { toast.error(res.error ?? 'Error al guardar'); return; }
+                setExpenses(prev => prev.map(e => e.id === editing.id ? res.data! : e));
+              } else {
+                setExpenses(prev => prev.map(e => e.id === editing.id ? { ...e, ...patch } as Expense : e));
+              }
+              setShowModal(false);
+              setEditing(null);
+              toast.success('Daño actualizado');
+            }}
+            onDiscard={editing.adjustment_id ? () => handleDiscardWithAdjustment(editing) : undefined}
+          />
+        ) : showModal && (
           <ExpenseModal
             properties={properties}
             bankAccounts={bankAccounts}
@@ -645,9 +673,10 @@ export default function ExpensesClient() {
             onSaveGroup={editing?.expense_group_id ? async (patch) => {
               if (!editing.expense_group_id) return;
               const res = await updateExpenseGroup(editing.expense_group_id, patch);
-              if (res.error || !res.data) { setSaveError(res.error ?? 'Error al actualizar el grupo'); return; }
+              if (res.error || !res.data) { setSaveError(res.error ?? 'Error al actualizar el grupo'); toast.error(res.error ?? 'Error al actualizar el grupo'); return; }
               const byId = new Map(res.data.map(r => [r.id, r]));
               setExpenses(prev => prev.map(e => byId.get(e.id) ?? e));
+              toast.success('Grupo de gastos actualizado');
             } : undefined}
             editingGroupId={editing?.expense_group_id ?? null}
             editingGroupSize={editing?.expense_group_id

@@ -37,6 +37,22 @@ export const deleteBookingAdjustment = async (
   return { data: true, error: null };
 };
 
+/**
+ * Carga todos los ajustes de reserva del propietario autenticado.
+ * RLS garantiza que solo se devuelven ajustes de reservas propias.
+ * Usado por `computeFinancials` para incluir cobros de daños, ingresos extra
+ * y descuentos en los KPIs globales y gráficas mensuales.
+ */
+export const listAllBookingAdjustmentsForOwner = async (): Promise<
+  ServiceResult<Pick<BookingAdjustmentRow, 'kind' | 'amount' | 'date'>[]>
+> => {
+  const { data, error } = await supabase
+    .from('booking_adjustments')
+    .select('kind, amount, date');
+  if (error) return { data: null, error: error.message };
+  return { data: data ?? [], error: null };
+};
+
 /** Devuelve el impacto neto: todos suman (entran como ingreso), excepto `discount` que resta. */
 export const netAdjustment = (adj: BookingAdjustmentRow[]): number =>
   adj.reduce((s, a) => {

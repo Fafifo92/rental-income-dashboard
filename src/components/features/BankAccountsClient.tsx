@@ -17,7 +17,7 @@ import type { BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import MoneyInput from '@/components/MoneyInput';
-
+import { toast } from '@/lib/toast';
 const BANKS = ['Bancolombia', 'Caja Social', 'Davivienda', 'BBVA', 'Scotiabank Colpatria', 'Banco de Bogotá', 'Nequi', 'Daviplata', 'Otro'];
 
 type FormState = {
@@ -146,7 +146,8 @@ export default function BankAccountsClient() {
   const handleDelete = async (acc: BankAccountRow) => {
     if (!confirm(`¿Eliminar la cuenta "${acc.name}"? Esto no borra reservas o gastos asociados, solo se descontecta el vínculo.`)) return;
     const res = await deleteBankAccount(acc.id);
-    if (res.error) { alert(res.error); return; }
+    if (res.error) { toast.error(res.error); return; }
+    toast.success(`Cuenta "${acc.name}" eliminada`);
     await load();
   };
 

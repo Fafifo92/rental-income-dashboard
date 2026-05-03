@@ -64,17 +64,25 @@ const SUBTYPE_OPTIONS: Record<ExpenseSubcategory, string[]> = {
   guest_amenities: ['Welcome kit', 'Snack / bebida', 'Regalo', 'Detalle especial', 'Otro'],
 };
 
-// Parsea "[Subtipo] resto" → { subtype, rest }
-const parseDescription = (desc: string | null): { subtype: string; rest: string } => {
-  if (!desc) return { subtype: '', rest: '' };
-  const m = desc.match(/^\[([^\]]+)\]\s*(.*)$/);
-  return m ? { subtype: m[1], rest: m[2] } : { subtype: '', rest: desc };
+// Parsea "[Subtipo] resto" → { subtype, rest }. También extrae el tag de daño
+// (`__item:uuid` o `__subject:slug`) para no mostrarlo al editar, pero
+// preservarlo al guardar — `reportDamage` lo usa para idempotencia.
+const DAMAGE_TAG_RE = /\s*__(?:item|subject):[A-Za-z0-9-]+(?:\s|$)/g;
+const parseDescription = (desc: string | null): { subtype: string; rest: string; tag: string } => {
+  if (!desc) return { subtype: '', rest: '', tag: '' };
+  const tagMatch = desc.match(/__(?:item|subject):[A-Za-z0-9-]+/);
+  const tag = tagMatch ? tagMatch[0] : '';
+  const cleaned = desc.replace(DAMAGE_TAG_RE, ' ').replace(/\s{2,}/g, ' ').trim();
+  const m = cleaned.match(/^\[([^\]]+)\]\s*(.*)$/);
+  return m ? { subtype: m[1], rest: m[2], tag } : { subtype: '', rest: cleaned, tag };
 };
 
-const composeDescription = (subtype: string, rest: string): string | null => {
+const composeDescription = (subtype: string, rest: string, tag = ''): string | null => {
   const t = rest.trim();
-  if (subtype) return `[${subtype}]${t ? ' ' + t : ''}`;
-  return t || null;
+  const body = subtype ? `[${subtype}]${t ? ' ' + t : ''}` : (t || '');
+  if (!body && !tag) return null;
+  if (!tag) return body || null;
+  return body ? `${body} ${tag}` : tag;
 };
 
 export default function ExpenseModal({ properties = [], bankAccounts = [], onClose, onSave, onSaveShared, onSaveGroup, editingGroupId, editingGroupSize, error, initial, prefill, onDiscardLinked }: Props) {
@@ -82,6 +90,7 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
   const initialParsed = parseDescription(initialForm.description ?? null);
   const [form, setForm] = useState<FormData>({ ...initialForm, description: initialParsed.rest || null });
   const [subtype, setSubtype] = useState<string>(initialParsed.subtype);
+  const [damageTag] = useState<string>(initialParsed.tag);
   const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>({});
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -169,7 +178,7 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
     if (!validate()) return;
     const merged: FormData = {
       ...form,
-      description: composeDescription(subtype, form.description ?? ''),
+      description: composeDescription(subtype, form.description ?? '', damageTag),
     };
 
     // Modo compartido: emitir N filas

@@ -1,5 +1,6 @@
 ---
 import '../styles/global.css';
+import ToastProvider from '../components/ToastProvider';
 const { title } = Astro.props;
 ---
 <!doctype html>
@@ -14,5 +15,8 @@ const { title } = Astro.props;
     <meta name="format-detection" content="telephone=no" />
     <title>{title}</title>
 </head>
-<body class="antialiased bg-background text-foreground"><slot /></body>
+<body class="antialiased bg-background text-foreground">
+    <slot />
+    <ToastProvider client:load />
+</body>
 </html>

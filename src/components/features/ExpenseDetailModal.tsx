@@ -3,6 +3,7 @@ import type { Expense } from '@/types';
 import type { PropertyRow, BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
+import { cleanDamageDescription } from '@/lib/damageDescription';
 
 interface Props {
   expense: Expense;
@@ -123,7 +124,7 @@ export default function ExpenseDetailModal({
         <div className="px-7 pb-5">
           <p className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1">Descripción</p>
           <p className="text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3 min-h-[3rem] whitespace-pre-wrap">
-            {expense.description || <span className="text-slate-400 italic">Sin descripción</span>}
+            {cleanDamageDescription(expense.description) || <span className="text-slate-400 italic">Sin descripción</span>}
           </p>
         </div>
 

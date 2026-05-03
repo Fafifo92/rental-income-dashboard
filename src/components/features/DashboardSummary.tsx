@@ -138,7 +138,7 @@ export default function DashboardSummary({ kpis }: { kpis: FinancialKPIs }) {
     },
     {
       label: 'Ocupación',
-      sublabel: 'Noches ocupadas',
+      sublabel: `${kpis.totalNights} de ${kpis.availableNights} noches`,
       value: Math.round(kpis.occupancyRate * 100),
       format: formatPercent,
       color: 'text-orange-600',
