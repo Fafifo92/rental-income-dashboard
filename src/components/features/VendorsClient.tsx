@@ -16,6 +16,7 @@ import SharedBillPayModal from './SharedBillPayModal';
 import MoneyInput from '@/components/MoneyInput';
 import { parseMoney } from '@/lib/money';
 import { toast } from '@/lib/toast';
+import { todayISO } from '@/lib/dateUtils';
 
 const KINDS: { value: VendorKind; label: string; icon: string; description: string; group: 'utilities' | 'business' }[] = [
   { value: 'utility',          label: 'Servicio público',     icon: '💡', description: 'Luz, agua, gas, internet — gastos de operación de cada propiedad.', group: 'utilities' },
@@ -89,7 +90,7 @@ const EMPTY: Form = {
   poolConsumptionRule: 'per_person_per_night',
   poolCreditsPerUnit: '1',
   poolChildWeight: '1',
-  poolActivatedAt: new Date().toISOString().slice(0, 10),
+  poolActivatedAt: todayISO(),
   poolExpiresAt: '',
 };
 
@@ -215,7 +216,7 @@ export default function VendorsClient(): JSX.Element {
       poolConsumptionRule: 'per_person_per_night',
       poolCreditsPerUnit: '1',
       poolChildWeight: '1',
-      poolActivatedAt: new Date().toISOString().slice(0, 10),
+      poolActivatedAt: todayISO(),
       poolExpiresAt: '',
     });
     setErr(null);

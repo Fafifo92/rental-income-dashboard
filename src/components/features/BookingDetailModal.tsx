@@ -14,6 +14,7 @@ import {
 } from '@/services/cleanings';
 import { listVendors, type Vendor } from '@/services/vendors';
 import { consumeCreditsForCheckin } from '@/services/creditPools';
+import { todayISO } from '@/lib/dateUtils';
 import type { Expense } from '@/types';
 import type {
   PropertyRow, BankAccountRow, BookingAdjustmentRow, BookingAdjustmentKind,
@@ -190,7 +191,7 @@ export default function BookingDetailModal({
       kind: 'damage_charge',
       amount: g.diff,
       description: `Cobro pendiente – Daño: ${g.itemName} [exp:${g.expense.id}] (diferencia no cobrada)`,
-      date: new Date().toISOString().slice(0, 10),
+      date: todayISO(),
       bank_account_id: null,
     });
     if (res.error) { toast.error(res.error); return; }
@@ -269,7 +270,7 @@ export default function BookingDetailModal({
 
     // Auto-marcar aseos pendientes como hechos cuando se marca el check-out.
     if (field === 'checkout_done' && next) {
-      const doneDate = booking.end_date || new Date().toISOString().split('T')[0];
+      const doneDate = booking.end_date || todayISO();
       const pending = cleanings.filter(c => c.status === 'pending');
       if (pending.length > 0) {
         await Promise.all(pending.map(c => updateCleaning(c.id, { status: 'done', done_date: c.done_date ?? doneDate })));
@@ -291,7 +292,7 @@ export default function BookingDetailModal({
     c: BookingCleaning,
     next: 'pending' | 'done' | 'paid',
   ) => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayISO();
     const patch: Partial<BookingCleaning> = { status: next };
     if (next === 'done' && !c.done_date) patch.done_date = today;
     if (next === 'paid' && !c.paid_date) patch.paid_date = today;
@@ -846,7 +847,7 @@ export default function BookingDetailModal({
         <AnimatePresence>
           {showAddAdjustment && (
             <AdjustmentFormModal
-              defaultDate={booking.end_date || new Date().toISOString().split('T')[0]}
+              defaultDate={booking.end_date || todayISO()}
               onClose={() => setShowAddAdjustment(false)}
               onSave={handleCreateAdjustment}
             />
@@ -878,7 +879,7 @@ export default function BookingDetailModal({
             <CleaningFormModal
               cleaners={cleaners}
               defaultFee={property?.default_cleaning_fee ?? null}
-              defaultDate={booking.end_date || new Date().toISOString().split('T')[0]}
+              defaultDate={booking.end_date || todayISO()}
               onClose={() => setShowAddCleaning(false)}
               onSave={async (payload) => { await addCleaning(payload); setShowAddCleaning(false); }}
             />

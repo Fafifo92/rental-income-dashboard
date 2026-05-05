@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Globe } from 'lucide-react';
 import { useAuth } from '@/lib/useAuth';
 import {

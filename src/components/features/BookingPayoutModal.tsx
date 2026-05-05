@@ -5,6 +5,7 @@ import type { BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import { subMoney } from '@/lib/money';
+import { todayISO } from '@/lib/dateUtils';
 import MoneyInput from '@/components/MoneyInput';
 
 export interface PayoutTarget {
@@ -62,7 +63,7 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
 
     // Bloque 10: bloquear payout de reservas futuras no-directas sin checkin
     const isDirect = (booking.channel ?? '').toLowerCase() === 'direct';
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayISO();
     const isFuture = booking.start_date ? booking.start_date > today : false;
     if (!isDirect && isFuture && !booking.checkin_done) {
       setSaving(false);

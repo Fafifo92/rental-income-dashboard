@@ -231,7 +231,7 @@ const computeCore = (
   range: DateRange,
   propertyCount = 1,
 ): Omit<FinancialKPIs, 'vsLastPeriod' | 'isDemo' | 'propertyCount'> => {
-  const inRange = (d: string) => { const t = new Date(d); return t >= range.from && t <= range.to; };
+  const inRange = (d: string) => { const t = new Date(d + 'T12:00:00'); return t >= range.from && t <= range.to; };
 
   const filtered  = bookings.filter(b => b.start_date && inRange(b.start_date));
   const completed = filtered.filter(b => !b.status.toLowerCase().includes('cancel'));
@@ -338,8 +338,8 @@ const buildMonthlyPnL = (
   for (const b of bookings) {
     if (b.status.toLowerCase().includes('cancel') || !b.start_date || !b.end_date || b.num_nights === 0) continue;
     const ratePerNight = b.revenue / b.num_nights;
-    const cur = new Date(b.start_date);
-    const end = new Date(b.end_date);
+    const cur = new Date(b.start_date + 'T12:00:00');
+    const end = new Date(b.end_date + 'T12:00:00');
     while (cur < end) {
       const k = keyFn(cur);
       add(revMap, k, ratePerNight);
@@ -352,12 +352,12 @@ const buildMonthlyPnL = (
   for (const a of adjustments) {
     if (!a.date) continue;
     const sign = a.kind === 'discount' ? -1 : 1;
-    add(revMap, keyFn(new Date(a.date)), sign * Number(a.amount));
+    add(revMap, keyFn(new Date(a.date + 'T12:00:00')), sign * Number(a.amount));
   }
 
   for (const e of expenses) {
     if (!e.date) continue;
-    add(expMap, keyFn(new Date(e.date)), e.amount);
+    add(expMap, keyFn(new Date(e.date + 'T12:00:00')), e.amount);
   }
 
   const pc = Math.max(1, propertyCount);
@@ -414,7 +414,7 @@ const buildPayoutBreakdown = (
   range: DateRange,
   granularity: ChartGranularity,
 ): PayoutBreakdown => {
-  const inRange = (d: string) => { const t = new Date(d); return t >= range.from && t <= range.to; };
+  const inRange = (d: string) => { const t = new Date(d + 'T12:00:00'); return t >= range.from && t <= range.to; };
   const today   = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -436,9 +436,9 @@ const buildPayoutBreakdown = (
   const add = (m: Map<string, number>, k: string, v: number) => m.set(k, (m.get(k) ?? 0) + v);
 
   for (const b of activeBkgs) {
-    const key = keyFn(new Date(b.start_date));
+    const key = keyFn(new Date(b.start_date + 'T12:00:00'));
     const isConfirmed = b.payout_bank_account_id != null;
-    const isPast      = new Date(b.end_date) < today;
+    const isPast      = new Date(b.end_date + 'T12:00:00') < today;
 
     if (isConfirmed) {
       received += b.net_payout ?? b.revenue;
@@ -452,7 +452,7 @@ const buildPayoutBreakdown = (
 
   for (const e of expenses) {
     if (!e.date || !inRange(e.date)) continue;
-    add(expMap, keyFn(new Date(e.date)), e.amount);
+    add(expMap, keyFn(new Date(e.date + 'T12:00:00')), e.amount);
   }
 
   const monthlyBreakdown: MonthlyPayoutData[] = [];

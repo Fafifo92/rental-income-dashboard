@@ -37,6 +37,7 @@ import type {
 import { formatCurrency } from '@/lib/utils';
 import MoneyInput from '@/components/MoneyInput';
 import { useBackdropClose, makeBackdropHandlers } from '@/lib/useBackdropClose';
+import { todayISO } from '@/lib/dateUtils';
 
 type StatusFilter = 'all' | InventoryItemStatus | 'low_stock';
 
@@ -983,7 +984,7 @@ function DamageReportModal({
     (async () => {
       const res = await listBookings({ propertyIds: [item.property_id] });
       if (!res.data) return;
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayISO();
       const sorted = [...res.data].sort((a, b) => {
         const aActive = a.start_date <= today && a.end_date >= today ? 0 : 1;
         const bActive = b.start_date <= today && b.end_date >= today ? 0 : 1;
@@ -1356,11 +1357,10 @@ function RecoverDamageModal({
   onClose: () => void;
   onSaved: () => void;
 }): JSX.Element {
-  const today = new Date().toISOString().slice(0, 10);
   const missing = Math.max(0, row.repair_cost - row.charged_to_guest);
   const [amount, setAmount] = useState<number | null>(missing > 0 ? missing : null);
   const [bankId, setBankId] = useState<string>('');
-  const [date, setDate] = useState<string>(today);
+  const [date, setDate] = useState<string>(todayISO());
   const [notes, setNotes] = useState<string>('');
   const [accounts, setAccounts] = useState<BankAccountRow[]>([]);
   const [saving, setSaving] = useState(false);

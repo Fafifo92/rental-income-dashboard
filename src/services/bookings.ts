@@ -1,9 +1,11 @@
 import { supabase } from '@/lib/supabase/client';
 import type { ServiceResult } from './expenses';
 import type { BookingRow } from '@/types/database';
-import type { ParsedBooking } from './etl';
+import { datesOverlap } from './etl';
+import type { ParsedBooking, ConflictEntry } from './etl';
 import { findOrCreateListing } from './listings';
-import { inferOperationalFlags } from '@/lib/bookingStatus';
+import { inferOperationalFlags, isCancelled } from '@/lib/bookingStatus';
+import { todayISO } from '@/lib/dateUtils';
 
 // ─── Public Types ────────────────────────────────────────────────────────────
 
@@ -225,7 +227,140 @@ export const getBookingKPIs = async (): Promise<ServiceResult<BookingKPIs>> => {
   };
 };
 
-// ─── Overlap detection ───────────────────────────────────────────────────────
+// ─── Booking alerts ──────────────────────────────────────────────────────────
+
+export type BookingAlertIssue = 'checkout' | 'inventory' | 'payout';
+
+export interface BookingAlert {
+  id: string;
+  confirmation_code: string;
+  guest_name: string | null;
+  end_date: string;
+  issues: BookingAlertIssue[];
+}
+
+/**
+ * Devuelve reservas finalizadas (end_date <= hoy) con tareas operativas pendientes:
+ * checkout no confirmado, inventario no revisado, o pago sin registrar.
+ *
+ * Mira los últimos `daysBack` días para no acumular alertas históricas eternas.
+ */
+export const listBookingAlerts = async (
+  daysBack = 45,
+): Promise<ServiceResult<BookingAlert[]>> => {
+  const today = todayISO();
+  // Compute lower bound: today minus daysBack days using local-safe arithmetic
+  const [ty, tm, td] = today.split('-').map(Number);
+  const fromDate = new Date(ty, tm - 1, td - daysBack);
+  const from = `${fromDate.getFullYear()}-${String(fromDate.getMonth() + 1).padStart(2, '0')}-${String(fromDate.getDate()).padStart(2, '0')}`;
+
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('id, confirmation_code, guest_name, end_date, checkout_done, inventory_checked, payout_bank_account_id, status')
+    .lte('end_date', today)
+    .gte('end_date', from)
+    .order('end_date', { ascending: false });
+
+  if (error) return { data: null, error: error.message };
+
+  const alerts: BookingAlert[] = (data ?? [])
+    .filter(b => !isCancelled(b))
+    .map(b => ({
+      id: b.id,
+      confirmation_code: b.confirmation_code,
+      guest_name: b.guest_name,
+      end_date: b.end_date,
+      issues: [
+        ...(b.checkout_done ? [] : ['checkout' as const]),
+        ...(b.inventory_checked ? [] : ['inventory' as const]),
+        ...(b.payout_bank_account_id ? [] : ['payout' as const]),
+      ],
+    }))
+    .filter(a => a.issues.length > 0);
+
+  return { data: alerts, error: null };
+};
+
+// ─── Import conflict detection ────────────────────────────────────────────────
+
+/**
+ * Detects bookings in the uploaded file that overlap with existing DB bookings
+ * for the same listing. Same confirmation_code = upsert (not a conflict).
+ * Cancelled bookings on either side are excluded.
+ */
+export const detectDbConflicts = async (
+  bookings: ParsedBooking[],
+  listingNameToPropertyId: Record<string, string>,
+): Promise<ServiceResult<ConflictEntry[]>> => {
+  const propertyIds = [...new Set(Object.values(listingNameToPropertyId))];
+  if (propertyIds.length === 0) return { data: [], error: null };
+
+  const { data: listings, error: lErr } = await supabase
+    .from('listings')
+    .select('id, external_name, property_id')
+    .in('property_id', propertyIds);
+  if (lErr) return { data: null, error: lErr.message };
+
+  const nameToListingId: Record<string, string> = {};
+  for (const l of listings ?? []) {
+    if (listingNameToPropertyId[l.external_name] === l.property_id) {
+      nameToListingId[l.external_name] = l.id;
+    }
+  }
+
+  const listingIds = [...new Set(Object.values(nameToListingId))];
+  if (listingIds.length === 0) return { data: [], error: null };
+
+  const { data: existing, error: bErr } = await supabase
+    .from('bookings')
+    .select('id, confirmation_code, guest_name, start_date, end_date, listing_id, num_nights, status')
+    .in('listing_id', listingIds);
+  if (bErr) return { data: null, error: bErr.message };
+
+  const listingIdToName: Record<string, string> = {};
+  for (const [name, id] of Object.entries(nameToListingId)) {
+    listingIdToName[id] = name;
+  }
+
+  const conflicts: ConflictEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const incoming of bookings) {
+    if (!incoming.start_date || !incoming.end_date) continue;
+    if (incoming.status?.toLowerCase().includes('cancel')) continue;
+    const listingId = nameToListingId[incoming.listing_name];
+    if (!listingId) continue;
+
+    for (const ex of existing ?? []) {
+      if (ex.listing_id !== listingId) continue;
+      if (ex.confirmation_code === incoming.confirmation_code) continue;
+      if ((ex.status as string | null)?.toLowerCase().includes('cancel')) continue;
+      if (!ex.start_date || !ex.end_date) continue;
+
+      if (datesOverlap(incoming.start_date, incoming.end_date, ex.start_date, ex.end_date)) {
+        const key = [incoming.confirmation_code, ex.confirmation_code].sort().join('|');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        conflicts.push({
+          id: `db-${incoming.confirmation_code}-${ex.confirmation_code}`,
+          type: 'with_db',
+          listingName: listingIdToName[listingId] ?? incoming.listing_name,
+          incoming,
+          opponent: {
+            confirmation_code: ex.confirmation_code,
+            guest_name: ex.guest_name,
+            start_date: ex.start_date,
+            end_date: ex.end_date,
+            num_nights: ex.num_nights,
+            source: 'db',
+          },
+        });
+      }
+    }
+  }
+
+  return { data: conflicts, error: null };
+};
 
 export type OverlapCheck = {
   /** No hay solape ni colindancia. */

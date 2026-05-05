@@ -25,6 +25,7 @@ import {
   FormShell, PropertyPicker, BankPicker, MoneyField, DateField,
   StatusPicker, DescField, type ExpenseStatus,
 } from './Shared';
+import { todayISO } from '@/lib/dateUtils';
 
 interface Props {
   properties: PropertyRow[];
@@ -51,7 +52,7 @@ export default function CleaningSuppliesForm({
   const [manual, setManual] = useState<Record<string, number | null>>({});
 
   const [amount, setAmount] = useState<number | null>(null);
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(todayISO());
   const [status, setStatus] = useState<ExpenseStatus>('paid');
   const [bankId, setBankId] = useState<string | null>(null);
   const [desc, setDesc] = useState('');

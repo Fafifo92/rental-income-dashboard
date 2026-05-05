@@ -32,6 +32,7 @@ import { parseDamageDescription, composeDamageDescription } from '@/lib/damageDe
 import { listBookingAdjustments, createBookingAdjustment } from '@/services/bookingAdjustments';
 import MoneyInput from '@/components/MoneyInput';
 import { toast } from '@/lib/toast';
+import { todayISO } from '@/lib/dateUtils';
 
 interface Props {
   expense: Expense;
@@ -144,7 +145,7 @@ export default function DamageExpenseEditModal({
       kind: 'damage_charge',
       amount: diff,
       description: `Cobro pendiente – Daño: ${subjectLabel || 'reparación'} [exp:${expense.id}] (diferencia no cobrada)`,
-      date: new Date().toISOString().slice(0, 10),
+      date: todayISO(),
       bank_account_id: null,
     });
     if (res.error) { toast.error(res.error); return; }

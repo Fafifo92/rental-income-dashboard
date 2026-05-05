@@ -14,6 +14,7 @@
  */
 
 import { supabase } from '@/lib/supabase/client';
+import { todayISO } from '@/lib/dateUtils';
 import type { ServiceResult } from './expenses';
 import type {
   CreditPoolRow,
@@ -21,8 +22,6 @@ import type {
   CreditPoolConsumptionRule,
   BookingRow,
 } from '@/types/database';
-
-const todayISO = (): string => new Date().toISOString().slice(0, 10);
 
 // ─── CRUD básico ─────────────────────────────────────────────────────────────
 

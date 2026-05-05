@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Period } from '@/services/financial';
+import { todayISO } from '@/lib/dateUtils';
 
 const OPTIONS: { value: Period; label: string }[] = [
   { value: 'current-month',  label: 'Este mes' },
@@ -18,7 +19,7 @@ interface Props {
 }
 
 export default function PeriodSelector({ value, onChange, customRange, onCustomRangeChange }: Props) {
-  const today      = new Date().toISOString().slice(0, 10);
+  const today      = todayISO();
   const [from, setFrom] = useState(customRange?.from ?? '');
   const [to,   setTo  ] = useState(customRange?.to   ?? '');
   const panelRef = useRef<HTMLDivElement>(null);

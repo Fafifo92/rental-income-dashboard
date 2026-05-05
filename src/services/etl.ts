@@ -122,3 +122,75 @@ export const parseAirbnbFile = (file: File): Promise<ParsedBooking[]> => {
   if (ext === 'xlsx' || ext === 'xls') return parseXLSXFile(file);
   return parseCSVFile(file);
 };
+
+// ── Conflict detection ────────────────────────────────────────────────────────
+
+export interface ConflictEntry {
+  id: string;
+  type: 'within_file' | 'with_db';
+  listingName: string;
+  incoming: ParsedBooking;
+  opponent: {
+    confirmation_code: string;
+    guest_name: string | null;
+    start_date: string;
+    end_date: string;
+    num_nights: number;
+    source: 'file' | 'db';
+  };
+}
+
+export type ConflictAction = 'skip' | 'import';
+export type ConflictResolutions = Record<string, ConflictAction>;
+
+/** True iff date ranges [s1,e1) and [s2,e2) overlap. Back-to-back (s1===e2) is NOT an overlap. */
+export const datesOverlap = (s1: string, e1: string, s2: string, e2: string): boolean =>
+  s1 < e2 && s2 < e1;
+
+/** Detects bookings within the same listing that have overlapping dates. */
+export const detectWithinFileConflicts = (bookings: ParsedBooking[]): ConflictEntry[] => {
+  const byListing = new Map<string, ParsedBooking[]>();
+  for (const b of bookings) {
+    const key = b.listing_name || '__no_listing__';
+    const list = byListing.get(key) ?? [];
+    list.push(b);
+    byListing.set(key, list);
+  }
+
+  const conflicts: ConflictEntry[] = [];
+  for (const [listingName, rows] of byListing.entries()) {
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = i + 1; j < rows.length; j++) {
+        const a = rows[i], b = rows[j];
+        if (!a.start_date || !a.end_date || !b.start_date || !b.end_date) continue;
+        if (a.confirmation_code && a.confirmation_code === b.confirmation_code) continue;
+        if (!datesOverlap(a.start_date, a.end_date, b.start_date, b.end_date)) continue;
+
+        const makeOpponent = (src: ParsedBooking) => ({
+          confirmation_code: src.confirmation_code,
+          guest_name: src.guest_name,
+          start_date: src.start_date,
+          end_date: src.end_date,
+          num_nights: src.num_nights,
+          source: 'file' as const,
+        });
+
+        conflicts.push({
+          id: `file-${a.confirmation_code}-${b.confirmation_code}`,
+          type: 'within_file',
+          listingName,
+          incoming: a,
+          opponent: makeOpponent(b),
+        });
+        conflicts.push({
+          id: `file-${b.confirmation_code}-${a.confirmation_code}`,
+          type: 'within_file',
+          listingName,
+          incoming: b,
+          opponent: makeOpponent(a),
+        });
+      }
+    }
+  }
+  return conflicts;
+};

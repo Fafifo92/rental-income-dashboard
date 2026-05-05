@@ -8,6 +8,7 @@ import { listListings } from '@/services/listings';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import MoneyInput from '@/components/MoneyInput';
 import { addMoney, splitMoney } from '@/lib/money';
+import { todayISO } from '@/lib/dateUtils';
 
 type FormData = Omit<Expense, 'id' | 'owner_id'>;
 
@@ -40,7 +41,7 @@ const INITIAL: FormData = {
   subcategory: null,
   type: 'variable',
   amount: 0,
-  date: new Date().toISOString().split('T')[0],
+  date: todayISO(),
   description: null,
   status: 'pending',
   property_id: null,
@@ -86,7 +87,7 @@ const composeDescription = (subtype: string, rest: string, tag = ''): string | n
 };
 
 export default function ExpenseModal({ properties = [], bankAccounts = [], onClose, onSave, onSaveShared, onSaveGroup, editingGroupId, editingGroupSize, error, initial, prefill, onDiscardLinked }: Props) {
-  const initialForm = initial ?? { ...INITIAL, ...(prefill ?? {}) };
+  const initialForm = initial ?? { ...INITIAL, date: todayISO(), ...(prefill ?? {}) };
   const initialParsed = parseDescription(initialForm.description ?? null);
   const [form, setForm] = useState<FormData>({ ...initialForm, description: initialParsed.rest || null });
   const [subtype, setSubtype] = useState<string>(initialParsed.subtype);

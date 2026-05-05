@@ -21,7 +21,11 @@ interface BookingLite {
   checkin_done: boolean | null;
 }
 
-const todayISO = (): string => new Date().toISOString().slice(0, 10);
+// Timezone-aware "today" for Bogotá (UTC-5).
+// Uses Intl.DateTimeFormat with en-CA locale which formats as YYYY-MM-DD.
+// Same pattern as dateUtils.ts — but this is Deno, so no shared module.
+const todayISO = (tz = 'America/Bogota'): string =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
 
 const calcUnits = (
   b: BookingLite,

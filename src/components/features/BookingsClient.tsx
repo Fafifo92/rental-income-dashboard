@@ -552,8 +552,8 @@ export default function BookingsClient() {
         const b = info.row.original;
         const fmt = (d: string) => {
           if (!d) return '—';
-          const date = new Date(d);
-          return `${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}/${String(date.getFullYear()).slice(2)}`;
+          const [y, m, day] = d.split('-');
+          return `${day}/${m}/${y.slice(2)}`;
         };
         return (
           <div className="flex flex-col text-xs">

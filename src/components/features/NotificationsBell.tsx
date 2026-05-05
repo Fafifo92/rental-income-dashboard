@@ -4,6 +4,7 @@ import { listPendingRecurringForOwner, type PendingRecurring } from '@/services/
 import { getNotificationSettings } from '@/services/notificationSettings';
 import { isSupabaseConfigured } from '@/services/auth';
 import { formatCurrency } from '@/lib/utils';
+import { listBookingAlerts, type BookingAlert } from '@/services/bookings';
 
 const ymLabel = (ym: string): string => {
   const [y, m] = ym.split('-');
@@ -11,9 +12,21 @@ const ymLabel = (ym: string): string => {
   return `${names[Number(m) - 1]} ${y.slice(2)}`;
 };
 
+const ISSUE_LABEL: Record<string, string> = {
+  checkout:  'Checkout por confirmar',
+  inventory: 'Inventario por revisar',
+  payout:    'Liquidación pendiente',
+};
+
+const fmtDate = (iso: string): string => {
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y.slice(2)}`;
+};
+
 export default function NotificationsBell() {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<PendingRecurring[]>([]);
+  const [bookingAlerts, setBookingAlerts] = useState<BookingAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [enabled, setEnabled] = useState(true);
 
@@ -28,9 +41,13 @@ export default function NotificationsBell() {
         setLoading(false);
         return;
       }
-      const res = await listPendingRecurringForOwner(6);
+      const [recurringRes, alertsRes] = await Promise.all([
+        listPendingRecurringForOwner(6),
+        listBookingAlerts(45),
+      ]);
       if (cancelled) return;
-      if (!res.error) setPending(res.data ?? []);
+      if (!recurringRes.error) setPending(recurringRes.data ?? []);
+      if (!alertsRes.error) setBookingAlerts(alertsRes.data ?? []);
       setLoading(false);
     };
     refresh();
@@ -49,6 +66,7 @@ export default function NotificationsBell() {
 
   const count = pending.length;
   const overdueCount = pending.filter(p => !p.isCurrentMonth).length;
+  const alertCount = bookingAlerts.length;
 
   return (
     <div className="relative">
@@ -61,11 +79,11 @@ export default function NotificationsBell() {
         <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0a3 3 0 11-6 0" />
         </svg>
-        {!loading && count > 0 && (
+        {!loading && (count + alertCount) > 0 && (
           <span className={`absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-bold text-white rounded-full ${
             overdueCount > 0 ? 'bg-rose-600' : 'bg-amber-500'
           }`}>
-            {count > 99 ? '99+' : count}
+            {(count + alertCount) > 99 ? '99+' : (count + alertCount)}
           </span>
         )}
       </button>
@@ -83,19 +101,17 @@ export default function NotificationsBell() {
             >
               <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-bold text-slate-800">Pagos pendientes</p>
+                  <p className="text-sm font-bold text-slate-800">Pendientes</p>
                   <p className="text-xs text-slate-500">
-                    {count === 0
+                    {(count + alertCount) === 0
                       ? 'Todo al día ✓'
-                      : `${count} recurrente${count > 1 ? 's' : ''}${overdueCount > 0 ? ` · ${overdueCount} atrasado${overdueCount > 1 ? 's' : ''}` : ''}`}
+                      : [
+                          count > 0 && `${count} recurrente${count > 1 ? 's' : ''}${overdueCount > 0 ? ` (${overdueCount} atrasado${overdueCount > 1 ? 's' : ''})` : ''}`,
+                          alertCount > 0 && `${alertCount} reserva${alertCount > 1 ? 's' : ''} por completar`,
+                        ].filter(Boolean).join(' · ')}
                   </p>
                 </div>
-                <a
-                  href="/notificaciones"
-                  className="text-xs text-blue-600 hover:underline"
-                >
-                  ⚙ Config
-                </a>
+                <a href="/notificaciones" className="text-xs text-blue-600 hover:underline">⚙ Config</a>
               </div>
 
               {loading ? (
@@ -103,42 +119,86 @@ export default function NotificationsBell() {
                   <div className="h-4 bg-slate-100 rounded animate-pulse mb-2" />
                   <div className="h-4 bg-slate-100 rounded animate-pulse w-3/4" />
                 </div>
-              ) : count === 0 ? (
+              ) : (count + alertCount) === 0 ? (
                 <div className="px-4 py-6 text-center text-sm text-slate-500">
-                  No tienes recurrentes pendientes en los últimos 6 meses. 🎉
+                  Sin pendientes. ¡Todo al día! 🎉
                 </div>
               ) : (
-                <ul>
-                  {pending.slice(0, 12).map((p, i) => (
-                    <li key={`${p.recurring.id}-${p.yearMonth}-${i}`} className="border-b border-slate-50 last:border-0">
-                      <a
-                        href={`/properties/${p.recurring.property_id}`}
-                        className="block px-4 py-2.5 hover:bg-slate-50"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium text-slate-800 truncate">{p.recurring.category}</div>
-                            <div className="text-xs text-slate-500 truncate">
-                              {formatCurrency(Number(p.recurring.amount))} · {ymLabel(p.yearMonth)}
-                            </div>
-                          </div>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${
-                            p.isCurrentMonth
-                              ? 'bg-amber-100 text-amber-700'
-                              : 'bg-rose-100 text-rose-700'
-                          }`}>
-                            {p.isCurrentMonth ? 'mes actual' : 'atrasado'}
-                          </span>
-                        </div>
-                      </a>
-                    </li>
-                  ))}
-                  {pending.length > 12 && (
-                    <li className="px-4 py-2 text-xs text-slate-400 text-center">
-                      +{pending.length - 12} más… resuélvelos en cada propiedad.
-                    </li>
+                <>
+                  {/* ── Alertas de reservas ── */}
+                  {alertCount > 0 && (
+                    <>
+                      <div className="px-4 pt-3 pb-1">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Reservas por completar</p>
+                      </div>
+                      <ul>
+                        {bookingAlerts.slice(0, 8).map(a => (
+                          <li key={a.id} className="border-b border-slate-50 last:border-0">
+                            <a href="/bookings" className="block px-4 py-2.5 hover:bg-slate-50">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-medium text-slate-800 truncate">
+                                    {a.guest_name ?? a.confirmation_code}
+                                  </div>
+                                  <div className="text-xs text-slate-500">
+                                    Checkout: {fmtDate(a.end_date)}
+                                  </div>
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {a.issues.map(issue => (
+                                      <span key={issue} className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700">
+                                        {ISSUE_LABEL[issue]}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            </a>
+                          </li>
+                        ))}
+                        {alertCount > 8 && (
+                          <li className="px-4 py-2 text-xs text-slate-400 text-center">
+                            +{alertCount - 8} más… revisa en /reservas.
+                          </li>
+                        )}
+                      </ul>
+                    </>
                   )}
-                </ul>
+
+                  {/* ── Recurrentes pendientes ── */}
+                  {count > 0 && (
+                    <>
+                      <div className="px-4 pt-3 pb-1">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Gastos recurrentes</p>
+                      </div>
+                      <ul>
+                        {pending.slice(0, 12).map((p, i) => (
+                          <li key={`${p.recurring.id}-${p.yearMonth}-${i}`} className="border-b border-slate-50 last:border-0">
+                            <a href={`/properties/${p.recurring.property_id}`} className="block px-4 py-2.5 hover:bg-slate-50">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-medium text-slate-800 truncate">{p.recurring.category}</div>
+                                  <div className="text-xs text-slate-500 truncate">
+                                    {formatCurrency(Number(p.recurring.amount))} · {ymLabel(p.yearMonth)}
+                                  </div>
+                                </div>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${
+                                  p.isCurrentMonth ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
+                                }`}>
+                                  {p.isCurrentMonth ? 'mes actual' : 'atrasado'}
+                                </span>
+                              </div>
+                            </a>
+                          </li>
+                        ))}
+                        {pending.length > 12 && (
+                          <li className="px-4 py-2 text-xs text-slate-400 text-center">
+                            +{pending.length - 12} más… resuélvelos en cada propiedad.
+                          </li>
+                        )}
+                      </ul>
+                    </>
+                  )}
+                </>
               )}
             </motion.div>
           </>

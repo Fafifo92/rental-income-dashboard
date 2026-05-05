@@ -24,6 +24,7 @@ import {
   FormShell, PropertyPicker, BankPicker, MoneyField, DateField,
   StatusPicker, DescField, type ExpenseStatus,
 } from './Shared';
+import { todayISO } from '@/lib/dateUtils';
 
 type SubKind = Extract<ExpenseSubcategory, 'utilities' | 'administration' | 'maintenance' | 'stock'>;
 
@@ -72,7 +73,7 @@ export default function PropertyExpenseForm({
   const [manual, setManual] = useState<Record<string, number | null>>({});
 
   const [amount, setAmount] = useState<number | null>(null);
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(todayISO());
   const [type, setType] = useState<'fixed' | 'variable'>('variable');
   const [status, setStatus] = useState<ExpenseStatus>('pending');
   const [bankId, setBankId] = useState<string | null>(null);

@@ -1,4 +1,5 @@
 import { formatCurrency } from '@/lib/utils';
+import { todayISO } from '@/lib/dateUtils';
 import type { FinancialKPIs, MonthlyPnL } from './financial';
 
 // ─── CSV Export ───────────────────────────────────────────────────────────────
@@ -131,5 +132,5 @@ export function exportToExcel(kpis: FinancialKPIs, monthly: MonthlyPnL[], period
 // ─── Utility ──────────────────────────────────────────────────────────────────
 
 function today(): string {
-  return new Date().toISOString().split('T')[0];
+  return todayISO();
 }

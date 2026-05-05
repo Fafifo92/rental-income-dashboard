@@ -1,12 +1,13 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { parseAirbnbFile, type ParsedBooking } from '@/services/etl';
-import { upsertBookings, saveDemoBookings, type ImportResult } from '@/services/bookings';
+import { parseAirbnbFile, detectWithinFileConflicts, type ParsedBooking, type ConflictEntry } from '@/services/etl';
+import { upsertBookings, saveDemoBookings, detectDbConflicts, type ImportResult } from '@/services/bookings';
 import ListingMapper from './ListingMapper';
+import ConflictResolver from './ConflictResolver';
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 
-type Step = 'idle' | 'dragging' | 'parsing' | 'preview' | 'mapping' | 'importing' | 'complete' | 'error';
+type Step = 'idle' | 'dragging' | 'parsing' | 'preview' | 'mapping' | 'checking' | 'conflicts' | 'importing' | 'complete' | 'error';
 
 interface Props {
   onClose: () => void;
@@ -21,19 +22,36 @@ const STATUS_COLORS: Record<string, string> = {
 const statusColor = (s: string) =>
   STATUS_COLORS[s.toLowerCase()] ?? 'bg-slate-100 text-slate-600';
 
-const STEP_LABELS: Partial<Record<Step, string>> = {
-  preview: '1. Vista previa',
-  mapping: '2. Vincular anuncios',
-  importing: '3. Importando…',
-  complete: '3. Completado',
-};
-
 export default function CSVUploader({ onClose, onImport }: Props) {
   const [step, setStep] = useState<Step>('idle');
   const [bookings, setBookings] = useState<ParsedBooking[]>([]);
   const [error, setError] = useState('');
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [withinFileConflicts, setWithinFileConflicts] = useState<ConflictEntry[]>([]);
+  const [dbConflicts, setDbConflicts] = useState<ConflictEntry[]>([]);
+  const [pendingListingMap, setPendingListingMap] = useState<Record<string, string>>({});
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const allConflicts = useMemo(
+    () => [...withinFileConflicts, ...dbConflicts],
+    [withinFileConflicts, dbConflicts],
+  );
+
+  // Set of confirmation_codes involved in within-file conflicts (for highlighting preview table)
+  const conflictCodesInFile = useMemo(
+    () => new Set(withinFileConflicts.map(c => c.incoming.confirmation_code)),
+    [withinFileConflicts],
+  );
+
+  const hasConflictStep = allConflicts.length > 0 || step === 'checking' || step === 'conflicts';
+
+  const STEP_LABELS = useMemo((): Partial<Record<Step, string>> => ({
+    preview: '1. Vista previa',
+    mapping: '2. Vincular',
+    ...(hasConflictStep
+      ? { conflicts: '3. Conflictos', importing: '4. Importando…', complete: '4. Completado' }
+      : { importing: '3. Importando…', complete: '3. Completado' }),
+  }), [hasConflictStep]);
 
   const uniqueListingNames = useMemo(
     () => [...new Set(bookings.map(b => b.listing_name).filter(Boolean))],
@@ -43,13 +61,29 @@ export default function CSVUploader({ onClose, onImport }: Props) {
   const totalRevenue = bookings.reduce((s, b) => s + b.revenue, 0);
   const totalNights = bookings.reduce((s, b) => s + b.num_nights, 0);
 
+  const runImport = useCallback(async (booksToImport: ParsedBooking[], listingMap: Record<string, string>) => {
+    setStep('importing');
+    const res = await upsertBookings(booksToImport, listingMap);
+    if (res.error) {
+      setError(res.error);
+      setStep('error');
+      return;
+    }
+    setResult(res.data);
+    setStep('complete');
+    onImport?.(booksToImport);
+  }, [onImport]);
+
   const processFile = useCallback(async (file: File) => {
     setStep('parsing');
     setError('');
+    setWithinFileConflicts([]);
+    setDbConflicts([]);
     try {
       const parsed = await parseAirbnbFile(file);
       if (parsed.length === 0) throw new Error('El archivo no contiene filas válidas.');
       setBookings(parsed);
+      setWithinFileConflicts(detectWithinFileConflicts(parsed));
       setStep('preview');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al procesar el archivo.');
@@ -69,7 +103,7 @@ export default function CSVUploader({ onClose, onImport }: Props) {
     if (file) processFile(file);
   };
 
-  const handleMappingConfirm = async (
+  const handleMappingConfirm = useCallback(async (
     listingMap: Record<string, string>,
     isDemo: boolean,
   ) => {
@@ -81,23 +115,31 @@ export default function CSVUploader({ onClose, onImport }: Props) {
       return;
     }
 
-    setStep('importing');
-    const res = await upsertBookings(bookings, listingMap);
+    setPendingListingMap(listingMap);
+    setStep('checking');
+
+    const res = await detectDbConflicts(bookings, listingMap);
     if (res.error) {
       setError(res.error);
       setStep('error');
       return;
     }
-    setResult(res.data);
-    setStep('complete');
-    onImport?.(bookings);
-  };
+
+    const dbc = res.data ?? [];
+    setDbConflicts(dbc);
+    const combined = [...withinFileConflicts, ...dbc];
+
+    if (combined.length > 0) {
+      setStep('conflicts');
+    } else {
+      await runImport(bookings, listingMap);
+    }
+  }, [bookings, withinFileConflicts, runImport, onImport]);
 
   const isDropZone = step === 'idle' || step === 'dragging' || step === 'error';
   const currentStepLabel =
-    step === 'preview' || step === 'mapping' || step === 'importing' || step === 'complete'
-      ? Object.keys(STEP_LABELS)
-          .map(k => ({ key: k as Step, label: STEP_LABELS[k as Step]! }))
+    ['preview', 'mapping', 'checking', 'conflicts', 'importing', 'complete'].includes(step)
+      ? (Object.keys(STEP_LABELS) as Step[]).map(k => ({ key: k, label: STEP_LABELS[k]! }))
       : [];
 
   return (
@@ -197,6 +239,14 @@ export default function CSVUploader({ onClose, onImport }: Props) {
               </motion.div>
             )}
 
+            {/* STEP: Checking conflicts */}
+            {step === 'checking' && (
+              <motion.div key="checking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center gap-4 py-16">
+                <div className="w-12 h-12 border-4 border-amber-200 border-t-amber-600 rounded-full animate-spin" />
+                <p className="text-sm font-medium text-slate-500">Verificando conflictos de fechas…</p>
+              </motion.div>
+            )}
+
             {/* STEP: Importing */}
             {step === 'importing' && (
               <motion.div key="importing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center gap-4 py-16">
@@ -227,6 +277,25 @@ export default function CSVUploader({ onClose, onImport }: Props) {
                   ))}
                 </div>
 
+                {/* Within-file conflict warning */}
+                {withinFileConflicts.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-3"
+                  >
+                    <span className="text-lg flex-none">⚠️</span>
+                    <div>
+                      <p className="text-sm font-semibold text-amber-800">
+                        {withinFileConflicts.length} conflicto{withinFileConflicts.length > 1 ? 's' : ''} de fechas en el archivo
+                      </p>
+                      <p className="text-xs text-amber-600 mt-0.5">
+                        Las filas marcadas con ⚠️ se solapan con otras reservas del mismo anuncio. Podrás resolverlos después de vincular los anuncios.
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
+
                 <div className="border rounded-xl overflow-hidden">
                   <div className="px-4 py-3 bg-slate-50 border-b flex items-center justify-between">
                     <span className="text-sm font-semibold text-slate-700">Vista previa ({bookings.length} filas)</span>
@@ -244,26 +313,32 @@ export default function CSVUploader({ onClose, onImport }: Props) {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {bookings.slice(0, 50).map((b, i) => (
-                          <motion.tr
-                            key={b.confirmation_code || i}
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            transition={{ delay: Math.min(i * 0.015, 0.4) }}
-                            className="hover:bg-slate-50"
-                          >
-                            <td className="px-4 py-2 font-mono text-slate-500">{b.confirmation_code || '—'}</td>
-                            <td className="px-4 py-2">
-                              <span className={`px-2 py-0.5 rounded-full font-medium ${statusColor(b.status)}`}>{b.status || '—'}</span>
-                            </td>
-                            <td className="px-4 py-2 whitespace-nowrap text-slate-700">{b.guest_name || '—'}</td>
-                            <td className="px-4 py-2 text-slate-500">{b.start_date}</td>
-                            <td className="px-4 py-2 text-slate-500">{b.end_date}</td>
-                            <td className="px-4 py-2 text-center font-medium">{b.num_nights}</td>
-                            <td className="px-4 py-2 text-slate-600 max-w-[140px] truncate">{b.listing_name}</td>
-                            <td className="px-4 py-2 text-right font-semibold text-slate-800">{formatCurrency(b.revenue)}</td>
-                          </motion.tr>
-                        ))}
+                        {bookings.slice(0, 50).map((b, i) => {
+                          const hasConflict = conflictCodesInFile.has(b.confirmation_code);
+                          return (
+                            <motion.tr
+                              key={b.confirmation_code || i}
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              transition={{ delay: Math.min(i * 0.015, 0.4) }}
+                              className={`hover:bg-slate-50 ${hasConflict ? 'bg-amber-50/60' : ''}`}
+                            >
+                              <td className="px-4 py-2 font-mono text-slate-500">
+                                {hasConflict && <span className="mr-1" title="Conflicto de fechas">⚠️</span>}
+                                {b.confirmation_code || '—'}
+                              </td>
+                              <td className="px-4 py-2">
+                                <span className={`px-2 py-0.5 rounded-full font-medium ${statusColor(b.status)}`}>{b.status || '—'}</span>
+                              </td>
+                              <td className="px-4 py-2 whitespace-nowrap text-slate-700">{b.guest_name || '—'}</td>
+                              <td className="px-4 py-2 text-slate-500">{b.start_date}</td>
+                              <td className="px-4 py-2 text-slate-500">{b.end_date}</td>
+                              <td className="px-4 py-2 text-center font-medium">{b.num_nights}</td>
+                              <td className="px-4 py-2 text-slate-600 max-w-[140px] truncate">{b.listing_name}</td>
+                              <td className="px-4 py-2 text-right font-semibold text-slate-800">{formatCurrency(b.revenue)}</td>
+                            </motion.tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -278,6 +353,18 @@ export default function CSVUploader({ onClose, onImport }: Props) {
                   uniqueNames={uniqueListingNames}
                   onConfirm={handleMappingConfirm}
                   onBack={() => setStep('preview')}
+                />
+              </motion.div>
+            )}
+
+            {/* STEP: Conflict Resolver */}
+            {step === 'conflicts' && (
+              <motion.div key="conflicts" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+                <ConflictResolver
+                  conflicts={allConflicts}
+                  allBookings={bookings}
+                  onResolve={(kept) => runImport(kept, pendingListingMap)}
+                  onBack={() => setStep('mapping')}
                 />
               </motion.div>
             )}
@@ -334,12 +421,12 @@ export default function CSVUploader({ onClose, onImport }: Props) {
         {/* Footer */}
         <div className="px-6 py-4 border-t bg-slate-50 flex items-center justify-between">
           <p className="text-xs text-slate-400">
-            {step === 'preview' || step === 'mapping'
+            {(step === 'preview' || step === 'mapping' || step === 'conflicts')
               ? `${bookings.length} reservas detectadas • ${uniqueListingNames.length} anuncio(s) único(s)`
               : 'Exporta desde Airbnb → Informes → Reservas'}
           </p>
           <div className="flex gap-3">
-            {step !== 'complete' && (
+            {step !== 'complete' && step !== 'checking' && step !== 'conflicts' && (
               <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
                 Cancelar
               </button>

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase/client';
+import { todayISO } from '@/lib/dateUtils';
 import type { ServiceResult } from './expenses';
 import type {
   InventoryCategoryRow,
@@ -310,7 +311,7 @@ export const reportItemDamage = async (
     return { data: null, error: 'Especifica el item del inventario o describe qué se dañó (pared, estufa, etc.).' };
   }
 
-  const today = input.date ?? new Date().toISOString().slice(0, 10);
+  const today = input.date ?? todayISO();
 
   // 0. Guard de idempotencia: ¿ya existe un expense de daño pendiente para
   //    esta misma combinación (booking + item|sujeto)?

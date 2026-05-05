@@ -19,6 +19,7 @@ import {
   FormShell, BankPicker, MoneyField, DateField,
   StatusPicker, DescField, type ExpenseStatus,
 } from './Shared';
+import { todayISO } from '@/lib/dateUtils';
 
 interface Props {
   properties: PropertyRow[];
@@ -60,7 +61,7 @@ export default function VendorExpenseForm({
   const [splitMode, setSplitMode] = useState<'equal' | 'manual'>('equal');
   const [manualAmounts, setManualAmounts] = useState<Record<string, string>>({});
   const [amount, setAmount] = useState<number | null>(null);
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(todayISO());
   const [status, setStatus] = useState<ExpenseStatus>('pending');
   const [bankId, setBankId] = useState<string | null>(null);
   const [desc, setDesc] = useState('');

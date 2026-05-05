@@ -29,14 +29,13 @@ import type {
 import { formatCurrency } from '@/lib/utils';
 import MoneyInput from '@/components/MoneyInput';
 import { useBackdropClose, makeBackdropHandlers } from '@/lib/useBackdropClose';
+import { todayISO } from '@/lib/dateUtils';
 
 const RULE_LABELS: Record<CreditPoolConsumptionRule, string> = {
   per_person_per_night:  'Por persona y noche',
   per_person_per_booking: 'Por persona (toda la reserva)',
   per_booking:            'Por reserva (fijo)',
 };
-
-const todayISO = (): string => new Date().toISOString().slice(0, 10);
 
 interface Form {
   name: string;

@@ -25,6 +25,7 @@ import type { BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { useBackdropClose } from '@/lib/useBackdropClose';
 import { Pencil, UserMinus } from 'lucide-react';
+import { todayISO } from '@/lib/dateUtils';
 
 export default function AseoClient(): JSX.Element {
   const [cleaners, setCleaners] = useState<Vendor[]>([]);
@@ -923,7 +924,7 @@ function PayoutModal({
   onConfirm: (args: { paidDate: string; bankAccountId: string | null; includePending: boolean }) => Promise<string | null>;
 }) {
   const backdrop = useBackdropClose(onClose);
-  const [paidDate, setPaidDate] = useState(new Date().toISOString().split('T')[0]);
+  const [paidDate, setPaidDate] = useState(todayISO());
   const [bankId, setBankId] = useState<string>('');
   const [includePending, setIncludePending] = useState(false);
   const [working, setWorking] = useState(false);
