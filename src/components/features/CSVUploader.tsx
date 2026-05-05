@@ -39,7 +39,9 @@ export default function CSVUploader({ onClose, onImport }: Props) {
 
   // Set of confirmation_codes involved in within-file conflicts (for highlighting preview table)
   const conflictCodesInFile = useMemo(
-    () => new Set(withinFileConflicts.map(c => c.incoming.confirmation_code)),
+    () => new Set([
+      ...withinFileConflicts.flatMap(c => [c.incoming.confirmation_code, c.opponent.confirmation_code]),
+    ]),
     [withinFileConflicts],
   );
 

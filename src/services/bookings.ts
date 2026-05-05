@@ -101,7 +101,9 @@ export const upsertBookings = async (
     const listingId = listingIdCache[b.listing_name];
     if (!listingId) { skippedCodes.push(b.confirmation_code); continue; }
 
-    const flags = inferOperationalFlags(b.start_date, b.end_date);
+    const flags = isCancelled({ status: b.status })
+      ? { checkin_done: false, checkout_done: false }
+      : inferOperationalFlags(b.start_date, b.end_date);
     rows.push({
       listing_id: listingId,
       confirmation_code: b.confirmation_code,
@@ -150,9 +152,14 @@ export const upsertBookings = async (
   };
 };
 
+/** BookingRow enriched with its parent listing (joined via listing_id FK). */
+export type BookingWithListingRow = BookingRow & {
+  listings?: { id: string; external_name: string; property_id: string } | null;
+};
+
 export const listBookings = async (
   filters?: BookingFilters,
-): Promise<ServiceResult<BookingRow[]>> => {
+): Promise<ServiceResult<BookingWithListingRow[]>> => {
   // If filtering by property, resolve listing IDs first
   let allowedListingIds: string[] | undefined;
   const propIds: string[] | undefined =
@@ -162,18 +169,19 @@ export const listBookings = async (
         ? [filters.propertyId]
         : undefined;
   if (propIds) {
-    const { data: listings, error } = await supabase
+    const { data: listingsData, error } = await supabase
       .from('listings')
       .select('id')
       .in('property_id', propIds);
     if (error) return { data: null, error: error.message };
-    if (!listings || listings.length === 0) return { data: [], error: null };
-    allowedListingIds = listings.map((l: { id: string }) => l.id);
+    if (!listingsData || listingsData.length === 0) return { data: [], error: null };
+    allowedListingIds = listingsData.map((l: { id: string }) => l.id);
   }
 
+  // Join listing so each booking row carries external_name + property_id inline.
   let query = supabase
     .from('bookings')
-    .select('*')
+    .select('*, listings(id, external_name, property_id)')
     .order('start_date', { ascending: false });
 
   if (allowedListingIds) query = query.in('listing_id', allowedListingIds);
@@ -185,7 +193,7 @@ export const listBookings = async (
   const { data, error } = await query;
   if (error) return { data: null, error: error.message };
 
-  let rows = data ?? [];
+  let rows = (data ?? []) as BookingWithListingRow[];
   if (filters?.search) {
     const q = filters.search.toLowerCase();
     rows = rows.filter(
@@ -440,6 +448,8 @@ export const insertBooking = async (
     num_adults?: number;
     num_children?: number;
     notes?: string;
+    checkin_done?: boolean;
+    checkout_done?: boolean;
   },
 ): Promise<ServiceResult<BookingRow>> => {
   const { data: row, error } = await supabase
@@ -467,8 +477,8 @@ export const insertBooking = async (
       exchange_rate: null,
       notes: data.notes ?? null,
       raw_data: null,
-      checkin_done: false,
-      checkout_done: false,
+      checkin_done: data.checkin_done ?? false,
+      checkout_done: data.checkout_done ?? false,
       inventory_checked: false,
       operational_notes: null,
     })
@@ -493,6 +503,7 @@ export const updateBooking = async (
     num_adults?: number;
     num_children?: number;
     notes?: string | null;
+    listing_id?: string | null;
   },
 ): Promise<ServiceResult<BookingRow>> => {
   const dbPatch: Partial<Omit<BookingRow, 'id' | 'created_at'>> = { ...patch } as Partial<Omit<BookingRow, 'id' | 'created_at'>>;

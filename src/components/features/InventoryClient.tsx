@@ -547,7 +547,7 @@ function ItemFormModal({
 }) {
   const backdrop = useBackdropClose(onClose);
   const [name, setName] = useState(item?.name ?? '');
-  const [propertyId, setPropertyId] = useState(item?.property_id ?? properties[0]?.id ?? '');
+  const [propertyId, setPropertyId] = useState(item?.property_id ?? '');
   const [categoryId, setCategoryId] = useState<string | null>(item?.category_id ?? null);
   const [description, setDescription] = useState(item?.description ?? '');
   const [location, setLocation] = useState(item?.location ?? '');
@@ -645,6 +645,9 @@ function ItemFormModal({
                 value={propertyId} onChange={e => setPropertyId(e.target.value)}
                 className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
               >
+                {!propertyId && (
+                  <option value="" disabled>— Selecciona una propiedad —</option>
+                )}
                 {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>

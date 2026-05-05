@@ -40,6 +40,8 @@ interface BookingLite {
   net_payout?: number | null;
   payout_date?: string | null;
   listing_id?: string | null;
+  /** Pre-resolved from listings join. */
+  property_id?: string | null;
   notes?: string | null;
   num_adults?: number | null;
   num_children?: number | null;
@@ -83,7 +85,8 @@ export default function BookingDetailModal({
   const [cleaners, setCleaners] = useState<Vendor[]>([]);
   const [showAddCleaning, setShowAddCleaning] = useState(false);
 
-  const propertyId = resolvePropertyId?.(booking.listing_id) ?? null;
+  // Use property_id from the booking (pre-resolved via join), with fallback to resolvePropertyId
+  const propertyId = booking.property_id ?? resolvePropertyId?.(booking.listing_id) ?? null;
   const property = propertyId ? properties.find(p => p.id === propertyId) : null;
 
   const bookingStarted = useMemo(() => hasBookingStarted({

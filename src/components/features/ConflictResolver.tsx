@@ -22,7 +22,7 @@ function BookingMiniCard({
   start,
   end,
   nights,
-  badge,
+  highlight,
 }: {
   label: string;
   code: string;
@@ -30,14 +30,13 @@ function BookingMiniCard({
   start: string;
   end: string;
   nights: number;
-  badge?: React.ReactNode;
+  highlight?: boolean;
 }) {
   return (
-    <div className="flex-1 min-w-0 p-3 rounded-lg bg-white border border-slate-200">
-      <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</span>
-        {badge}
-      </div>
+    <div className={`flex-1 min-w-0 p-3 rounded-lg border transition-colors ${
+      highlight ? 'bg-green-50 border-green-300 ring-1 ring-green-400' : 'bg-white border-slate-200'
+    }`}>
+      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">{label}</p>
       <p className="text-xs font-mono font-semibold text-slate-700 truncate">{code || '—'}</p>
       <p className="text-sm text-slate-600 truncate mt-0.5">{guest || 'Huésped desconocido'}</p>
       <p className="text-xs text-slate-400 mt-1">
@@ -59,27 +58,26 @@ function ConflictCard({
 }) {
   const { incoming, opponent, listingName, type } = conflict;
   const isDb = type === 'with_db';
+  const resolved = action !== 'skip';
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       className={`border rounded-xl p-4 transition-colors ${
-        action === 'import'
-          ? 'border-green-200 bg-green-50/40'
+        resolved
+          ? 'border-green-200 bg-green-50/30'
           : 'border-rose-200 bg-rose-50/20'
       }`}
     >
-      {/* Header row */}
+      {/* Header */}
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full truncate max-w-[220px]">
           {listingName}
         </span>
-        <span
-          className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-none ${
-            isDb ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
-          }`}
-        >
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-none ${
+          isDb ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
+        }`}>
           {isDb ? '🗄️ vs base de datos' : '📁 mismo archivo'}
         </span>
       </div>
@@ -87,54 +85,89 @@ function ConflictCard({
       {/* Both sides */}
       <div className="flex gap-2 mb-3">
         <BookingMiniCard
-          label="Del archivo"
+          label={isDb ? 'Del archivo' : `Opción A`}
           code={incoming.confirmation_code}
           guest={incoming.guest_name}
           start={incoming.start_date}
           end={incoming.end_date}
           nights={incoming.num_nights}
+          highlight={action === 'import'}
         />
         <div className="flex-none self-center text-slate-300 font-bold text-lg select-none">↔</div>
         <BookingMiniCard
-          label={isDb ? 'Ya guardada en BD' : 'También en archivo'}
+          label={isDb ? 'Ya en base de datos' : `Opción B`}
           code={opponent.confirmation_code}
           guest={opponent.guest_name}
           start={opponent.start_date}
           end={opponent.end_date}
           nights={opponent.num_nights}
-          badge={
-            isDb ? (
-              <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded font-semibold">BD</span>
-            ) : (
-              <span className="text-[10px] bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded font-semibold">Archivo</span>
-            )
-          }
+          highlight={action === 'import_opponent'}
         />
       </div>
 
-      {/* Resolution toggle */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => onChange('skip')}
-          className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-all ${
-            action === 'skip'
-              ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
-              : 'bg-white text-slate-600 border-slate-200 hover:border-rose-300 hover:text-rose-600'
-          }`}
-        >
-          ✗ Saltar esta reserva
-        </button>
-        <button
-          onClick={() => onChange('import')}
-          className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-all ${
-            action === 'import'
-              ? 'bg-green-600 text-white border-green-600 shadow-sm'
-              : 'bg-white text-slate-600 border-slate-200 hover:border-green-300 hover:text-green-600'
-          }`}
-        >
-          ✓ Importar de todas formas
-        </button>
-      </div>
+      {/* Resolution */}
+      {isDb ? (
+        /* with_db: just decide whether to import the incoming booking */
+        <div className="flex gap-2">
+          <button
+            onClick={() => onChange('skip')}
+            className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-all ${
+              action === 'skip'
+                ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+                : 'bg-white text-slate-600 border-slate-200 hover:border-rose-300 hover:text-rose-600'
+            }`}
+          >
+            ✗ Saltar (no importar)
+          </button>
+          <button
+            onClick={() => onChange('import')}
+            className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-all ${
+              action === 'import'
+                ? 'bg-green-600 text-white border-green-600 shadow-sm'
+                : 'bg-white text-slate-600 border-slate-200 hover:border-green-300 hover:text-green-600'
+            }`}
+          >
+            ✓ Importar de todas formas
+          </button>
+        </div>
+      ) : (
+        /* within_file: choose which one to keep (or skip both) */
+        <div>
+          <p className="text-xs text-slate-500 mb-2 text-center">¿Cuál reserva quieres importar?</p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => onChange('import')}
+              className={`flex-1 py-2 text-xs font-semibold rounded-lg border transition-all ${
+                action === 'import'
+                  ? 'bg-green-600 text-white border-green-600 shadow-sm'
+                  : 'bg-white text-slate-600 border-slate-200 hover:border-green-300 hover:text-green-600'
+              }`}
+            >
+              ✓ {incoming.confirmation_code}
+            </button>
+            <button
+              onClick={() => onChange('import_opponent')}
+              className={`flex-1 py-2 text-xs font-semibold rounded-lg border transition-all ${
+                action === 'import_opponent'
+                  ? 'bg-green-600 text-white border-green-600 shadow-sm'
+                  : 'bg-white text-slate-600 border-slate-200 hover:border-green-300 hover:text-green-600'
+              }`}
+            >
+              ✓ {opponent.confirmation_code}
+            </button>
+            <button
+              onClick={() => onChange('skip')}
+              className={`flex-none px-3 py-2 text-xs font-semibold rounded-lg border transition-all ${
+                action === 'skip'
+                  ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+                  : 'bg-white text-slate-500 border-slate-200 hover:border-rose-300 hover:text-rose-600'
+              }`}
+            >
+              ✗ Saltar ambas
+            </button>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -162,15 +195,34 @@ export default function ConflictResolver({ conflicts, allBookings, onResolve, on
   const fileConflicts = useMemo(() => conflicts.filter(c => c.type === 'within_file'), [conflicts]);
   const dbConflicts = useMemo(() => conflicts.filter(c => c.type === 'with_db'), [conflicts]);
 
-  const importCount = Object.values(resolutions).filter(v => v === 'import').length;
-  const skipCount = conflicts.length - importCount;
+  const resolvedCount = Object.values(resolutions).filter(v => v !== 'skip').length;
+  const skipCount = conflicts.length - resolvedCount;
 
   const handleContinue = () => {
-    const conflictCodes = new Set(conflicts.map(c => c.incoming.confirmation_code));
-    const kept = allBookings.filter(b => {
-      if (!conflictCodes.has(b.confirmation_code)) return true;
-      return (resolutions[b.confirmation_code] ?? 'skip') === 'import';
-    });
+    // Build the set of codes to exclude from the final import
+    const codesToSkip = new Set<string>();
+    for (const c of conflicts) {
+      const resolution = resolutions[c.incoming.confirmation_code] ?? 'skip';
+      if (c.type === 'within_file') {
+        const opCode = c.opponent.confirmation_code;
+        if (resolution === 'skip') {
+          codesToSkip.add(c.incoming.confirmation_code);
+          codesToSkip.add(opCode);
+        } else if (resolution === 'import') {
+          // Keep incoming, skip opponent
+          codesToSkip.add(opCode);
+        } else if (resolution === 'import_opponent') {
+          // Keep opponent, skip incoming
+          codesToSkip.add(c.incoming.confirmation_code);
+        }
+      } else {
+        // with_db: only the incoming booking is in play
+        if (resolution === 'skip') {
+          codesToSkip.add(c.incoming.confirmation_code);
+        }
+      }
+    }
+    const kept = allBookings.filter(b => !codesToSkip.has(b.confirmation_code));
     onResolve(kept);
   };
 
@@ -186,12 +238,11 @@ export default function ConflictResolver({ conflicts, allBookings, onResolve, on
             </p>
             <p className="text-sm text-amber-700 mt-0.5 leading-relaxed">
               {[
-                fileConflicts.length > 0 && `${fileConflicts.length} dentro del archivo`,
+                fileConflicts.length > 0 && `${fileConflicts.length} dentro del archivo (elige cuál importar)`,
                 dbConflicts.length > 0 && `${dbConflicts.length} con reservas ya guardadas`,
               ]
                 .filter(Boolean)
                 .join(' · ')}
-              . Decide qué hacer con cada uno.
             </p>
           </div>
         </div>
@@ -248,7 +299,7 @@ export default function ConflictResolver({ conflicts, allBookings, onResolve, on
       {/* Footer */}
       <div className="border-t pt-4 flex items-center justify-between gap-4 flex-wrap">
         <p className="text-sm text-slate-500">
-          <span className="font-semibold text-green-600">{importCount}</span> se importarán ·{' '}
+          <span className="font-semibold text-green-600">{resolvedCount}</span> conflictos resueltos ·{' '}
           <span className="font-semibold text-slate-400">{skipCount}</span> se saltarán
         </p>
         <div className="flex gap-3">
@@ -270,3 +321,4 @@ export default function ConflictResolver({ conflicts, allBookings, onResolve, on
     </div>
   );
 }
+

@@ -4,7 +4,7 @@ import { createColumnHelper, type ColumnDef } from '@tanstack/react-table';
 import {
   listBookings, getDemoBookings, saveDemoBookings, insertBooking,
   updateBooking, deleteBooking, checkBookingOverlap,
-  generateDirectBookingCode, type BookingFilters,
+  generateDirectBookingCode, type BookingFilters, type BookingWithListingRow,
 } from '@/services/bookings';
 import { listProperties } from '@/services/properties';
 import { findOrCreateListing } from '@/services/listings';
@@ -24,7 +24,7 @@ import BookingDetailModal from './BookingDetailModal';
 import ConfirmDeleteChallenge from './ConfirmDeleteChallenge';
 import MoneyInput from '@/components/MoneyInput';
 import { parseMoney } from '@/lib/money';
-import { getBookingStatus, statusUI } from '@/lib/bookingStatus';
+import { getBookingStatus, statusUI, inferOperationalFlags } from '@/lib/bookingStatus';
 import { todayISO as todayISOFromUtils } from '@/lib/dateUtils';
 import { toast } from '@/lib/toast';
 import { CalendarCheck, Pencil, HandCoins, Trash2 } from 'lucide-react';
@@ -42,6 +42,8 @@ interface DisplayBooking {
   status: string;
   listing_name: string;
   listing_id?: string | null;
+  /** Resolved from listings join — available without needing the separate listings cache. */
+  property_id?: string | null;
   channel?: string | null;
   gross_revenue?: number | null;
   channel_fees?: number | null;
@@ -76,7 +78,7 @@ interface BookingForm {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const fromRow = (row: BookingRow): DisplayBooking => ({
+const fromRow = (row: BookingWithListingRow): DisplayBooking => ({
   id: row.id,
   confirmation_code: row.confirmation_code,
   guest_name: row.guest_name ?? '—',
@@ -85,14 +87,15 @@ const fromRow = (row: BookingRow): DisplayBooking => ({
   num_nights: row.num_nights,
   total_revenue: Number(row.total_revenue),
   status: row.status ?? '',
-  listing_name: '',
+  listing_name: row.listings?.external_name ?? '',
+  listing_id: row.listing_id ?? null,
+  property_id: row.listings?.property_id ?? null,
   channel: row.channel ?? null,
   gross_revenue: row.gross_revenue !== null && row.gross_revenue !== undefined ? Number(row.gross_revenue) : null,
   channel_fees: row.channel_fees !== null && row.channel_fees !== undefined ? Number(row.channel_fees) : null,
   net_payout: row.net_payout !== null && row.net_payout !== undefined ? Number(row.net_payout) : null,
   payout_bank_account_id: row.payout_bank_account_id ?? null,
   payout_date: row.payout_date ?? null,
-  listing_id: row.listing_id ?? null,
   notes: row.notes ?? null,
   num_adults: row.num_adults ?? null,
   num_children: row.num_children ?? null,
@@ -176,6 +179,7 @@ export default function BookingsClient() {
   const [formLoading, setFormLoading] = useState(false);
   const [formWarning, setFormWarning] = useState('');
   const [editingListingId, setEditingListingId] = useState<string | null>(null);
+  const [editingPropertyId, setEditingPropertyId] = useState<string | null>(null);
   const [overlapAck, setOverlapAck] = useState(false);
   const [editingId, setEditingId]     = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DisplayBooking | null>(null);
@@ -389,9 +393,20 @@ export default function BookingsClient() {
     try {
       if (editingId) {
         // ── UPDATE flow ───────────────────────────────────────────────
-        // Validar solape contra otras reservas del mismo listing
-        if (editingListingId) {
-          const overlap = await checkBookingOverlap(editingListingId, form.start_date, form.end_date, editingId);
+        // Determine target listing: if property changed, find/create new listing
+        let targetListingId = editingListingId;
+        if (form.property_id && form.property_id !== editingPropertyId) {
+          const listingRes = await findOrCreateListing(form.property_id, form.listing_name || 'Manual');
+          if (listingRes.error || !listingRes.data) {
+            toast.error(listingRes.error ?? 'No se pudo cambiar el anuncio');
+            setFormLoading(false);
+            return;
+          }
+          targetListingId = listingRes.data.id;
+        }
+        // Validar solape contra otras reservas del listing destino
+        if (targetListingId) {
+          const overlap = await checkBookingOverlap(targetListingId, form.start_date, form.end_date, editingId);
           if (!overlap.ok) {
             toast.error(overlap.error);
             setFormLoading(false);
@@ -415,6 +430,7 @@ export default function BookingsClient() {
           num_adults: parseInt(form.num_adults) || 1,
           num_children: parseInt(form.num_children) || 0,
           notes: form.notes || null,
+          ...(targetListingId !== editingListingId ? { listing_id: targetListingId } : {}),
         });
         if (res.error) { toast.error(res.error); setFormLoading(false); return; }
         toast.success('Reserva actualizada');
@@ -431,9 +447,11 @@ export default function BookingsClient() {
         }]);
         toast.success('Reserva guardada (demo)');
       } else {
-        const propertyId = form.property_id || properties[0]?.id;
+        const propertyId = form.property_id;
         if (!propertyId) {
-          toast.error('Crea una propiedad primero desde la sección Propiedades.');
+          toast.error(properties.length === 0
+            ? 'Crea una propiedad primero desde la sección Propiedades.'
+            : 'Selecciona una propiedad para esta reserva.');
           setFormLoading(false);
           return;
         }
@@ -452,6 +470,7 @@ export default function BookingsClient() {
           setFormLoading(false);
           return;
         }
+        const opFlags = inferOperationalFlags(form.start_date, form.end_date);
         const res = await insertBooking(listingRes.data.id, {
           confirmation_code: code,
           guest_name: form.guest_name || undefined,
@@ -464,6 +483,8 @@ export default function BookingsClient() {
           num_adults: parseInt(form.num_adults) || 1,
           num_children: parseInt(form.num_children) || 0,
           notes: form.notes || undefined,
+          checkin_done: opFlags.checkin_done,
+          checkout_done: opFlags.checkout_done,
         });
         if (res.error) { toast.error(res.error); setFormLoading(false); return; }
         toast.success('Reserva creada');
@@ -471,6 +492,7 @@ export default function BookingsClient() {
       setShowModal(false);
       setEditingId(null);
       setEditingListingId(null);
+      setEditingPropertyId(null);
       setOverlapAck(false);
       setForm(EMPTY_FORM);
       await load({ ...filters, propertyIds });
@@ -478,11 +500,12 @@ export default function BookingsClient() {
       toast.error('Error inesperado al guardar.');
     }
     setFormLoading(false);
-  }, [form, editingId, editingListingId, overlapAck, authStatus, properties, filters, propertyIds, load]);
+  }, [form, editingId, editingListingId, editingPropertyId, overlapAck, authStatus, properties, listings, filters, propertyIds, load]);
 
   const handleEdit = useCallback((b: DisplayBooking) => {
     setEditingId(b.id);
     setEditingListingId(b.listing_id ?? null);
+    setEditingPropertyId(b.property_id ?? null);
     setForm({
       guest_name: b.guest_name === '—' ? '' : b.guest_name,
       confirmation_code: b.confirmation_code,
@@ -492,7 +515,7 @@ export default function BookingsClient() {
       total_revenue: String(b.total_revenue),
       status: b.status,
       listing_name: b.listing_name,
-      property_id: '',
+      property_id: b.property_id ?? '',
       channel: b.channel ?? '',
       num_adults: '1',
       num_children: '0',
@@ -501,7 +524,23 @@ export default function BookingsClient() {
     setShowModal(true);
   }, []);
 
-  const handleConfirmDelete = useCallback(async () => {
+  const openNewBookingModal = useCallback(() => {
+    setEditingId(null);
+    setEditingListingId(null);
+    setEditingPropertyId(null);
+    setOverlapAck(false);
+    setFormWarning('');
+    const smartDates = getSmartDefaultStartDate();
+    setForm({
+      ...EMPTY_FORM,
+      ...smartDates,
+      // Auto-select the only property if there's just one; otherwise require explicit choice
+      property_id: properties.length === 1 ? properties[0].id : '',
+    });
+    setShowModal(true);
+  }, [properties]);
+
+  const handleConfirmDelete= useCallback(async () => {
     if (!deleteTarget) return;
     const res = await deleteBooking(deleteTarget.id);
     if (res.error) { toast.error(res.error); return; }
@@ -653,6 +692,10 @@ export default function BookingsClient() {
     }),
   ], [handleEdit, setDetailTarget]);
 
+  // ── Derived values (must be before any early returns) ────────────────────
+  // listing_name and property_id are already populated from the DB join in fromRow
+  const enrichedBookings = useMemo(() => bookings, [bookings]);
+
   // ── EARLY RETURNS (after all hooks) ──────────────────────────────────────
   if (authStatus === 'checking') {
     return (
@@ -663,8 +706,7 @@ export default function BookingsClient() {
     );
   }
 
-  // ── Derived values ────────────────────────────────────────────────────────
-  const completed    = bookings.filter(b => !b.status.toLowerCase().includes('cancel'));
+  const completed    = enrichedBookings.filter(b => !b.status.toLowerCase().includes('cancel'));
   const totalRevenue = completed.reduce((s, b) => s + b.total_revenue, 0);
   const totalNights  = completed.reduce((s, b) => s + b.num_nights, 0);
 
@@ -678,7 +720,7 @@ export default function BookingsClient() {
   const incompleteCount = completed.filter(b => !b.payout_bank_account_id && b.end_date && new Date(b.end_date) < today).length;
 
   const kpis = [
-    { label: 'Total Reservas', value: bookings.length.toString(), color: 'text-blue-600', bg: 'bg-blue-50', sub: null },
+    { label: 'Total Reservas', value: enrichedBookings.length.toString(), color: 'text-blue-600', bg: 'bg-blue-50', sub: null },
     {
       label: 'Payout confirmado',
       value: formatCurrency(receivedPayout),
@@ -713,15 +755,7 @@ export default function BookingsClient() {
           <PropertyMultiSelect properties={allProperties} value={propertyIds} onChange={setPropertyIds} groups={groups} tags={tags} tagAssigns={tagAssigns} />
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-            onClick={() => {
-              setEditingId(null);
-              setEditingListingId(null);
-              setOverlapAck(false);
-              setFormWarning('');
-              const smartDates = getSmartDefaultStartDate();
-              setForm({ ...EMPTY_FORM, ...smartDates });
-              setShowModal(true);
-            }}
+            onClick={openNewBookingModal}
             className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
           >
             + Nueva reserva
@@ -737,7 +771,7 @@ export default function BookingsClient() {
       </motion.div>
 
       {/* KPI Cards */}
-      {!loading && bookings.length > 0 && (
+      {!loading && enrichedBookings.length > 0 && (
         <div className="space-y-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
             {kpis.map((kpi, i) => (
@@ -818,12 +852,12 @@ export default function BookingsClient() {
 
       {/* Table */}
       <DataTable<DisplayBooking>
-        columns={columns} data={bookings} loading={loading}
+        columns={columns} data={enrichedBookings} loading={loading}
         showSearch={false} defaultPageSize={25} skeletonRows={8}
         emptyIcon="" emptyTitle="Sin reservas importadas"
         emptyDescription={
           <span>
-            <button onClick={() => setShowModal(true)} className="text-blue-600 hover:underline font-medium mr-2">
+            <button onClick={openNewBookingModal} className="text-blue-600 hover:underline font-medium mr-2">
               + Añadir manualmente
             </button>
             o{' '}
@@ -1005,9 +1039,12 @@ export default function BookingsClient() {
                 {/* Property picker — only in auth mode */}
                 {authStatus === 'authed' && properties.length > 0 && (
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Propiedad (Supabase)</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Propiedad *</label>
                     <select value={form.property_id} onChange={e => handleFormChange('property_id', e.target.value)}
                       className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                      {!form.property_id && (
+                        <option value="" disabled>— Selecciona una propiedad —</option>
+                      )}
                       {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   </div>
