@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import DashboardSummary, { KPISkeleton } from './DashboardSummary';
 import RevenueChart from './RevenueChart';
 import OccupancyGrid from './OccupancyGrid';
+import OccupancyByProperty from './OccupancyByProperty';
 import PeriodSelector from './PeriodSelector';
 import CSVUploader from './CSVUploader';
 import ExportMenu from './ExportMenu';
@@ -106,7 +107,7 @@ export default function DashboardClient() {
   const [granularity, setGranularity]     = useState<import('@/services/financial').ChartGranularity>('week');
   const [transactions, setTransactions]   = useState<FinancialTransaction[]>([]);
   const [txLoading, setTxLoading]         = useState(false);
-  const [activeTab, setActiveTab]         = useState<'resumen' | 'ingresos-egresos' | 'en-curso'>('resumen');
+  const [activeTab, setActiveTab]         = useState<'resumen' | 'ingresos-egresos' | 'en-curso' | 'calendario'>('resumen');
   const [loading, setLoading]             = useState(true);
   const [showUploader, setShowUploader]   = useState(false);
   const [importedBookings, setImportedBookings] = useState<ParsedBooking[]>([]);
@@ -180,7 +181,7 @@ export default function DashboardClient() {
 
         {/* Tabs */}
         <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit">
-          {(['resumen', 'ingresos-egresos', 'en-curso'] as const).map(tab => (
+          {(['resumen', 'ingresos-egresos', 'en-curso', 'calendario'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -190,7 +191,10 @@ export default function DashboardClient() {
                   : 'text-slate-500 hover:text-slate-700'
               }`}
             >
-              {tab === 'resumen' ? 'Resumen' : tab === 'ingresos-egresos' ? 'Ingresos vs Egresos' : 'Reservas en curso'}
+              {tab === 'resumen' ? 'Resumen'
+                : tab === 'ingresos-egresos' ? 'Ingresos vs Egresos'
+                : tab === 'en-curso' ? 'Reservas en curso'
+                : 'Calendario de ocupacion'}
             </button>
           ))}
         </div>
@@ -199,6 +203,23 @@ export default function DashboardClient() {
           <IncomeExpenseTab payout={payoutBreakdown} kpis={kpis} granularity={granularity} transactions={transactions} txLoading={txLoading} />
         ) : activeTab === 'en-curso' ? (
           <ActiveBookingsWidget propertyIds={propertyIds} />
+        ) : activeTab === 'calendario' ? (
+          <div className="space-y-4">
+            {(() => {
+              const { from, to } = resolvePeriodRange(period, customRange);
+              return (
+                <OccupancyGrid
+                  from={from}
+                  to={to}
+                  propertyIds={propertyIds}
+                  totalNights={kpis?.totalNights ?? 0}
+                  availableNights={kpis?.availableNights ?? 0}
+                  occupancyRate={kpis?.occupancyRate ?? 0}
+                  breakEvenOccupancy={kpis?.breakEvenOccupancy ?? 0}
+                />
+              );
+            })()}
+          </div>
         ) : (
           <>
         {/* KPI Grid */}
@@ -252,13 +273,11 @@ export default function DashboardClient() {
             {(() => {
               const { from, to } = resolvePeriodRange(period, customRange);
               return (
-                <OccupancyGrid
+                <OccupancyByProperty
+                  granularity={granularity}
                   from={from}
                   to={to}
                   propertyIds={propertyIds}
-                  totalNights={kpis?.totalNights ?? 0}
-                  availableNights={kpis?.availableNights ?? 0}
-                  occupancyRate={kpis?.occupancyRate ?? 0}
                   breakEvenOccupancy={kpis?.breakEvenOccupancy ?? 0}
                 />
               );
