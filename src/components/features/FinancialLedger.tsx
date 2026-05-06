@@ -30,23 +30,6 @@ interface Props {
 
 const PAGE_SIZE = 25;
 
-const CHANNEL_ICONS: Record<string, string> = {
-  airbnb:    '🏠',
-  booking:   '📘',
-  'booking.com': '📘',
-  vrbo:      '🏖',
-  directo:   '🤝',
-  direct:    '🤝',
-};
-
-const channelIcon = (ch: string | null) => {
-  if (!ch) return '';
-  const lower = ch.toLowerCase();
-  for (const [key, icon] of Object.entries(CHANNEL_ICONS)) {
-    if (lower.includes(key)) return icon + ' ';
-  }
-  return '';
-};
 
 // ─── CSV helpers ─────────────────────────────────────────────────────────────
 
@@ -236,7 +219,7 @@ export default function FinancialLedger({ transactions, loading }: Props) {
                     </div>
                   </td>
                   <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap text-xs">
-                    {tx.channel ? `${channelIcon(tx.channel)}${tx.channel}` : '—'}
+                    {tx.channel ?? '—'}
                   </td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${
@@ -322,7 +305,7 @@ export default function FinancialLedger({ transactions, loading }: Props) {
           { label: 'Total ingresos', value: totalIncome, color: 'text-emerald-600', sign: '+' },
           { label: 'Total egresos',  value: totalExpense, color: 'text-rose-600',   sign: '−' },
           { label: 'Neto',           value: Math.abs(net), color: net >= 0 ? 'text-emerald-700' : 'text-rose-700', sign: net >= 0 ? '+' : '−' },
-          { label: 'Fees canal (info)', value: totalFees, color: 'text-slate-400', sign: '' },
+          { label: 'Fees canal', value: totalFees, color: 'text-slate-400', sign: '' },
         ].map(item => (
           <div key={item.label} className="px-5 py-3 border-r last:border-r-0 border-slate-100">
             <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{item.label}</p>

@@ -547,7 +547,7 @@ export default function ExpensesClient() {
               Total: <span className="text-slate-900">{formatCurrency(visibleTotal)}</span>
               {visibleFees > 0 && (
                 <span className="ml-2 text-xs text-slate-400 font-normal">
-                  + {formatCurrency(visibleFees)} fees (info)
+                  + {formatCurrency(visibleFees)} fees
                 </span>
               )}
             </p>

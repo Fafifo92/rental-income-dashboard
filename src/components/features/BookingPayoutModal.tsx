@@ -100,6 +100,10 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
       setTotalError('El monto debe ser mayor a 0');
       return;
     }
+    if (!totalAccount) {
+      setTotalError('Selecciona una cuenta bancaria');
+      return;
+    }
     setSavingTotal(true);
     setTotalError('');
     const res = await addBookingPayment({
@@ -129,6 +133,7 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
   // ── Partial: add payment ──────────────────────────────────────────────────
   const handleAddPayment = async () => {
     if (!newAmount || newAmount <= 0) { setPayError('El monto debe ser mayor a 0'); return; }
+    if (!newAccount) { setPayError('Selecciona una cuenta bancaria'); return; }
     setAddingPay(true);
     setPayError('');
     const res = await addBookingPayment({
@@ -224,7 +229,7 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
                     {booking.confirmation_code} · Reserva cancelada
                   </p>
                 </div>
-                <span className="text-3xl select-none">⚠️</span>
+                <span className="text-3xl select-none"></span>
               </div>
 
               {/* Selector de cuenta */}
@@ -240,7 +245,7 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
                   <option value="">— Selecciona una cuenta —</option>
                   {bankAccounts.map(a => (
                     <option key={a.id} value={a.id}>
-                      {a.is_cash ? '💵 ' : ''}{a.name}{a.bank && !a.is_cash ? ` · ${a.bank}` : ''}
+                      {a.name}{a.bank && !a.is_cash ? ` · ${a.bank}` : ''}
                     </option>
                   ))}
                 </select>
@@ -303,10 +308,10 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Cuenta</label>
                     <select value={totalAccount} onChange={e => setTotalAccount(e.target.value)}
                       className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                      <option value="">— Sin asignar —</option>
+                      <option value="">— Selecciona una cuenta —</option>
                       {bankAccounts.map(a => (
                         <option key={a.id} value={a.id}>
-                          {a.is_cash ? '💵 ' : ''}{a.name}{a.bank && !a.is_cash ? ` (${a.bank})` : ''}
+                          {a.name}{a.bank && !a.is_cash ? ` (${a.bank})` : ''}
                         </option>
                       ))}
                     </select>
@@ -401,10 +406,10 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
                     <label className="block text-[11px] text-slate-500 mb-1">Cuenta / forma de pago</label>
                     <select value={newAccount} onChange={e => setNewAccount(e.target.value)}
                       className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                      <option value="">— Sin asignar —</option>
+                      <option value="">— Selecciona una cuenta —</option>
                       {bankAccounts.map(a => (
                         <option key={a.id} value={a.id}>
-                          {a.is_cash ? '💵 ' : ''}{a.name}{a.bank && !a.is_cash ? ` (${a.bank})` : ''}
+                          {a.name}{a.bank && !a.is_cash ? ` (${a.bank})` : ''}
                         </option>
                       ))}
                     </select>

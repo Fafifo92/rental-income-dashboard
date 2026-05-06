@@ -118,8 +118,10 @@ export const listExpenses = async (
               amount: Math.abs(rev),
               date: r.start_date,
               description: `${r.channel ?? 'Canal'} · ${r.confirmation_code ?? ''}`,
-              status: 'paid',
+              // 'paid' only once a debit account is assigned; otherwise 'pending' (unregistered)
+              status: r.payout_bank_account_id ? 'paid' : 'pending',
               booking_id: r.id,
+              bank_account_id: r.payout_bank_account_id ?? null,
             } as Expense);
           }
         }

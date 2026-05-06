@@ -165,8 +165,21 @@ export const computeBalances = async (): Promise<ServiceResult<BankAccountBalanc
       .eq('payout_bank_account_id', account.id);
 
     const legacyInflows = (legacyData ?? []).reduce(
-      (sum: number, row: { id: string; net_payout: number | null }) =>
-        bookingsWithPayments.has(row.id) ? sum : sum + Number(row.net_payout ?? 0),
+      (sum: number, row: { id: string; net_payout: number | null }) => {
+        if (bookingsWithPayments.has(row.id)) return sum;
+        const net = Number(row.net_payout ?? 0);
+        return net > 0 ? sum + net : sum; // negatives are fine deductions → counted as outflows
+      },
+      0,
+    );
+
+    // Fine/deduction bookings: negative net_payout with this account assigned = outflow
+    const legacyFineOutflows = (legacyData ?? []).reduce(
+      (sum: number, row: { id: string; net_payout: number | null }) => {
+        if (bookingsWithPayments.has(row.id)) return sum;
+        const net = Number(row.net_payout ?? 0);
+        return net < 0 ? sum + Math.abs(net) : sum;
+      },
       0,
     );
 
@@ -184,16 +197,18 @@ export const computeBalances = async (): Promise<ServiceResult<BankAccountBalanc
       0,
     );
 
-    // Outflows = sum of expenses amount with this bank
+    // Outflows = paid expenses + fine/deduction booking payments from this account
     const { data: outflowData } = await supabase
       .from('expenses')
       .select('amount')
       .eq('bank_account_id', account.id);
 
-    const outflows = (outflowData ?? []).reduce(
+    const expenseOutflows = (outflowData ?? []).reduce(
       (sum: number, row: { amount: number }) => sum + Number(row.amount),
       0,
     );
+
+    const outflows = expenseOutflows + legacyFineOutflows;
 
     balances.push({
       account,
@@ -516,12 +531,12 @@ const labelForAdjKind = (kind: string): string => {
   }
 };
 
-export const BANK_TX_KIND_META: Record<BankTxKind, { label: string; emoji: string; tone: 'in' | 'out' | 'neutral' }> = {
-  opening:           { label: 'Apertura',                emoji: '🏦', tone: 'neutral' },
-  booking_payout:    { label: 'Payout reserva',           emoji: '💵', tone: 'in' },
-  damage_recovery:   { label: 'Recuperación por daño',    emoji: '🛠️', tone: 'in' },
-  platform_refund:   { label: 'Reembolso plataforma',     emoji: '↩️', tone: 'in' },
-  extra_income:      { label: 'Ingreso extra',            emoji: '➕', tone: 'in' },
-  extra_guest_fee:   { label: 'Huésped adicional',        emoji: '👥', tone: 'in' },
-  expense:           { label: 'Gasto',                    emoji: '💸', tone: 'out' },
+export const BANK_TX_KIND_META: Record<BankTxKind, { label: string; tone: 'in' | 'out' | 'neutral' }> = {
+  opening:           { label: 'Apertura',                tone: 'neutral' },
+  booking_payout:    { label: 'Payout reserva',           tone: 'in' },
+  damage_recovery:   { label: 'Recuperación por daño',    tone: 'in' },
+  platform_refund:   { label: 'Reembolso plataforma',     tone: 'in' },
+  extra_income:      { label: 'Ingreso extra',            tone: 'in' },
+  extra_guest_fee:   { label: 'Huésped adicional',        tone: 'in' },
+  expense:           { label: 'Gasto',                    tone: 'out' },
 };

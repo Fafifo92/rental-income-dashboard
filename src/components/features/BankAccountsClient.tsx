@@ -199,7 +199,7 @@ export default function BankAccountsClient() {
       {unassigned && (unassigned.unassignedPayouts.length > 0 || unassigned.unassignedPaidExpenses.length > 0) && (
         <div className="mb-6 p-5 bg-amber-50 border-2 border-amber-300 rounded-2xl">
           <div className="flex items-start gap-3">
-            <span className="text-2xl">💸</span>
+            <div className="w-2 h-2 mt-1.5 rounded-full bg-amber-500 shrink-0" />
             <div className="flex-1">
               <h3 className="font-bold text-amber-900">Dinero sin asignar a cuenta bancaria</h3>
               <p className="text-sm text-amber-800 mt-1">
@@ -280,7 +280,7 @@ export default function BankAccountsClient() {
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <h3 className="font-bold text-slate-800 truncate flex items-center gap-2">
-                      {account.is_cash ? '💵 ' : ''}{account.name}
+                      {account.name}
                       {account.is_cash ? (
                         <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-yellow-100 text-yellow-800 rounded">EFECTIVO</span>
                       ) : account.is_credit ? (
@@ -329,7 +329,7 @@ export default function BankAccountsClient() {
                     onClick={() => setHistoryAccount(account)}
                     className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100"
                   >
-                    📋 Historial
+                    Historial
                   </button>
                   {!account.is_cash && (
                     <>
@@ -579,7 +579,7 @@ function BankHistoryModal({
         <header className="p-5 border-b border-slate-200">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-lg font-bold text-slate-800">📋 Historial de transacciones</h3>
+              <h3 className="text-lg font-bold text-slate-800">Historial de transacciones</h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 {account.name} · {account.bank ?? 'Sin banco'} {account.is_credit ? '· CRÉDITO' : '· DÉBITO'}
               </p>

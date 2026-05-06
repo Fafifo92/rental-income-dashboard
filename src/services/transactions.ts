@@ -128,25 +128,26 @@ export const listTransactions = async (
     });
   }
 
-  // 5. Cancelled fines (informational — deducted by platform, not a real bank tx)
+  // 5. Cancelled fines — real movement if debit account is assigned, synthetic (info) otherwise
   for (const b of bookings) {
     const rev = Number(b.total_revenue ?? 0);
     if (!b.status?.toLowerCase().includes('cancel') || rev >= 0) continue;
+    const hasAccount = !!b.payout_bank_account_id;
     txs.push({
       id: `fine-${b.id}`,
-      date: b.start_date ?? fromISO,
+      date: b.payout_date ?? b.start_date ?? fromISO,
       concept: `Multa cancelación · ${b.confirmation_code} · ${b.guest_name ?? ''}`,
       type: 'expense',
       category: 'Multa por cancelación',
       amount: Math.abs(rev),
       signedAmount: rev,
-      bankAccountId: null,
-      bankAccountName: null,
+      bankAccountId: b.payout_bank_account_id ?? null,
+      bankAccountName: hasAccount ? acctName(b.payout_bank_account_id) : null,
       channel: b.channel ?? null,
       bookingCode: b.confirmation_code ?? null,
       guestName: b.guest_name ?? null,
       notes: null,
-      isSynthetic: true,
+      isSynthetic: !hasAccount, // informational only until debit account is confirmed
     });
   }
 
