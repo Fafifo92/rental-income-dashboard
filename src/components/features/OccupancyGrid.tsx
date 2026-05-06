@@ -12,7 +12,7 @@ interface Props {
   breakEvenOccupancy: number; // 0-100
 }
 
-const CELL_W = 34;
+const CELL_W = 38;
 const ROW_H = 44;
 const LABEL_W = 140;
 const MAX_DAYS = 180; // cap visible window to avoid freeze on "Todo"
@@ -439,8 +439,14 @@ export default function OccupancyGrid({
                     />
                   ))}
 
-                  {/* Booking blocks */}
-                  {propBookings.map(bk => {
+                  {/* Booking blocks — cancelled rendered first (behind), active on top */}
+                  {[...propBookings]
+                    .sort((a, b) => {
+                      const ac = isCancelled(a.status) ? 0 : 1;
+                      const bc = isCancelled(b.status) ? 0 : 1;
+                      return ac - bc;
+                    })
+                    .map(bk => {
                     const bkStart = isoToDate(bk.start_date);
                     const bkEnd = isoToDate(bk.end_date);
 
@@ -476,6 +482,7 @@ export default function OccupancyGrid({
                           paddingLeft: 5,
                           paddingRight: 3,
                           cursor: 'default',
+                          zIndex: cancelled ? 1 : 2,
                           ...(cancelled ? {
                             backgroundImage: `repeating-linear-gradient(
                               45deg,
