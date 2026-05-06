@@ -26,6 +26,8 @@ interface Props {
   breakEvenOccupancy: number; // 0-100, for reference line
 }
 
+import { resolveColor } from './PropertiesClient';
+
 const NO_GROUP_COLOR = '#94a3b8'; // slate-400 for ungrouped
 const MONTHS_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
@@ -175,7 +177,7 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
           .select('id, name, color')
           .in('id', uniqueGroupIds);
         for (const g of (gRows ?? []) as Array<{ id: string; name: string; color: string }>) {
-          groupMap.set(g.id, { id: g.id, name: g.name, color: g.color });
+          groupMap.set(g.id, { id: g.id, name: g.name, color: resolveColor(g.color) });
         }
       }
       if (cancelled) return;

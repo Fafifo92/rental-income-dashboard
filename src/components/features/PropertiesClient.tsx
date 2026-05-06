@@ -41,38 +41,32 @@ const DEMO_PROPERTIES: Property[] = [
 
 const CATEGORY_COLORS = ['from-blue-500 to-indigo-600', 'from-emerald-500 to-teal-600', 'from-violet-500 to-purple-600', 'from-orange-500 to-amber-600'];
 
-const TAILWIND_COLORS = ['slate', 'blue', 'violet', 'amber', 'emerald', 'rose', 'cyan', 'fuchsia'] as const;
-
-const COLOR_PILL: Record<string, string> = {
-  slate:    'bg-slate-100 text-slate-700 border-slate-200',
-  blue:     'bg-blue-100 text-blue-700 border-blue-200',
-  violet:   'bg-violet-100 text-violet-700 border-violet-200',
-  amber:    'bg-amber-100 text-amber-700 border-amber-200',
-  emerald:  'bg-emerald-100 text-emerald-700 border-emerald-200',
-  rose:     'bg-rose-100 text-rose-700 border-rose-200',
-  cyan:     'bg-cyan-100 text-cyan-700 border-cyan-200',
-  fuchsia:  'bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200',
+const COLOR_NAME_TO_HEX: Record<string, string> = {
+  slate:   '#64748b',
+  blue:    '#3b82f6',
+  violet:  '#8b5cf6',
+  amber:   '#f59e0b',
+  emerald: '#10b981',
+  rose:    '#f43f5e',
+  cyan:    '#06b6d4',
+  fuchsia: '#d946ef',
 };
 
-const COLOR_DOT: Record<string, string> = {
-  slate: 'bg-slate-400', blue: 'bg-blue-500', violet: 'bg-violet-500',
-  amber: 'bg-amber-500', emerald: 'bg-emerald-500', rose: 'bg-rose-500',
-  cyan: 'bg-cyan-500', fuchsia: 'bg-fuchsia-500',
-};
+export function resolveColor(c: string): string {
+  if (!c) return '#64748b';
+  if (c.startsWith('#')) return c;
+  return COLOR_NAME_TO_HEX[c] ?? '#64748b';
+}
 
 function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {TAILWIND_COLORS.map(c => (
-        <button
-          key={c}
-          type="button"
-          onClick={() => onChange(c)}
-          className={`w-6 h-6 rounded-full border-2 ${COLOR_DOT[c]} ${value === c ? 'border-slate-800 ring-2 ring-slate-300' : 'border-white'}`}
-          aria-label={c}
-        />
-      ))}
-    </div>
+    <input
+      type="color"
+      value={resolveColor(value)}
+      onChange={e => onChange(e.target.value)}
+      className="w-9 h-9 rounded-lg cursor-pointer border border-slate-200 p-0.5 bg-white"
+      title="Seleccionar color"
+    />
   );
 }
 
@@ -104,8 +98,15 @@ function PropertyCard({
           <div className="flex items-start gap-2">
             <h3 className="font-bold text-slate-800 text-lg leading-tight truncate flex-1">{property.name}</h3>
             {group && (
-              <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${COLOR_PILL[group.color] ?? COLOR_PILL.slate}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${COLOR_DOT[group.color] ?? COLOR_DOT.slate}`} />
+              <span
+                className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border"
+                style={{
+                  backgroundColor: resolveColor(group.color) + '18',
+                  borderColor: resolveColor(group.color) + '50',
+                  color: resolveColor(group.color),
+                }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: resolveColor(group.color) }} />
                 {group.name}
               </span>
             )}
@@ -118,7 +119,12 @@ function PropertyCard({
               {tags.map(t => (
                 <span
                   key={t.id}
-                  className={`px-1.5 py-0.5 text-[10px] font-medium rounded border ${COLOR_PILL[t.color] ?? COLOR_PILL.blue}`}
+                  className="px-1.5 py-0.5 text-[10px] font-medium rounded border"
+                  style={{
+                    backgroundColor: resolveColor(t.color) + '18',
+                    borderColor: resolveColor(t.color) + '50',
+                    color: resolveColor(t.color),
+                  }}
                 >
                   {t.name}
                 </span>
@@ -442,7 +448,7 @@ function GroupsManagerModal({
   const [items, setItems] = useState<PropertyGroupRow[]>(groups);
   const [props, setProps] = useState<Property[]>(properties);
   const [newName, setNewName] = useState('');
-  const [newColor, setNewColor] = useState<string>('slate');
+  const [newColor, setNewColor] = useState<string>('#3b82f6');
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [propSearch, setPropSearch] = useState('');
@@ -528,14 +534,13 @@ function GroupsManagerModal({
                     onBlur={e => { if (e.target.value.trim() && e.target.value !== g.name) handleUpdate(g.id, { name: e.target.value.trim() }); }}
                     className="flex-1 px-2 py-1 text-sm border border-slate-200 rounded"
                   />
-                  <select
-                    value={g.color}
+                  <input
+                    type="color"
+                    value={resolveColor(g.color)}
                     onChange={e => handleUpdate(g.id, { color: e.target.value })}
-                    className="px-2 py-1 text-xs border border-slate-200 rounded"
-                  >
-                    {TAILWIND_COLORS.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <span className={`w-4 h-4 rounded-full ${COLOR_DOT[g.color] ?? COLOR_DOT.slate}`} />
+                    className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 p-0.5 bg-white"
+                    title="Color del grupo"
+                  />
                   <button onClick={() => handleDelete(g.id)} className="text-rose-600 hover:text-rose-800 text-xs px-2 py-1" title="Eliminar grupo">
                     ✕
                   </button>
@@ -640,7 +645,7 @@ function TagsManagerModal({
   const [items, setItems] = useState<PropertyTagRow[]>(tags);
   const [assigns, setAssigns] = useState<PropertyTagAssignmentRow[]>(tagAssigns);
   const [newName, setNewName] = useState('');
-  const [newColor, setNewColor] = useState<string>('blue');
+  const [newColor, setNewColor] = useState<string>('#3b82f6');
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [propSearch, setPropSearch] = useState('');
@@ -722,14 +727,13 @@ function TagsManagerModal({
                     onBlur={e => { if (e.target.value.trim() && e.target.value !== t.name) handleUpdate(t.id, { name: e.target.value.trim() }); }}
                     className="flex-1 px-2 py-1 text-sm border border-slate-200 rounded"
                   />
-                  <select
-                    value={t.color}
+                  <input
+                    type="color"
+                    value={resolveColor(t.color)}
                     onChange={e => handleUpdate(t.id, { color: e.target.value })}
-                    className="px-2 py-1 text-xs border border-slate-200 rounded"
-                  >
-                    {TAILWIND_COLORS.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <span className={`w-4 h-4 rounded-full ${COLOR_DOT[t.color] ?? COLOR_DOT.blue}`} />
+                    className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 p-0.5 bg-white"
+                    title="Color de la etiqueta"
+                  />
                   <button onClick={() => handleDelete(t.id)} className="text-rose-600 hover:text-rose-800 text-xs px-2 py-1" title="Eliminar etiqueta">
                     ✕
                   </button>
