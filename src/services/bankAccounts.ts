@@ -161,11 +161,11 @@ export const computeBalances = async (): Promise<ServiceResult<BankAccountBalanc
     // AND no booking_payments entry (to avoid double-counting)
     const { data: legacyData } = await supabase
       .from('bookings')
-      .select('id, net_payout')
+      .select('id, net_payout, status')
       .eq('payout_bank_account_id', account.id);
 
     const legacyInflows = (legacyData ?? []).reduce(
-      (sum: number, row: { id: string; net_payout: number | null }) => {
+      (sum: number, row: { id: string; net_payout: number | null; status?: string | null }) => {
         if (bookingsWithPayments.has(row.id)) return sum;
         const net = Number(row.net_payout ?? 0);
         return net > 0 ? sum + net : sum; // negatives are fine deductions → counted as outflows
@@ -173,12 +173,13 @@ export const computeBalances = async (): Promise<ServiceResult<BankAccountBalanc
       0,
     );
 
-    // Fine/deduction bookings: negative net_payout with this account assigned = outflow
+    // Fine/deduction bookings: cancelled + negative net_payout with this account = outflow
     const legacyFineOutflows = (legacyData ?? []).reduce(
-      (sum: number, row: { id: string; net_payout: number | null }) => {
+      (sum: number, row: { id: string; net_payout: number | null; status?: string | null }) => {
         if (bookingsWithPayments.has(row.id)) return sum;
         const net = Number(row.net_payout ?? 0);
-        return net < 0 ? sum + Math.abs(net) : sum;
+        const isCancelled = (row.status ?? '').toLowerCase().includes('cancel');
+        return (net < 0 && isCancelled) ? sum + Math.abs(net) : sum;
       },
       0,
     );
@@ -197,11 +198,12 @@ export const computeBalances = async (): Promise<ServiceResult<BankAccountBalanc
       0,
     );
 
-    // Outflows = paid expenses + fine/deduction booking payments from this account
+    // Outflows = PAID expenses + fine/deduction booking payments from this account
     const { data: outflowData } = await supabase
       .from('expenses')
       .select('amount')
-      .eq('bank_account_id', account.id);
+      .eq('bank_account_id', account.id)
+      .eq('status', 'paid');
 
     const expenseOutflows = (outflowData ?? []).reduce(
       (sum: number, row: { amount: number }) => sum + Number(row.amount),

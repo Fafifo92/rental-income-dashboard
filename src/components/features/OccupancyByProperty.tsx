@@ -144,10 +144,13 @@ interface BookingRaw {
 }
 
 export default function OccupancyByProperty({ granularity, from, to, propertyIds, breakEvenOccupancy }: Props) {
+  const [mounted, setMounted]       = useState(false);
   const [chartData, setChartData]   = useState<ChartDataRow[]>([]);
   const [groups, setGroups]         = useState<Group[]>([]);
   const [totalProps, setTotalProps] = useState(0);
   const [loading, setLoading]       = useState(true);
+
+  useEffect(() => setMounted(true), []);
 
   const propIdsKey = propertyIds?.join(',') ?? '';
 
@@ -306,6 +309,7 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
       </div>
 
       <div className="h-64 w-full">
+        {mounted && (
         <ResponsiveContainer width="100%" height="100%" minHeight={0} minWidth={0}>
           <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -352,6 +356,7 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
             ))}
           </BarChart>
         </ResponsiveContainer>
+        )}
       </div>
     </div>
   );
