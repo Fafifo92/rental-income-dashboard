@@ -329,6 +329,7 @@ export const validateAccountSpend = async (
 export type BankTxKind =
   | 'opening'             // saldo de apertura
   | 'booking_payout'      // ingreso por payout de reserva
+  | 'cancellation_fine'   // egreso por multa de cancelación (net_payout negativo)
   | 'damage_recovery'     // ingreso por recuperación de daño (booking_adjustment)
   | 'platform_refund'     // ingreso por reembolso de plataforma
   | 'extra_income'        // ingreso extra registrado en la reserva
@@ -362,7 +363,7 @@ export const getBankAccountTransactions = async (
   // 1) Bookings con payout a esta cuenta
   const { data: bookings, error: e1 } = await supabase
     .from('bookings')
-    .select('id, confirmation_code, guest_name, end_date, net_payout, listing_id')
+    .select('id, confirmation_code, guest_name, end_date, net_payout, listing_id, status')
     .eq('payout_bank_account_id', accountId)
     .order('end_date', { ascending: false });
   if (e1) return { data: null, error: e1.message };
@@ -382,7 +383,7 @@ export const getBankAccountTransactions = async (
   if (e3) return { data: null, error: e3.message };
 
   // 4) Resolver listings → properties para nombres
-  type B = { id: string; confirmation_code: string | null; guest_name: string | null; end_date: string | null; net_payout: number | null; listing_id: string };
+  type B = { id: string; confirmation_code: string | null; guest_name: string | null; end_date: string | null; net_payout: number | null; listing_id: string; status: string | null };
   type A = { id: string; kind: string; amount: number; description: string | null; date: string; booking_id: string };
   type E = { id: string; date: string; amount: number; description: string | null; category: string | null; booking_id: string | null; property_id: string | null };
 
@@ -458,21 +459,24 @@ export const getBankAccountTransactions = async (
     });
   }
 
-  // Bookings → payouts
+  // Bookings → payouts and fines
   for (const b of bs) {
     const amount = Number(b.net_payout ?? 0);
     if (amount === 0) continue;
+    const isFine = amount < 0 && !!b.status?.toLowerCase().includes('cancel');
     txs.push({
       id: `booking-${b.id}`,
       date: b.end_date ?? '',
-      kind: 'booking_payout',
+      kind: isFine ? 'cancellation_fine' : 'booking_payout',
       amount,
-      description: `Payout reserva ${b.guest_name ? '· ' + b.guest_name : ''}`.trim(),
+      description: isFine
+        ? `Multa por cancelación${b.guest_name ? ' · ' + b.guest_name : ''}`
+        : `Payout reserva${b.guest_name ? ' · ' + b.guest_name : ''}`,
       reference_id: b.id,
       reference_type: 'booking',
       booking_code: b.confirmation_code,
       property_name: listingPropMap.get(b.listing_id) ?? null,
-      category: null,
+      category: isFine ? 'Multa por cancelación' : null,
     });
   }
 
@@ -534,6 +538,7 @@ const labelForAdjKind = (kind: string): string => {
 export const BANK_TX_KIND_META: Record<BankTxKind, { label: string; tone: 'in' | 'out' | 'neutral' }> = {
   opening:           { label: 'Apertura',                tone: 'neutral' },
   booking_payout:    { label: 'Payout reserva',           tone: 'in' },
+  cancellation_fine: { label: 'Multa por cancelación',    tone: 'out' },
   damage_recovery:   { label: 'Recuperación por daño',    tone: 'in' },
   platform_refund:   { label: 'Reembolso plataforma',     tone: 'in' },
   extra_income:      { label: 'Ingreso extra',            tone: 'in' },

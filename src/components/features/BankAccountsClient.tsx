@@ -556,8 +556,11 @@ function BankHistoryModal({
 
   const filtered = txs.filter(t => {
     if (filter === 'all') return true;
-    const meta = BANK_TX_KIND_META[t.kind];
-    return meta.tone === filter;
+    if (t.kind === 'opening') return false; // opening doesn't belong to in/out
+    // Use amount sign as source of truth (safer than tone which can mismatch)
+    if (filter === 'in')  return t.amount > 0;
+    if (filter === 'out') return t.amount < 0;
+    return true;
   });
 
   const totalIn = txs.filter(t => t.amount > 0 && t.kind !== 'opening').reduce((s, t) => s + t.amount, 0);
@@ -635,7 +638,10 @@ function BankHistoryModal({
                 const isIn = t.amount > 0;
                 return (
                   <li key={t.id} className="py-3 flex items-start gap-3">
-                    <div className="text-2xl">{meta.emoji}</div>
+                    <div className={`w-2 h-2 mt-2 rounded-full shrink-0 ${
+                      t.kind === 'opening' ? 'bg-slate-400' :
+                      t.amount > 0 ? 'bg-emerald-500' : 'bg-rose-500'
+                    }`} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-semibold text-slate-800">{meta.label}</span>
