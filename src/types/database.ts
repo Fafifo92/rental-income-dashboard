@@ -56,6 +56,12 @@ export type Database = {
         Update: Partial<Omit<BankAccountRow, 'id' | 'created_at'>>;
         Relationships: [];
       };
+      booking_payments: {
+        Row: BookingPaymentRow;
+        Insert: Omit<BookingPaymentRow, 'id' | 'created_at'>;
+        Update: Partial<Omit<BookingPaymentRow, 'id' | 'created_at'>>;
+        Relationships: [];
+      };
       booking_adjustments: {
         Row: BookingAdjustmentRow;
         Insert: Omit<BookingAdjustmentRow, 'id' | 'created_at'>;
@@ -254,6 +260,20 @@ export type BankAccountRow = {
   created_at: string;
   is_credit: boolean;
   credit_limit: number | null;
+  /** Cuenta especial de efectivo: existe siempre, no se puede crear ni eliminar. */
+  is_cash: boolean;
+};
+
+/** Pago parcial o total registrado contra una reserva. */
+export type BookingPaymentRow = {
+  id: string;
+  owner_id: string;
+  booking_id: string;
+  amount: number;
+  bank_account_id: string | null;
+  payment_date: string | null;
+  notes: string | null;
+  created_at: string;
 };
 
 export type BookingAdjustmentKind = 'extra_income' | 'discount' | 'damage_charge' | 'platform_refund' | 'extra_guest_fee';

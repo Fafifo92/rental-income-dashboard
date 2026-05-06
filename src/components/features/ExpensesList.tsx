@@ -18,10 +18,11 @@ const TYPE_CONFIG: Record<string, { label: string; className: string }> = {
   variable: { label: 'Variable', className: 'bg-slate-100 text-slate-600' },
 };
 
-const isSynthetic = (id: string) => id.startsWith('rec-') || id.startsWith('fee-');
-const syntheticKind = (id: string): 'Recurrente' | 'Fees canal' | null => {
-  if (id.startsWith('rec-')) return 'Recurrente';
-  if (id.startsWith('fee-')) return 'Fees canal';
+const isSynthetic = (id: string) => id.startsWith('rec-') || id.startsWith('fee-') || id.startsWith('fine-');
+const syntheticKind = (id: string): 'Recurrente' | 'Fees canal · info' | 'Multa cancelación' | null => {
+  if (id.startsWith('rec-'))  return 'Recurrente';
+  if (id.startsWith('fee-'))  return 'Fees canal · info';
+  if (id.startsWith('fine-')) return 'Multa cancelación';
   return null;
 };
 
@@ -50,7 +51,9 @@ export default function ExpensesList({ expenses, loading = false, onDelete, onEd
                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
                   kind === 'Recurrente'
                     ? 'bg-purple-50 text-purple-700 border-purple-200'
-                    : 'bg-rose-50 text-rose-700 border-rose-200'
+                    : kind === 'Multa cancelación'
+                      ? 'bg-red-50 text-red-700 border-red-200'
+                      : 'bg-slate-50 text-slate-500 border-slate-200'
                 }`}>
                   {kind}
                 </span>
@@ -133,6 +136,9 @@ export default function ExpensesList({ expenses, loading = false, onDelete, onEd
         header: 'Estado',
         meta: { align: 'center' },
         cell: info => {
+          const row = info.row.original;
+          // Synthetic entries (fees/fines) don't have a real payment status
+          if (isSynthetic(row.id)) return null;
           const cfg = STATUS_CONFIG[info.getValue()] ?? {
             label: info.getValue(),
             className: 'bg-slate-100 text-slate-600',

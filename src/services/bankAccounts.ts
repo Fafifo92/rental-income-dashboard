@@ -1,10 +1,10 @@
 import { supabase } from '@/lib/supabase/client';
 import type { ServiceResult } from './expenses';
-import type { BankAccountRow } from '@/types/database';
+import type { BankAccountRow, BookingPaymentRow } from '@/types/database';
 
 export interface BankAccountBalance {
   account: BankAccountRow;
-  inflows: number;      // sum of bookings.net_payout with this bank
+  inflows: number;      // booking payments (new system) + legacy net_payout
   outflows: number;     // sum of expenses.amount paid from this bank
   currentBalance: number;
 }
@@ -13,10 +13,41 @@ export const listBankAccounts = async (): Promise<ServiceResult<BankAccountRow[]
   const { data, error } = await supabase
     .from('bank_accounts')
     .select('*')
+    .order('is_cash', { ascending: false })   // cash account first
     .order('is_active', { ascending: false })
     .order('name');
   if (error) return { data: null, error: error.message };
   return { data, error: null };
+};
+
+/**
+ * Ensures a "Efectivo" cash account exists for the current user.
+ * Called on app load. Safe to call multiple times (is idempotent).
+ */
+export const ensureCashAccount = async (): Promise<void> => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  const { data: existing } = await supabase
+    .from('bank_accounts')
+    .select('id')
+    .eq('owner_id', user.id)
+    .eq('is_cash', true)
+    .maybeSingle();
+  if (existing) return;
+  await supabase.from('bank_accounts').insert({
+    owner_id: user.id,
+    name: 'Efectivo',
+    bank: null,
+    account_type: 'otro',
+    account_number_mask: null,
+    currency: 'COP',
+    opening_balance: 0,
+    is_active: true,
+    is_credit: false,
+    credit_limit: null,
+    is_cash: true,
+    notes: 'Cuenta de efectivo. Los pagos en cash se registran aquí.',
+  });
 };
 
 export const createBankAccount = async (
@@ -54,30 +85,94 @@ export const deleteBankAccount = async (id: string): Promise<ServiceResult<true>
   return { data: true, error: null };
 };
 
+// ─── Pagos parciales de reservas ─────────────────────────────────────────────
+
+export const listBookingPayments = async (
+  bookingId: string,
+): Promise<ServiceResult<BookingPaymentRow[]>> => {
+  const { data, error } = await supabase
+    .from('booking_payments')
+    .select('*')
+    .eq('booking_id', bookingId)
+    .order('payment_date', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) return { data: null, error: error.message };
+  return { data: data as BookingPaymentRow[], error: null };
+};
+
+export const addBookingPayment = async (input: {
+  booking_id: string;
+  amount: number;
+  bank_account_id: string | null;
+  payment_date: string | null;
+  notes: string | null;
+}): Promise<ServiceResult<BookingPaymentRow>> => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: null, error: 'No autenticado' };
+  const { data, error } = await supabase
+    .from('booking_payments')
+    .insert({ ...input, owner_id: user.id })
+    .select()
+    .single();
+  if (error) return { data: null, error: error.message };
+  return { data: data as BookingPaymentRow, error: null };
+};
+
+export const deleteBookingPayment = async (id: string): Promise<ServiceResult<true>> => {
+  const { error } = await supabase.from('booking_payments').delete().eq('id', id);
+  if (error) return { data: null, error: error.message };
+  return { data: true, error: null };
+};
+
 /**
- * Compute current balance for each account by summing inflows (booking payouts)
- * and outflows (expenses) tied to that account.
+ * Compute current balance for each account.
+ * Inflows = booking_payments (new system) + legacy net_payout on bookings that
+ * have no booking_payments entries yet (backward compat).
  */
 export const computeBalances = async (): Promise<ServiceResult<BankAccountBalance[]>> => {
   const accRes = await listBankAccounts();
   if (accRes.error) return { data: null, error: accRes.error };
 
+  // Pre-fetch all booking_payments grouped by account (gracefully handles missing table)
+  const { data: allPayments } = await supabase
+    .from('booking_payments')
+    .select('bank_account_id, amount, booking_id');
+
+  // Set of booking IDs that have at least one payment entry (new system)
+  const bookingsWithPayments = new Set(
+    (allPayments ?? []).map((p: { booking_id: string }) => p.booking_id),
+  );
+
+  // Sum of new-system payments per account
+  const paymentInflowByAccount = new Map<string, number>();
+  for (const p of allPayments ?? []) {
+    const acc = (p as { bank_account_id: string | null; amount: number }).bank_account_id;
+    if (!acc) continue;
+    paymentInflowByAccount.set(acc, (paymentInflowByAccount.get(acc) ?? 0) + Number(p.amount));
+  }
+
   const balances: BankAccountBalance[] = [];
 
   for (const account of accRes.data ?? []) {
-    // Inflows = sum of net_payout on bookings with this bank
-    const { data: inflowData } = await supabase
+    // New-system inflows for this account
+    const newInflows = paymentInflowByAccount.get(account.id) ?? 0;
+
+    // Legacy inflows: bookings with payout_bank_account_id = this account
+    // AND no booking_payments entry (to avoid double-counting)
+    const { data: legacyData } = await supabase
       .from('bookings')
-      .select('net_payout')
+      .select('id, net_payout')
       .eq('payout_bank_account_id', account.id);
 
-    const inflows = (inflowData ?? []).reduce(
-      (sum: number, row: { net_payout: number | null }) => sum + Number(row.net_payout ?? 0),
+    const legacyInflows = (legacyData ?? []).reduce(
+      (sum: number, row: { id: string; net_payout: number | null }) =>
+        bookingsWithPayments.has(row.id) ? sum : sum + Number(row.net_payout ?? 0),
       0,
     );
 
-    // Inflows extra: ajustes de reserva que cayeron a esta cuenta (ej. recuperación
-    // de daños cobrada aparte por la plataforma). 'discount' nunca trae plata, se ignora.
+    const inflows = newInflows + legacyInflows;
+
+    // Adjustment inflows (damage recoveries, extras, etc.)
     const { data: adjData } = await supabase
       .from('booking_adjustments')
       .select('amount, kind')

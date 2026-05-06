@@ -36,9 +36,15 @@ export interface FinancialKPIs {
   availableNights: number;
   totalBookings: number;
   cancelledCount: number;
+  /** Ingresos por cancelación (reservas canceladas con monto > 0, ej: tarifa de cancelación cobrada al huésped). */
+  cancelledRevenue: number;
+  /** Multas cobradas al anfitrión (reservas canceladas con monto negativo → se contabilizan como gasto). */
+  cancelledFines: number;
   isDemo: boolean;
   /** Ingresos netos de ajustes de reserva (cobros de daños, ingresos extra, etc.) */
   netAdjustmentIncome: number;
+  /** Fees cobrados por la plataforma (Airbnb, Booking…). Informativo — NO se restan de la utilidad. */
+  totalChannelFees: number;
   /** Número de propiedades/listings distintos en el portafolio */
   propertyCount: number;
   vsLastPeriod: {
@@ -206,6 +212,22 @@ const getPeriodRange = (period: Period): DateRange => {
   }
 };
 
+/**
+ * Resolves a Period (+ optional custom range) to ISO date strings.
+ * Exported so other services (e.g. transactions.ts) can use the same logic.
+ */
+export const resolvePeriodRange = (
+  period: Period,
+  customRange?: { from: string; to: string },
+): { from: string; to: string } => {
+  if (period === 'custom' && customRange?.from && customRange?.to) {
+    return { from: customRange.from, to: customRange.to };
+  }
+  const r = getPeriodRange(period);
+  const pad = (d: Date) => d.toISOString().slice(0, 10);
+  return { from: pad(r.from), to: pad(r.to) };
+};
+
 const getPriorRange = (period: Period): DateRange => {
   const now = new Date();
   const y = now.getFullYear();
@@ -230,7 +252,7 @@ const computeCore = (
   adjustments: AdjData[],
   range: DateRange,
   propertyCount = 1,
-): Omit<FinancialKPIs, 'vsLastPeriod' | 'isDemo' | 'propertyCount'> => {
+): Omit<FinancialKPIs, 'vsLastPeriod' | 'isDemo' | 'propertyCount' | 'totalChannelFees'> => {
   const inRange = (d: string) => { const t = new Date(d + 'T12:00:00'); return t >= range.from && t <= range.to; };
 
   const filtered  = bookings.filter(b => b.start_date && inRange(b.start_date));
@@ -240,18 +262,28 @@ const computeCore = (
   const bookingRevenue = completed.reduce((s, b) => s + b.revenue, 0);
   const totalNights    = completed.reduce((s, b) => s + b.num_nights, 0);
 
+  // Cancelled bookings with positive revenue: cancellation fee earned (counts as income)
+  const cancelledRevenue = cancelled
+    .filter(b => b.revenue > 0)
+    .reduce((s, b) => s + b.revenue, 0);
+  // Cancelled bookings with negative revenue: host was fined (counts as variable expense)
+  const cancelledFines = cancelled
+    .filter(b => b.revenue < 0)
+    .reduce((s, b) => s + Math.abs(b.revenue), 0);
+
   // Ajustes de reserva en el rango: cobros de daños, ingresos extra, descuentos dados
   const adjInRange = adjustments.filter(a => a.date && inRange(a.date));
   const incomeFromAdj  = adjInRange.filter(a => a.kind !== 'discount').reduce((s, a) => s + Number(a.amount), 0);
   const discountsGiven = adjInRange.filter(a => a.kind === 'discount').reduce((s, a) => s + Number(a.amount), 0);
   const netAdjustmentIncome = incomeFromAdj - discountsGiven;
 
-  // grossRevenue = lo que entró por reservas + cobros de daños/extras − descuentos
-  const grossRevenue = bookingRevenue + netAdjustmentIncome;
+  // grossRevenue includes cancelled-with-revenue (cancellation fees earned)
+  const grossRevenue = bookingRevenue + netAdjustmentIncome + cancelledRevenue;
 
   const expInRange          = expenses.filter(e => e.date && inRange(e.date));
   const totalFixedExpenses  = expInRange.filter(e => e.type === 'fixed').reduce((s, e) => s + e.amount, 0);
-  const totalVariableExpenses = expInRange.filter(e => e.type === 'variable').reduce((s, e) => s + e.amount, 0);
+  // cancelledFines are multas charged to the host — treated as variable expense
+  const totalVariableExpenses = expInRange.filter(e => e.type === 'variable').reduce((s, e) => s + e.amount, 0) + cancelledFines;
   const totalExpenses       = totalFixedExpenses + totalVariableExpenses;
   const contributionMargin  = grossRevenue - totalVariableExpenses;
   const netProfit           = contributionMargin - totalFixedExpenses;
@@ -285,6 +317,8 @@ const computeCore = (
     availableNights,
     totalBookings:   completed.length,
     cancelledCount:  cancelled.length,
+    cancelledRevenue: Math.round(cancelledRevenue),
+    cancelledFines:   Math.round(cancelledFines),
   };
 };
 
@@ -552,8 +586,7 @@ export const computeFinancials = async (
   let isDemo = false;
   const bookingFilters = propertyIds ? { propertyIds } : undefined;
 
-  // Channel fees → tratados como gasto sintético para que impacten netProfit
-  const channelFeeExpenses: Expense[] = [];
+  let totalChannelFees = 0;
 
   if (isAuthenticated) {
     const bookingRes = await listBookings(bookingFilters);
@@ -568,21 +601,8 @@ export const computeFinancials = async (
         payout_bank_account_id: r.payout_bank_account_id ?? null,
         net_payout: r.net_payout !== null && r.net_payout !== undefined ? Number(r.net_payout) : null,
       }));
-      for (const r of bookingRes.data) {
-        const fees = Number(r.channel_fees ?? 0);
-        if (fees > 0) {
-          channelFeeExpenses.push({
-            id: `fee-${r.id}`,
-            property_id: null,
-            category: 'Comisiones de canal',
-            type: 'variable',
-            amount: fees,
-            date: r.start_date,
-            description: `Comisión ${r.channel ?? 'canal'} — ${r.confirmation_code}`,
-            status: 'paid',
-          });
-        }
-      }
+      // Sum channel fees for informational display only — NOT counted as expenses
+      totalChannelFees = bookingRes.data.reduce((s, r) => s + Number(r.channel_fees ?? 0), 0);
     }
   } else {
     const bookingRes = await listBookings(bookingFilters);
@@ -611,6 +631,7 @@ export const computeFinancials = async (
   const expenseRes = await listExpenses(propertyIds, {
     includeRecurring: false,
     includeChannelFees: false,
+    includeCancelledFines: false, // Already summed from bookings directly in computeCore
   });
   let expenses: Expense[] = [];
   if (isAuthenticated) {
@@ -644,12 +665,7 @@ export const computeFinancials = async (
     }
   }
 
-  // Add channel fee synthetic expenses (authenticated only)
-  if (channelFeeExpenses.length > 0) {
-    expenses = [...expenses, ...channelFeeExpenses];
-  }
-
-  // Load booking adjustments (authenticated only; RLS ensures owner scope).
+  // Load booking adjustments(authenticated only; RLS ensures owner scope).
   // Demo mode skips this — no adjustments in seed data.
   let adjustments: AdjData[] = [];
   if (isAuthenticated && !isDemo) {
@@ -691,6 +707,7 @@ export const computeFinancials = async (
     ...core,
     isDemo,
     propertyCount,
+    totalChannelFees: Math.round(totalChannelFees),
     vsLastPeriod: {
       grossRevenue:  delta(core.grossRevenue,  prior.grossRevenue),
       netProfit:     delta(core.netProfit,     prior.netProfit),

@@ -8,9 +8,12 @@ import CSVUploader from './CSVUploader';
 import ExportMenu from './ExportMenu';
 import AlertsPanel from './AlertsPanel';
 import IncomeExpenseTab from './IncomeExpenseTab';
+import ActiveBookingsWidget from './ActiveBookingsWidget';
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
-import { computeFinancials } from '@/services/financial';
+import { computeFinancials, resolvePeriodRange } from '@/services/financial';
 import type { Period, FinancialKPIs, MonthlyPnL, PayoutBreakdown } from '@/services/financial';
+import { listTransactions } from '@/services/transactions';
+import type { FinancialTransaction } from '@/services/transactions';
 import type { ParsedBooking } from '@/services/etl';
 import { useAuth } from '@/lib/useAuth';
 import { usePropertyFilter } from '@/lib/usePropertyFilter';
@@ -23,14 +26,23 @@ import type { InventoryItemRow } from '@/types/database';
 // ─── P&L Waterfall panel ──────────────────────────────────────────────────────
 
 function PLPanel({ kpis }: { kpis: FinancialKPIs }) {
-  const bookingRevenue = kpis.grossRevenue - (kpis.netAdjustmentIncome ?? 0);
-  const rows: Array<{ label: string; value: number; variant: 'revenue' | 'expense' | 'total' | 'adj' }> = [
+  const bookingRevenue = kpis.grossRevenue - (kpis.netAdjustmentIncome ?? 0) - (kpis.cancelledRevenue ?? 0);
+  const rows: Array<{ label: string; value: number; variant: 'revenue' | 'expense' | 'total' | 'adj' | 'info' }> = [
     { label: 'Ingresos por reservas', value: bookingRevenue,               variant: 'revenue' },
+    ...(kpis.cancelledRevenue && kpis.cancelledRevenue > 0
+      ? [{ label: 'Ingresos por cancelación', value: kpis.cancelledRevenue, variant: 'adj' as const }]
+      : []),
     ...(kpis.netAdjustmentIncome && kpis.netAdjustmentIncome !== 0
       ? [{ label: 'Ajustes (daños cobrados, extras, etc.)', value: kpis.netAdjustmentIncome, variant: 'adj' as const }]
       : []),
     { label: 'Ingreso Bruto Total',  value: kpis.grossRevenue,            variant: 'total' },
+    ...(kpis.totalChannelFees && kpis.totalChannelFees > 0
+      ? [{ label: '↳ Fees de canal (referencia)', value: kpis.totalChannelFees, variant: 'info' as const }]
+      : []),
     { label: 'Gastos Variables',     value: -kpis.totalVariableExpenses,   variant: 'expense' },
+    ...(kpis.cancelledFines && kpis.cancelledFines > 0
+      ? [{ label: '  · incl. multas por cancelación', value: -kpis.cancelledFines, variant: 'adj' as const }]
+      : []),
     { label: 'Margen Contribución',  value: kpis.contributionMargin,      variant: 'total' },
     { label: 'Gastos Fijos',         value: -kpis.totalFixedExpenses,     variant: 'expense' },
     { label: 'Utilidad Neta',        value: kpis.netProfit,               variant: 'total' },
@@ -54,13 +66,16 @@ function PLPanel({ kpis }: { kpis: FinancialKPIs }) {
                   ? 'text-red-700'
                   : row.variant === 'adj'
                     ? row.value >= 0 ? 'text-emerald-700 text-xs' : 'text-rose-700 text-xs'
-                    : 'text-blue-700 font-medium'
+                    : row.variant === 'info'
+                      ? 'text-slate-500 text-xs italic'
+                      : 'text-blue-700 font-medium'
             }`}
           >
             <span>{row.label}</span>
             <span className={
               row.variant === 'expense' ? 'text-red-600'
               : row.variant === 'adj' ? (row.value >= 0 ? 'text-emerald-600' : 'text-rose-600')
+              : row.variant === 'info' ? 'text-slate-400'
               : undefined
             }>
               {row.variant === 'expense' ? '−' : row.variant === 'adj' && row.value >= 0 ? '+' : ''}
@@ -89,7 +104,9 @@ export default function DashboardClient() {
   const [exportMonthly, setExportMonthly] = useState<MonthlyPnL[]>([]);
   const [payoutBreakdown, setPayoutBreakdown] = useState<PayoutBreakdown | null>(null);
   const [granularity, setGranularity]     = useState<import('@/services/financial').ChartGranularity>('week');
-  const [activeTab, setActiveTab]         = useState<'resumen' | 'ingresos-egresos'>('resumen');
+  const [transactions, setTransactions]   = useState<FinancialTransaction[]>([]);
+  const [txLoading, setTxLoading]         = useState(false);
+  const [activeTab, setActiveTab]         = useState<'resumen' | 'ingresos-egresos' | 'en-curso'>('resumen');
   const [loading, setLoading]             = useState(true);
   const [showUploader, setShowUploader]   = useState(false);
   const [importedBookings, setImportedBookings] = useState<ParsedBooking[]>([]);
@@ -109,6 +126,16 @@ export default function DashboardClient() {
       setGranularity(result.granularity);
       setLoading(false);
     });
+
+    // Load financial transaction ledger
+    setTxLoading(true);
+    const { from, to } = resolvePeriodRange(period, customRange);
+    listTransactions(from, to, propertyIds?.length ? propertyIds : undefined).then(txs => {
+      if (cancelled) return;
+      setTransactions(txs);
+      setTxLoading(false);
+    });
+
     return () => { cancelled = true; };
   }, [period, authStatus, propertyIds, customRange]);
 
@@ -153,7 +180,7 @@ export default function DashboardClient() {
 
         {/* Tabs */}
         <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit">
-          {(['resumen', 'ingresos-egresos'] as const).map(tab => (
+          {(['resumen', 'ingresos-egresos', 'en-curso'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -163,13 +190,15 @@ export default function DashboardClient() {
                   : 'text-slate-500 hover:text-slate-700'
               }`}
             >
-              {tab === 'resumen' ? 'Resumen' : 'Ingresos vs Egresos'}
+              {tab === 'resumen' ? 'Resumen' : tab === 'ingresos-egresos' ? 'Ingresos vs Egresos' : 'Reservas en curso'}
             </button>
           ))}
         </div>
 
         {activeTab === 'ingresos-egresos' && kpis && payoutBreakdown ? (
-          <IncomeExpenseTab payout={payoutBreakdown} kpis={kpis} granularity={granularity} />
+          <IncomeExpenseTab payout={payoutBreakdown} kpis={kpis} granularity={granularity} transactions={transactions} txLoading={txLoading} />
+        ) : activeTab === 'en-curso' ? (
+          <ActiveBookingsWidget propertyIds={propertyIds} />
         ) : (
           <>
         {/* KPI Grid */}

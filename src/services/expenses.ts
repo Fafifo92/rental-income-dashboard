@@ -15,8 +15,9 @@ export interface ExpenseFilters {
   bankAccountId?: string;
   personInCharge?: string;
   bookingId?: string;
-  includeRecurring?: boolean; // synthesize monthly recurring entries
-  includeChannelFees?: boolean; // synthesize channel fees from bookings
+  includeRecurring?: boolean;
+  includeChannelFees?: boolean;
+  includeCancelledFines?: boolean; // synthesize cancelled-booking fines as expenses
 }
 
 export type ServiceResult<T> =
@@ -84,23 +85,43 @@ export const listExpenses = async (
   // Mantenemos el flag por compat pero lo ignoramos.
   void filters?.includeRecurring;
 
-  // ── Inject synthetic channel fee expenses ─────────────────────────────
-  if (filters?.includeChannelFees !== false) {
+  // ── Inject synthetic expenses from bookings (channel fees + cancelled fines) ──
+  // Both are informational / read-only in UI. financial.ts passes both flags as false
+  // to avoid double-counting (it computes them directly from bookings data).
+  if (filters?.includeChannelFees !== false || filters?.includeCancelledFines !== false) {
     const bkRes = await listBookings(propertyIds ? { propertyIds } : undefined);
     if (!bkRes.error && bkRes.data) {
       for (const r of bkRes.data) {
-        const fees = Number(r.channel_fees ?? 0);
-        if (fees > 0) {
-          expenses.push({
-            id: `fee-${r.id}`,
-            property_id: null,
-            category: 'Comisiones de canal',
-            type: 'variable',
-            amount: fees,
-            date: r.start_date,
-            description: `[Fees] ${r.channel ?? 'canal'} — ${r.confirmation_code}`,
-            status: 'paid',
-          } as Expense);
+        if (filters?.includeChannelFees !== false) {
+          const fees = Number(r.channel_fees ?? 0);
+          if (fees > 0) {
+            expenses.push({
+              id: `fee-${r.id}`,
+              property_id: null,
+              category: 'Fees de canal',
+              type: 'variable',
+              amount: fees,
+              date: r.start_date,
+              description: `${r.channel ?? 'Canal'} · ${r.confirmation_code ?? ''}`,
+              status: 'paid',
+            } as Expense);
+          }
+        }
+        if (filters?.includeCancelledFines !== false) {
+          const rev = Number(r.total_revenue ?? 0);
+          if (r.status?.toLowerCase().includes('cancel') && rev < 0) {
+            expenses.push({
+              id: `fine-${r.id}`,
+              property_id: null,
+              category: 'Multa por cancelación',
+              type: 'variable',
+              amount: Math.abs(rev),
+              date: r.start_date,
+              description: `${r.channel ?? 'Canal'} · ${r.confirmation_code ?? ''}`,
+              status: 'paid',
+              booking_id: r.id,
+            } as Expense);
+          }
         }
       }
     }

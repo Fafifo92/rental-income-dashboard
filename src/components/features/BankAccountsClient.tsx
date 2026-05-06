@@ -5,6 +5,7 @@ import {
   createBankAccount,
   updateBankAccount,
   deleteBankAccount,
+  ensureCashAccount,
   computeBalances,
   listUnassignedMoney,
   getBankAccountTransactions,
@@ -29,6 +30,8 @@ type FormState = {
   opening_balance: number | null;
   notes: string;
   credit_limit: number | null;
+  /** true when user selects "cupo ilimitado" */
+  credit_unlimited: boolean;
 };
 
 const EMPTY_FORM: FormState = {
@@ -40,6 +43,7 @@ const EMPTY_FORM: FormState = {
   opening_balance: 0,
   notes: '',
   credit_limit: null,
+  credit_unlimited: true,
 };
 
 export default function BankAccountsClient() {
@@ -56,6 +60,7 @@ export default function BankAccountsClient() {
 
   const load = async () => {
     setLoading(true);
+    await ensureCashAccount();
     const [res, unassignedRes] = await Promise.all([
       computeBalances(),
       listUnassignedMoney(),
@@ -98,6 +103,7 @@ export default function BankAccountsClient() {
 
   const openEdit = (acc: BankAccountRow) => {
     setEditing(acc);
+    const creditUnlimited = acc.is_credit && acc.credit_limit == null;
     setForm({
       name: acc.name,
       bank: acc.bank ?? '',
@@ -107,6 +113,7 @@ export default function BankAccountsClient() {
       opening_balance: Number(acc.opening_balance) || 0,
       notes: acc.notes ?? '',
       credit_limit: acc.credit_limit != null ? Number(acc.credit_limit) : null,
+      credit_unlimited: creditUnlimited,
     });
     setError(null);
     setShowModal(true);
@@ -127,7 +134,8 @@ export default function BankAccountsClient() {
       notes: form.notes || null,
       is_active: true,
       is_credit: form.account_type === 'crédito',
-      credit_limit: form.account_type === 'crédito' ? form.credit_limit : null,
+      credit_limit: form.account_type === 'crédito' && !form.credit_unlimited ? form.credit_limit : null,
+      is_cash: false,
     };
     const res = editing
       ? await updateBankAccount(editing.id, payload)
@@ -272,15 +280,17 @@ export default function BankAccountsClient() {
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <h3 className="font-bold text-slate-800 truncate flex items-center gap-2">
-                      {account.name}
-                      {account.is_credit ? (
+                      {account.is_cash ? '💵 ' : ''}{account.name}
+                      {account.is_cash ? (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-yellow-100 text-yellow-800 rounded">EFECTIVO</span>
+                      ) : account.is_credit ? (
                         <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded">CRÉDITO</span>
                       ) : (
                         <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">DÉBITO</span>
                       )}
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      {account.bank ?? 'Sin banco'} · {account.account_type ?? '—'}
+                      {account.is_cash ? 'Pagos en efectivo' : (account.bank ?? 'Sin banco') + ' · ' + (account.account_type ?? '—')}
                       {account.account_number_mask && ` · ${account.account_number_mask}`}
                     </p>
                   </div>
@@ -298,10 +308,12 @@ export default function BankAccountsClient() {
                   <p className={`text-2xl font-extrabold mt-1 ${currentBalance >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
                     {formatCurrency(currentBalance)}
                   </p>
-                  {account.is_credit && account.credit_limit != null && (
-                    <p className="text-xs text-slate-500 mt-1">
-                      Cupo disponible: <span className="font-semibold">{formatCurrency(Number(account.credit_limit) + currentBalance)}</span> / {formatCurrency(Number(account.credit_limit))}
-                    </p>
+                  {account.is_credit && (
+                    account.credit_limit != null
+                      ? <p className="text-xs text-slate-500 mt-1">
+                          Cupo disponible: <span className="font-semibold">{formatCurrency(Number(account.credit_limit) + currentBalance)}</span> / {formatCurrency(Number(account.credit_limit))}
+                        </p>
+                      : <p className="text-xs text-slate-400 mt-1">Cupo ilimitado</p>
                   )}
                   <div className="flex justify-between text-xs mt-2 text-slate-500">
                     <span>Apertura: {formatCurrency(Number(account.opening_balance))}</span>
@@ -319,24 +331,28 @@ export default function BankAccountsClient() {
                   >
                     📋 Historial
                   </button>
-                  <button
-                    onClick={() => openEdit(account)}
-                    className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-slate-50 text-slate-700 hover:bg-slate-100"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    onClick={() => handleToggleActive(account)}
-                    className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-slate-50 text-slate-700 hover:bg-slate-100"
-                  >
-                    {account.is_active ? 'Desactivar' : 'Activar'}
-                  </button>
-                  <button
-                    onClick={() => handleDelete(account)}
-                    className="text-xs font-medium py-1.5 px-3 rounded-lg bg-red-50 text-red-600 hover:bg-red-100"
-                  >
-                    ×
-                  </button>
+                  {!account.is_cash && (
+                    <>
+                      <button
+                        onClick={() => openEdit(account)}
+                        className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-slate-50 text-slate-700 hover:bg-slate-100"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => handleToggleActive(account)}
+                        className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-slate-50 text-slate-700 hover:bg-slate-100"
+                      >
+                        {account.is_active ? 'Desactivar' : 'Activar'}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(account)}
+                        className="text-xs font-medium py-1.5 px-3 rounded-lg bg-red-50 text-red-600 hover:bg-red-100"
+                      >
+                        ×
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -447,16 +463,29 @@ export default function BankAccountsClient() {
 
                 {/* Cupo de crédito: solo visible cuando el tipo es Crédito */}
                 {form.account_type === 'crédito' && (
-                  <div className="border border-rose-200 rounded-lg p-3 bg-rose-50">
-                    <p className="text-[11px] text-rose-600 mb-2">
+                  <div className="border border-rose-200 rounded-lg p-3 bg-rose-50 space-y-2">
+                    <p className="text-[11px] text-rose-600">
                       Las cuentas de crédito permiten quedar en saldo negativo (deuda).
                     </p>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Cupo total (opcional)</label>
-                    <MoneyInput
-                      value={form.credit_limit}
-                      onChange={(v) => setForm({ ...form, credit_limit: v })}
-                      placeholder="2.000.000"
-                    />
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={form.credit_unlimited}
+                        onChange={e => setForm({ ...form, credit_unlimited: e.target.checked, credit_limit: e.target.checked ? null : form.credit_limit })}
+                        className="w-4 h-4 rounded"
+                      />
+                      <span className="text-xs font-semibold text-slate-700">Cupo ilimitado</span>
+                    </label>
+                    {!form.credit_unlimited && (
+                      <>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Cupo total</label>
+                        <MoneyInput
+                          value={form.credit_limit}
+                          onChange={(v) => setForm({ ...form, credit_limit: v })}
+                          placeholder="2.000.000"
+                        />
+                      </>
+                    )}
                   </div>
                 )}
 

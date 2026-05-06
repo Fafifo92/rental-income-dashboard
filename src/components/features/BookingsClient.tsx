@@ -24,7 +24,7 @@ import BookingDetailModal from './BookingDetailModal';
 import ConfirmDeleteChallenge from './ConfirmDeleteChallenge';
 import MoneyInput from '@/components/MoneyInput';
 import { parseMoney } from '@/lib/money';
-import { getBookingStatus, statusUI, inferOperationalFlags } from '@/lib/bookingStatus';
+import { getBookingStatus, statusUI, inferOperationalFlags, type DerivedBookingStatus } from '@/lib/bookingStatus';
 import { todayISO as todayISOFromUtils } from '@/lib/dateUtils';
 import { toast } from '@/lib/toast';
 import { CalendarCheck, Pencil, HandCoins, Trash2 } from 'lucide-react';
@@ -188,6 +188,7 @@ export default function BookingsClient() {
   const [payoutTarget, setPayoutTarget] = useState<DisplayBooking | null>(null);
   const [detailTarget, setDetailTarget] = useState<DisplayBooking | null>(null);
   const [listings, setListings] = useState<ListingRow[]>([]);
+  const [statusFilter, setStatusFilter] = useState<DerivedBookingStatus | 'all'>('all');
 
   // ESC cierra el modal abierto (sin cerrar por clic fuera — ver onClick del overlay)
   useEffect(() => {
@@ -579,7 +580,9 @@ export default function BookingsClient() {
         return (
           <div className="flex flex-col min-w-0 max-w-[180px] sm:max-w-[220px]">
             <span className="font-medium text-slate-800 truncate" title={b.guest_name}>{b.guest_name}</span>
-            <span className="font-mono text-[10px] text-slate-400 truncate">{b.confirmation_code}</span>
+            <span className="font-mono text-[10px] text-slate-400 truncate">
+              {b.confirmation_code}{b.listing_name ? ` · ${b.listing_name}` : ''}
+            </span>
           </div>
         );
       },
@@ -647,6 +650,7 @@ export default function BookingsClient() {
         const b = info.row.original;
         if (b.isDemo) return null;
         const hasPayout = b.net_payout !== null && b.net_payout !== undefined;
+        const isCancelledNegative = b.status.toLowerCase().includes('cancel') && b.total_revenue < 0;
         return (
           <div className="flex items-center gap-1 justify-end whitespace-nowrap">
             <button
@@ -665,19 +669,21 @@ export default function BookingsClient() {
             >
               <Pencil className="w-4 h-4" />
             </button>
-            <button
-              onClick={() => setPayoutTarget(b)}
-              title={hasPayout ? 'Editar payout real' : 'Registrar payout real'}
-              aria-label="Payout de reserva"
-              className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-md border transition-colors ${
-                hasPayout
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-blue-300 hover:text-blue-700'
-              }`}
-            >
-              <HandCoins className="w-3.5 h-3.5" />
-              Payout
-            </button>
+            {!isCancelledNegative && (
+              <button
+                onClick={() => setPayoutTarget(b)}
+                title={hasPayout ? 'Editar payout real' : 'Registrar payout real'}
+                aria-label="Payout de reserva"
+                className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-md border transition-colors ${
+                  hasPayout
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-blue-300 hover:text-blue-700'
+                }`}
+              >
+                <HandCoins className="w-3.5 h-3.5" />
+                Payout
+              </button>
+            )}
             <button
               onClick={() => setDeleteTarget(b)}
               title="Eliminar reserva"
@@ -694,7 +700,19 @@ export default function BookingsClient() {
 
   // ── Derived values (must be before any early returns) ────────────────────
   // listing_name and property_id are already populated from the DB join in fromRow
-  const enrichedBookings = useMemo(() => bookings, [bookings]);
+  const enrichedBookings = useMemo(() => {
+    if (statusFilter === 'all') return bookings;
+    return bookings.filter(b => {
+      const derived = getBookingStatus({
+        start_date: b.start_date,
+        end_date: b.end_date,
+        checkin_done: b.checkin_done,
+        checkout_done: b.checkout_done,
+        status: b.status,
+      });
+      return derived === statusFilter;
+    });
+  }, [bookings, statusFilter]);
 
   // ── EARLY RETURNS (after all hooks) ──────────────────────────────────────
   if (authStatus === 'checking') {
@@ -710,11 +728,20 @@ export default function BookingsClient() {
   const totalRevenue = completed.reduce((s, b) => s + b.total_revenue, 0);
   const totalNights  = completed.reduce((s, b) => s + b.num_nights, 0);
 
-  // Ingresos confirmados: reservas con banco de payout asignado (payout real recibido)
-  const confirmed = completed.filter(b => b.payout_bank_account_id);
+  // Payout eligible: reservas completadas + canceladas con ingreso positivo (tarifa de cancelación cobrada)
+  const payoutEligible = enrichedBookings.filter(b => {
+    const isCancelled = b.status.toLowerCase().includes('cancel');
+    return !isCancelled || b.total_revenue > 0;
+  });
+  // Ingresos confirmados: reservas con banco de payout asignado
+  const confirmed = payoutEligible.filter(b => b.payout_bank_account_id);
   const receivedPayout = confirmed.reduce((s, b) => s + (b.net_payout ?? b.total_revenue), 0);
-  // Ingresos esperados: reservas activas sin banco asignado (pendientes de confirmar)
-  const expectedPayout = completed.filter(b => !b.payout_bank_account_id).reduce((s, b) => s + b.total_revenue, 0);
+  // Ingresos por cobrar: sin banco asignado aún
+  const expectedPayout = payoutEligible.filter(b => !b.payout_bank_account_id).reduce((s, b) => s + b.total_revenue, 0);
+  // Multas por cancelación (ingresos negativos en canceladas)
+  const cancelledFinesTotal = enrichedBookings
+    .filter(b => b.status.toLowerCase().includes('cancel') && b.total_revenue < 0)
+    .reduce((s, b) => s + Math.abs(b.total_revenue), 0);
   // Reservas pasadas sin payout confirmado (datos incompletos)
   const today = new Date(); today.setHours(0,0,0,0);
   const incompleteCount = completed.filter(b => !b.payout_bank_account_id && b.end_date && new Date(b.end_date) < today).length;
@@ -726,7 +753,11 @@ export default function BookingsClient() {
       value: formatCurrency(receivedPayout),
       color: 'text-green-700',
       bg: 'bg-green-50',
-      sub: expectedPayout > 0 ? `Por cobrar: ${formatCurrency(expectedPayout)}` : null,
+      sub: expectedPayout > 0
+        ? `Por cobrar: ${formatCurrency(expectedPayout)}`
+        : cancelledFinesTotal > 0
+          ? `Multas: −${formatCurrency(cancelledFinesTotal)}`
+          : null,
     },
     { label: 'Noches Totales', value: totalNights.toString(), color: 'text-purple-600', bg: 'bg-purple-50', sub: null },
     { label: 'ADR (Tarifa Diaria)', value: totalNights > 0 ? formatCurrency(totalRevenue / totalNights) : '—', color: 'text-orange-600', bg: 'bg-orange-50', sub: null },
@@ -839,10 +870,25 @@ export default function BookingsClient() {
             className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
           />
         </div>
-        {(filters.dateFrom || filters.dateTo || filters.search) && (
+        <div className="min-w-[140px]">
+          <label className="block text-xs font-medium text-slate-500 mb-1.5">Estado</label>
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value as DerivedBookingStatus | 'all')}
+            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+          >
+            <option value="all">Todas</option>
+            <option value="upcoming">Próximas</option>
+            <option value="in_progress">En curso</option>
+            <option value="completed">Completadas</option>
+            <option value="past_unverified">Sin verificar</option>
+            <option value="cancelled">Canceladas</option>
+          </select>
+        </div>
+        {(filters.dateFrom || filters.dateTo || filters.search || statusFilter !== 'all') && (
           <motion.button
             initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
-            onClick={() => { setFilters(EMPTY_FILTERS); setSearch(''); }}
+            onClick={() => { setFilters(EMPTY_FILTERS); setSearch(''); setStatusFilter('all'); }}
             className="self-end px-3 py-2 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
           >
             ✕ Limpiar

@@ -18,7 +18,9 @@ import {
   Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import type { PayoutBreakdown, FinancialKPIs, ChartGranularity } from '@/services/financial';
+import type { FinancialTransaction } from '@/services/transactions';
 import { formatCurrency } from '@/lib/utils';
+import FinancialLedger from './FinancialLedger';
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -26,6 +28,8 @@ interface Props {
   payout: PayoutBreakdown;
   kpis: FinancialKPIs;
   granularity?: ChartGranularity;
+  transactions?: FinancialTransaction[];
+  txLoading?: boolean;
 }
 
 // ── Tooltip personalizado ─────────────────────────────────────────────────────
@@ -71,7 +75,7 @@ function KpiCard({
 
 // ── Componente principal ──────────────────────────────────────────────────────
 
-export default function IncomeExpenseTab({ payout, kpis, granularity = 'month' }: Props) {
+export default function IncomeExpenseTab({ payout, kpis, granularity = 'month', transactions = [], txLoading = false }: Props) {
   const { received, expected, incompleteCount, monthlyBreakdown } = payout;
   const netConfirmed = received - kpis.totalExpenses;
   const completenessRate = received + expected > 0
@@ -190,6 +194,9 @@ export default function IncomeExpenseTab({ payout, kpis, granularity = 'month' }
           La utilidad confirmada refleja lo que realmente tienes: lo recibido menos lo gastado.
         </p>
       </div>
+
+      {/* Movimientos detallados */}
+      <FinancialLedger transactions={transactions} loading={txLoading} />
     </div>
   );
 }

@@ -23,7 +23,8 @@ export function classifyExpense(e: Expense): {
   // Heurística sobre el texto de category (ANTES del fallback por booking_id,
   // para que un daño legacy sin subcategory no quede clasificado como cleaning).
   const c = (e.category ?? '').toLowerCase();
-  if (/da[ñn]o|reparaci[oó]n|reposici[oó]n.*invent/.test(c))     return { section: 'booking', subcategory: 'damage' };
+  if (/multa|penalidad|cancelaci[oó]n/.test(c))                 return { section: 'booking', subcategory: 'damage' };
+  if (/da[ñn]o|reparaci[oó]n|reposici[oó]n.*invent/.test(c))   return { section: 'booking', subcategory: 'damage' };
   if (/insumos? de aseo|aseo$|^aseo|limpieza|lavander/.test(c))  return { section: 'booking', subcategory: 'cleaning' };
   if (/welcome|kit|atenci/.test(c))                              return { section: 'booking', subcategory: 'guest_amenities' };
 
