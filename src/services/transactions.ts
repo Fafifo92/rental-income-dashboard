@@ -110,6 +110,9 @@ export const listTransactions = async (
     if (!b.payout_bank_account_id) continue;
     const net = Number(b.net_payout ?? 0);
     if (net === 0) continue;
+    // Cancelled bookings with negative net_payout are fines → handled exclusively in section 5
+    const isCancelledFine = b.status?.toLowerCase().includes('cancel') && net < 0;
+    if (isCancelledFine) continue;
     txs.push({
       id: `bk-${b.id}`,
       date: b.payout_date ?? b.start_date ?? fromISO,
