@@ -44,6 +44,24 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
   // Preserve the actual sign — don't clamp to 0
   const netoVal = booking.net_payout ?? subMoney(bruto, feesVal);
   const isFine  = netoVal < 0; // deduction, no payment to receive
+  // ── Fine debit account ────────────────────────────────────────────────────
+  const [fineAccount, setFineAccount] = useState(booking.payout_bank_account_id ?? '');
+  const [savingFine, setSavingFine]   = useState(false);
+  const [fineError, setFineError]     = useState('');
+
+  const handleSaveFineAccount = async () => {
+    setSavingFine(true);
+    setFineError('');
+    await updateBookingPayout(booking.id, {
+      gross_revenue: bruto,
+      channel_fees: feesVal,
+      net_payout: netoVal,
+      payout_bank_account_id: fineAccount || null,
+      payout_date: null,
+    });
+    setSavingFine(false);
+    onSaved();
+  };
   // ── Mode toggle ───────────────────────────────────────────────────────────
   const [payType, setPayType] = useState<'total' | 'parcial'>('total');
 
@@ -177,7 +195,9 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <div>
-            <h3 className="text-lg font-bold text-slate-900">Payout de reserva</h3>
+            <h3 className="text-lg font-bold text-slate-900">
+              {isFine ? 'Multa por cancelación' : 'Payout de reserva'}
+            </h3>
             <p className="text-xs text-slate-500 mt-0.5">
               {booking.confirmation_code} · {booking.guest_name}
             </p>
@@ -210,15 +230,40 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
             ))}
           </div>
 
-          {/* ── Fine info panel (no payment to receive) ── */}
+          {/* ── Fine: select debit account ── */}
           {isFine ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-800 space-y-1">
-              <p className="font-bold">⚠ Multa deducida automáticamente</p>
-              <p className="text-xs text-red-700">
-                Esta reserva fue cancelada y la plataforma dedujo{' '}
-                <strong>{formatCurrency(Math.abs(netoVal))}</strong> como multa al anfitrión.
-                El monto negativo ya está registrado como gasto en tus cuentas. No se requiere registrar un pago.
-              </p>
+            <div className="space-y-4">
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 space-y-1">
+                <p className="font-bold">⚠ Multa por cancelación</p>
+                <p className="text-xs text-rose-700">
+                  La plataforma dedujo{' '}
+                  <strong>{formatCurrency(Math.abs(netoVal))}</strong> como multa.
+                  Selecciona la cuenta de la que se descontó este monto para que el movimiento quede registrado correctamente.
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                  Cuenta debitada
+                </label>
+                <select
+                  value={fineAccount}
+                  onChange={e => setFineAccount(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400 outline-none bg-white"
+                >
+                  <option value="">— Sin asignar —</option>
+                  {bankAccounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+                {fineError && <p className="mt-1 text-xs text-rose-600">{fineError}</p>}
+              </div>
+              <button
+                onClick={handleSaveFineAccount}
+                disabled={savingFine}
+                className="w-full py-2.5 rounded-xl bg-rose-600 text-white font-semibold text-sm hover:bg-rose-700 disabled:opacity-60 transition-colors"
+              >
+                {savingFine ? 'Guardando…' : '✓ Registrar débito'}
+              </button>
             </div>
           ) : (
             <>

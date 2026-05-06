@@ -175,7 +175,7 @@ export const listTransactions = async (
   // 7. Paid expenses in period
   const { data: expData } = await supabase
     .from('expenses')
-    .select('id, category, type, amount, date, bank_account_id, description, notes')
+    .select('id, category, type, amount, date, bank_account_id, description')
     .eq('status', 'paid')
     .gte('date', fromISO)
     .lte('date', toISO);
@@ -195,7 +195,7 @@ export const listTransactions = async (
       channel: null,
       bookingCode: null,
       guestName: null,
-      notes: e.notes ?? null,
+      notes: null,
       isSynthetic: false,
     });
   }

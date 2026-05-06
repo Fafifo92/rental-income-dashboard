@@ -638,9 +638,11 @@ export default function BookingsClient() {
       sortingFn: 'basic',
       cell: info => {
         const v = info.getValue();
-        return v !== null && v !== undefined
-          ? <span className="font-semibold text-emerald-700 whitespace-nowrap">{formatCurrency(Number(v))}</span>
-          : <span className="text-slate-300 text-xs">—</span>;
+        if (v === null || v === undefined) return <span className="text-slate-300 text-xs">—</span>;
+        const n = Number(v);
+        return n < 0
+          ? <span className="font-semibold text-rose-600 whitespace-nowrap">−{formatCurrency(Math.abs(n))}</span>
+          : <span className="font-semibold text-emerald-700 whitespace-nowrap">{formatCurrency(n)}</span>;
       },
     }),
     bookingHelper.display({
@@ -669,7 +671,17 @@ export default function BookingsClient() {
             >
               <Pencil className="w-4 h-4" />
             </button>
-            {!isCancelledNegative && (
+            {isCancelledNegative ? (
+              <button
+                onClick={() => setPayoutTarget(b)}
+                title="Registrar cuenta de débito de multa"
+                aria-label="Cuenta de débito"
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-md border transition-colors bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
+              >
+                <HandCoins className="w-3.5 h-3.5" />
+                Débito
+              </button>
+            ) : (
               <button
                 onClick={() => setPayoutTarget(b)}
                 title={hasPayout ? 'Editar payout real' : 'Registrar payout real'}

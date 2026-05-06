@@ -130,9 +130,9 @@ export default function DashboardClient() {
     // Load financial transaction ledger
     setTxLoading(true);
     const { from, to } = resolvePeriodRange(period, customRange);
-    listTransactions(from, to, propertyIds?.length ? propertyIds : undefined).then(txs => {
+    listTransactions(from, to, propertyIds?.length ? propertyIds : undefined).then(result => {
       if (cancelled) return;
-      setTransactions(txs);
+      setTransactions(result.data ?? []);
       setTxLoading(false);
     });
 
