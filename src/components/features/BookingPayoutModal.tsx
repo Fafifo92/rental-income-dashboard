@@ -206,67 +206,72 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
             className="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
         </div>
 
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-5">
+
+          {/* ══════════════════════════════════════════════
+              CASO MULTA: solo monto + cuenta de débito
+          ══════════════════════════════════════════════ */}
+          {isFine ? (
+            <div className="space-y-5">
+              {/* Monto descontado */}
+              <div className="flex items-center justify-between bg-rose-50 border border-rose-200 rounded-xl px-5 py-4">
+                <div>
+                  <p className="text-xs font-semibold text-rose-500 uppercase tracking-wider">Monto descontado</p>
+                  <p className="text-2xl font-extrabold text-rose-700 tabular-nums mt-0.5">
+                    −{formatCurrency(Math.abs(netoVal))}
+                  </p>
+                  <p className="text-xs text-rose-500 mt-1">
+                    {booking.confirmation_code} · Reserva cancelada
+                  </p>
+                </div>
+                <span className="text-3xl select-none">⚠️</span>
+              </div>
+
+              {/* Selector de cuenta */}
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  ¿De qué cuenta se descontó?
+                </label>
+                <select
+                  value={fineAccount}
+                  onChange={e => setFineAccount(e.target.value)}
+                  className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-rose-400 outline-none bg-white"
+                >
+                  <option value="">— Selecciona una cuenta —</option>
+                  {bankAccounts.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.is_cash ? '💵 ' : ''}{a.name}{a.bank && !a.is_cash ? ` · ${a.bank}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {fineError && <p className="mt-1 text-xs text-rose-600">{fineError}</p>}
+              </div>
+
+              <button
+                onClick={handleSaveFineAccount}
+                disabled={savingFine || !fineAccount}
+                className="w-full py-2.5 rounded-xl bg-rose-600 text-white font-semibold text-sm hover:bg-rose-700 disabled:opacity-50 transition-colors"
+              >
+                {savingFine ? 'Guardando…' : '✓ Confirmar débito'}
+              </button>
+            </div>
+
+          ) : (
+            <>
           {/* ── Info chips (read-only) ── */}
           <div className="flex gap-3">
             {[
               { label: 'Bruto', value: bruto, color: 'bg-slate-50 text-slate-700 border-slate-200' },
               { label: 'Fees', value: feesVal, color: 'bg-amber-50 text-amber-700 border-amber-200' },
-              {
-                label: 'Neto',
-                value: netoVal,
-                color: isFine
-                  ? 'bg-red-50 text-red-700 border-red-200'
-                  : 'bg-emerald-50 text-emerald-700 border-emerald-200',
-              },
+              { label: 'Neto', value: netoVal, color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
             ].map(chip => (
               <div key={chip.label}
                 className={`flex-1 rounded-xl border px-3 py-2 text-center ${chip.color}`}>
                 <p className="text-[10px] font-semibold uppercase tracking-wider opacity-60">{chip.label}</p>
-                <p className="text-sm font-bold mt-0.5">
-                  {chip.value < 0 ? '−' : ''}{formatCurrency(Math.abs(chip.value))}
-                </p>
+                <p className="text-sm font-bold mt-0.5">{formatCurrency(Math.abs(chip.value))}</p>
               </div>
             ))}
           </div>
-
-          {/* ── Fine: select debit account ── */}
-          {isFine ? (
-            <div className="space-y-4">
-              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 space-y-1">
-                <p className="font-bold">⚠ Multa por cancelación</p>
-                <p className="text-xs text-rose-700">
-                  La plataforma dedujo{' '}
-                  <strong>{formatCurrency(Math.abs(netoVal))}</strong> como multa.
-                  Selecciona la cuenta de la que se descontó este monto para que el movimiento quede registrado correctamente.
-                </p>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                  Cuenta debitada
-                </label>
-                <select
-                  value={fineAccount}
-                  onChange={e => setFineAccount(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400 outline-none bg-white"
-                >
-                  <option value="">— Sin asignar —</option>
-                  {bankAccounts.map(a => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-                {fineError && <p className="mt-1 text-xs text-rose-600">{fineError}</p>}
-              </div>
-              <button
-                onClick={handleSaveFineAccount}
-                disabled={savingFine}
-                className="w-full py-2.5 rounded-xl bg-rose-600 text-white font-semibold text-sm hover:bg-rose-700 disabled:opacity-60 transition-colors"
-              >
-                {savingFine ? 'Guardando…' : '✓ Registrar débito'}
-              </button>
-            </div>
-          ) : (
-            <>
           {/* ── Toggle Total / Parcial ── */}
           <div className="flex rounded-xl border border-slate-200 overflow-hidden">
             {(['total', 'parcial'] as const).map(mode => (
