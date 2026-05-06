@@ -247,6 +247,7 @@ export default function InventoryClient(): JSX.Element {
             item={editTarget}
             properties={properties}
             categories={categories}
+            items={items}
             onCreateCategory={async name => {
               const res = await createInventoryCategory(name);
               if (res.data) {
@@ -332,7 +333,7 @@ function CategorizedInventoryView({
   }, [items]);
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const toggle = (key: string) => setCollapsed(c => ({ ...c, [key]: !c[key] }));
+  const toggle = (key: string) => setCollapsed(c => ({ ...c, [key]: c[key] === false }));
 
   // Orden estable: por nombre de propiedad / categoría
   const sortedProps = useMemo(() => {
@@ -360,7 +361,7 @@ function CategorizedInventoryView({
           return ai - bi;
         });
         const totalItems = Array.from(byCat.values()).reduce((s, arr) => s + arr.length, 0);
-        const propCollapsed = !!collapsed[`p:${pid}`];
+        const propCollapsed = collapsed[`p:${pid}`] !== false;
         return (
           <div key={pid} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <button
@@ -372,47 +373,76 @@ function CategorizedInventoryView({
                 <span className="font-bold text-slate-800">{prop?.name ?? 'Sin propiedad'}</span>
                 <span className="text-xs text-slate-500">· {totalItems} {totalItems === 1 ? 'item' : 'items'}</span>
               </div>
-              <span className="text-slate-400 text-sm">{propCollapsed ? '▸' : '▾'}</span>
+              <motion.span
+                animate={{ rotate: propCollapsed ? -90 : 0 }}
+                transition={{ duration: 0.2 }}
+                className="text-slate-400 text-sm inline-block"
+              >▾</motion.span>
             </button>
-            {!propCollapsed && (
-              <div className="divide-y divide-slate-100">
-                {catKeys.map(cKey => {
-                  const cat = cKey === '__none__' ? null : catMap.get(cKey);
-                  const arr = byCat.get(cKey)!;
-                  const catKey = `${pid}:${cKey}`;
-                  const catCollapsed = !!collapsed[catKey];
-                  return (
-                    <div key={cKey}>
-                      <button
-                        onClick={() => toggle(catKey)}
-                        className="w-full px-5 py-2 flex items-center justify-between text-left hover:bg-slate-50"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-base">{cat?.icon ?? '📦'}</span>
-                          <span className="font-semibold text-slate-700 text-sm">{cat?.name ?? 'Sin categoría'}</span>
-                          <span className="text-[11px] text-slate-400">({arr.length})</span>
+            <AnimatePresence initial={false}>
+              {!propCollapsed && (
+                <motion.div
+                  key="prop-body"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.22, ease: 'easeInOut' }}
+                  style={{ overflow: 'hidden' }}
+                >
+                  <div className="divide-y divide-slate-100">
+                    {catKeys.map(cKey => {
+                      const cat = cKey === '__none__' ? null : catMap.get(cKey);
+                      const arr = byCat.get(cKey)!;
+                      const catKey = `${pid}:${cKey}`;
+                      const catCollapsed = collapsed[catKey] !== false;
+                      return (
+                        <div key={cKey}>
+                          <button
+                            onClick={() => toggle(catKey)}
+                            className="w-full px-5 py-2 flex items-center justify-between text-left hover:bg-slate-50"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">{cat?.icon ?? '📦'}</span>
+                              <span className="font-semibold text-slate-700 text-sm">{cat?.name ?? 'Sin categoría'}</span>
+                              <span className="text-[11px] text-slate-400">({arr.length})</span>
+                            </div>
+                            <motion.span
+                              animate={{ rotate: catCollapsed ? -90 : 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="text-slate-400 text-xs inline-block"
+                            >▾</motion.span>
+                          </button>
+                          <AnimatePresence initial={false}>
+                            {!catCollapsed && (
+                              <motion.ul
+                                key="cat-body"
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.18, ease: 'easeInOut' }}
+                                style={{ overflow: 'hidden' }}
+                                className="divide-y divide-slate-100"
+                              >
+                                {arr.map(it => (
+                                  <ItemRow
+                                    key={it.id}
+                                    item={it}
+                                    onQuick={onQuick}
+                                    onHistory={onHistory}
+                                    onEdit={onEdit}
+                                    onDelete={onDelete}
+                                  />
+                                ))}
+                              </motion.ul>
+                            )}
+                          </AnimatePresence>
                         </div>
-                        <span className="text-slate-400 text-xs">{catCollapsed ? '▸' : '▾'}</span>
-                      </button>
-                      {!catCollapsed && (
-                        <ul className="divide-y divide-slate-100">
-                          {arr.map(it => (
-                            <ItemRow
-                              key={it.id}
-                              item={it}
-                              onQuick={onQuick}
-                              onHistory={onHistory}
-                              onEdit={onEdit}
-                              onDelete={onDelete}
-                            />
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         );
       })}
@@ -536,11 +566,12 @@ function KPI({ label, value, tone, highlight }: {
 
 // ──────────────────────────────────────────────────────────────────────────
 function ItemFormModal({
-  item, properties, categories, onCreateCategory, onClose, onSave,
+  item, properties, categories, items, onCreateCategory, onClose, onSave,
 }: {
   item: InventoryItemRow | null;
   properties: PropertyRow[];
   categories: InventoryCategoryRow[];
+  items: InventoryItemRow[];
   onCreateCategory: (name: string) => Promise<string | null>;
   onClose: () => void;
   onSave: (id: string | null, payload: CreateInventoryItemInput) => Promise<string | null>;
@@ -564,8 +595,24 @@ function ItemFormModal({
   const [newCatName, setNewCatName] = useState('');
   const [creatingCat, setCreatingCat] = useState(false);
 
+  const [locationOpen, setLocationOpen] = useState(false);
+
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const locationSuggestions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const it of items) {
+      if (it.location?.trim()) seen.add(it.location.trim());
+    }
+    return Array.from(seen).sort((a, b) => a.localeCompare(b));
+  }, [items]);
+
+  const filteredLocations = useMemo(() => {
+    const q = location.trim().toLowerCase();
+    if (!q) return locationSuggestions;
+    return locationSuggestions.filter(l => l.toLowerCase().includes(q));
+  }, [location, locationSuggestions]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -677,13 +724,40 @@ function ItemFormModal({
               </div>
             </div>
 
-            <div>
+            <div className="relative">
               <label className="block text-xs font-semibold text-slate-600 mb-1">Ubicación</label>
               <input
-                type="text" value={location} onChange={e => setLocation(e.target.value)}
+                type="text"
+                value={location}
+                onChange={e => { setLocation(e.target.value); setLocationOpen(true); }}
+                onFocus={() => setLocationOpen(true)}
+                onBlur={() => setTimeout(() => setLocationOpen(false), 150)}
                 placeholder="Ej: Cocina, Habitación principal, Baño 1"
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               />
+              <AnimatePresence>
+                {locationOpen && filteredLocations.length > 0 && (
+                  <motion.ul
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-44 overflow-y-auto"
+                  >
+                    {filteredLocations.map(loc => (
+                      <li key={loc}>
+                        <button
+                          type="button"
+                          onMouseDown={() => { setLocation(loc); setLocationOpen(false); }}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 hover:text-blue-700"
+                        >
+                          {loc}
+                        </button>
+                      </li>
+                    ))}
+                  </motion.ul>
+                )}
+              </AnimatePresence>
             </div>
 
             <div>
