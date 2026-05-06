@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Trash2, History, Plus, Download } from 'lucide-react';
+import { Pencil, Trash2, History, Plus, Download, Wrench } from 'lucide-react';
 import {
   listInventoryItems,
   ensureDefaultCategories,
@@ -32,12 +32,18 @@ import type {
   InventoryItemStatus,
   InventoryMovementRow,
   InventoryMovementType,
+  MaintenanceScheduleRow,
   PropertyRow,
 } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import MoneyInput from '@/components/MoneyInput';
 import { useBackdropClose, makeBackdropHandlers } from '@/lib/useBackdropClose';
 import InventoryExportModal from '@/components/features/InventoryExportModal';
+import ScheduleMaintenanceModal from '@/components/features/ScheduleMaintenanceModal';
+import {
+  listMaintenanceSchedules,
+  getUpcomingAndOverdueSchedules,
+} from '@/services/maintenanceSchedules';
 import { todayISO } from '@/lib/dateUtils';
 
 type StatusFilter = 'all' | InventoryItemStatus | 'low_stock';
@@ -62,16 +68,25 @@ export default function InventoryClient(): JSX.Element {
   const [damageTarget, setDamageTarget] = useState<InventoryItemRow | null>(null);
   const [showExport, setShowExport] = useState(false);
 
+  // mantenimiento
+  const [schedules, setSchedules] = useState<MaintenanceScheduleRow[]>([]);
+  const [maintenanceTarget, setMaintenanceTarget] = useState<{
+    item: InventoryItemRow;
+    schedule: MaintenanceScheduleRow | null;
+  } | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
-    const [pRes, cRes, iRes] = await Promise.all([
+    const [pRes, cRes, iRes, sRes] = await Promise.all([
       listProperties(),
       ensureDefaultCategories(),
       listInventoryItems(),
+      getUpcomingAndOverdueSchedules(),
     ]);
     if (pRes.data) setProperties(pRes.data);
     if (cRes.data) setCategories(cRes.data);
     if (iRes.data) setItems(iRes.data);
+    if (sRes.data) setSchedules(sRes.data);
     setLoading(false);
   }, []);
 
@@ -106,6 +121,34 @@ export default function InventoryClient(): JSX.Element {
     for (const c of categories) m.set(c.id, c);
     return m;
   }, [categories]);
+
+  // item_id → count of pending maintenance schedules
+  const pendingMaintMap = useMemo(() => {
+    const m = new Map<string, MaintenanceScheduleRow[]>();
+    for (const s of schedules) {
+      if (s.status === 'pending') {
+        if (!m.has(s.item_id)) m.set(s.item_id, []);
+        m.get(s.item_id)!.push(s);
+      }
+    }
+    return m;
+  }, [schedules]);
+
+  // overdue = scheduled_date < today, upcoming = within notify_before_days
+  const today = todayISO();
+  const overdueSchedules = useMemo(
+    () => schedules.filter(s => s.status === 'pending' && s.scheduled_date < today),
+    [schedules, today],
+  );
+  const upcomingSchedules = useMemo(
+    () => schedules.filter(s => {
+      if (s.status !== 'pending' || s.scheduled_date < today) return false;
+      const diffMs = new Date(s.scheduled_date).getTime() - new Date(today).getTime();
+      const diffDays = diffMs / 86_400_000;
+      return diffDays <= s.notify_before_days;
+    }),
+    [schedules, today],
+  );
 
   const handleSaveItem = async (id: string | null, payload: CreateInventoryItemInput) => {
     if (id) {
@@ -179,6 +222,62 @@ export default function InventoryClient(): JSX.Element {
 
       <DamageReconciliationSection />
 
+      {/* Mantenimientos vencidos o próximos */}
+      {(overdueSchedules.length > 0 || upcomingSchedules.length > 0) && (
+        <div className="mb-4 space-y-2">
+          {overdueSchedules.length > 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+              <p className="text-xs font-bold text-red-700 mb-2">
+                🔴 {overdueSchedules.length} mantenimiento{overdueSchedules.length > 1 ? 's' : ''} vencido{overdueSchedules.length > 1 ? 's' : ''}
+              </p>
+              <ul className="space-y-1">
+                {overdueSchedules.map(s => {
+                  const it = items.find(i => i.id === s.item_id);
+                  return (
+                    <li key={s.id} className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-red-700">
+                        <span className="font-medium">{it?.name ?? '—'}</span> · {s.title} · <span className="font-mono">{s.scheduled_date}</span>
+                      </span>
+                      <button
+                        onClick={() => it && setMaintenanceTarget({ item: it, schedule: s })}
+                        className="text-[10px] font-semibold text-red-600 hover:bg-red-100 px-2 py-0.5 rounded"
+                      >
+                        Ver
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+          {upcomingSchedules.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+              <p className="text-xs font-bold text-amber-700 mb-2">
+                🟡 {upcomingSchedules.length} mantenimiento{upcomingSchedules.length > 1 ? 's' : ''} próximo{upcomingSchedules.length > 1 ? 's' : ''}
+              </p>
+              <ul className="space-y-1">
+                {upcomingSchedules.map(s => {
+                  const it = items.find(i => i.id === s.item_id);
+                  return (
+                    <li key={s.id} className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-amber-700">
+                        <span className="font-medium">{it?.name ?? '—'}</span> · {s.title} · <span className="font-mono">{s.scheduled_date}</span>
+                      </span>
+                      <button
+                        onClick={() => it && setMaintenanceTarget({ item: it, schedule: s })}
+                        className="text-[10px] font-semibold text-amber-700 hover:bg-amber-100 px-2 py-0.5 rounded"
+                      >
+                        Ver
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Filtros */}
       <div className="bg-white rounded-xl border border-slate-200 p-3 mb-4 grid grid-cols-1 md:grid-cols-4 gap-2">
         <select
@@ -241,6 +340,7 @@ export default function InventoryClient(): JSX.Element {
           categories={categories}
           propMap={propMap}
           catMap={catMap}
+          pendingMaintMap={pendingMaintMap}
           onQuick={(it, t) => {
             if (t === 'damaged') setDamageTarget(it);
             else setQuickAction({ item: it, type: t });
@@ -248,6 +348,7 @@ export default function InventoryClient(): JSX.Element {
           onHistory={setMovementsTarget}
           onEdit={setEditTarget}
           onDelete={handleDelete}
+          onScheduleMaintenance={(it, s) => setMaintenanceTarget({ item: it, schedule: s ?? null })}
         />
       )}
 
@@ -317,6 +418,18 @@ export default function InventoryClient(): JSX.Element {
           />
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {maintenanceTarget && (
+          <ScheduleMaintenanceModal
+            item={maintenanceTarget.item}
+            propertyName={propMap.get(maintenanceTarget.item.property_id)?.name ?? ''}
+            schedule={maintenanceTarget.schedule}
+            onClose={() => setMaintenanceTarget(null)}
+            onSaved={async () => { setMaintenanceTarget(null); await load(); }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -326,17 +439,19 @@ export default function InventoryClient(): JSX.Element {
 // ──────────────────────────────────────────────────────────────────────────
 function CategorizedInventoryView({
   items, properties, categories, propMap, catMap,
-  onQuick, onHistory, onEdit, onDelete,
+  pendingMaintMap, onQuick, onHistory, onEdit, onDelete, onScheduleMaintenance,
 }: {
   items: InventoryItemRow[];
   properties: PropertyRow[];
   categories: InventoryCategoryRow[];
   propMap: Map<string, PropertyRow>;
   catMap: Map<string, InventoryCategoryRow>;
+  pendingMaintMap: Map<string, MaintenanceScheduleRow[]>;
   onQuick: (it: InventoryItemRow, type: InventoryMovementType) => void;
   onHistory: (it: InventoryItemRow) => void;
   onEdit: (it: InventoryItemRow) => void;
   onDelete: (id: string) => void;
+  onScheduleMaintenance: (it: InventoryItemRow, schedule?: MaintenanceScheduleRow) => void;
 }) {
   void properties; // reservado para futuras sub-vistas
   // Agrupamos: propertyId → categoryKey → items
@@ -448,10 +563,12 @@ function CategorizedInventoryView({
                                   <ItemRow
                                     key={it.id}
                                     item={it}
+                                    pendingSchedules={pendingMaintMap.get(it.id) ?? []}
                                     onQuick={onQuick}
                                     onHistory={onHistory}
                                     onEdit={onEdit}
                                     onDelete={onDelete}
+                                    onScheduleMaintenance={onScheduleMaintenance}
                                   />
                                 ))}
                               </motion.ul>
@@ -472,16 +589,19 @@ function CategorizedInventoryView({
 }
 
 function ItemRow({
-  item, onQuick, onHistory, onEdit, onDelete,
+  item, pendingSchedules, onQuick, onHistory, onEdit, onDelete, onScheduleMaintenance,
 }: {
   item: InventoryItemRow;
+  pendingSchedules: MaintenanceScheduleRow[];
   onQuick: (it: InventoryItemRow, type: InventoryMovementType) => void;
   onHistory: (it: InventoryItemRow) => void;
   onEdit: (it: InventoryItemRow) => void;
   onDelete: (id: string) => void;
+  onScheduleMaintenance: (it: InventoryItemRow, schedule?: MaintenanceScheduleRow) => void;
 }) {
   const lowStock =
     item.is_consumable && item.min_stock !== null && Number(item.quantity) <= Number(item.min_stock) && Number(item.quantity) > 0;
+  const hasPendingMaint = pendingSchedules.length > 0;
   return (
     <li className="px-5 py-2.5 flex items-center justify-between gap-3 hover:bg-slate-50/60">
       <div className="min-w-0 flex-1">
@@ -491,6 +611,15 @@ function ItemRow({
             {STATUS_LABEL[item.status]}
           </span>
           {lowStock && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">⚠ Stock bajo</span>}
+          {hasPendingMaint && (
+            <button
+              onClick={() => onScheduleMaintenance(item, pendingSchedules[0])}
+              className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 hover:bg-amber-200"
+              title={`${pendingSchedules.length} mantenimiento(s) programado(s)`}
+            >
+              🔧 {pendingSchedules.length}
+            </button>
+          )}
         </div>
         <p className="text-[11px] text-slate-500 truncate">
           {item.location ?? '—'}
@@ -533,6 +662,14 @@ function ItemRow({
             ⚠ Daño
           </button>
         )}
+        <button
+          onClick={() => onScheduleMaintenance(item)}
+          className="p-1.5 text-amber-500 hover:bg-amber-50 rounded"
+          title="Agendar mantenimiento"
+          aria-label="Agendar mantenimiento"
+        >
+          <Wrench className="w-3.5 h-3.5" />
+        </button>
         <button
           onClick={() => onHistory(item)}
           className="p-1.5 text-slate-400 hover:bg-slate-100 rounded"

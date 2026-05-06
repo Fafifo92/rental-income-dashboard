@@ -128,6 +128,12 @@ export type Database = {
         Update: Partial<Omit<InventoryMovementRow, 'id' | 'created_at'>>;
         Relationships: [];
       };
+      inventory_maintenance_schedules: {
+        Row: MaintenanceScheduleRow;
+        Insert: Omit<MaintenanceScheduleRow, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<MaintenanceScheduleRow, 'id' | 'created_at' | 'updated_at'>>;
+        Relationships: [];
+      };
       credit_pools: {
         Row: CreditPoolRow;
         Insert: Omit<CreditPoolRow, 'id' | 'created_at'>;
@@ -602,4 +608,23 @@ export type CreditPoolConsumptionRow = {
   occurred_at: string;
   notes: string | null;
   created_at: string;
+};
+
+// ─── Inventory maintenance schedules ─────────────────────────────────────────
+
+export type MaintenanceScheduleStatus = 'pending' | 'done' | 'cancelled';
+
+export type MaintenanceScheduleRow = {
+  id: string;
+  owner_id: string;
+  item_id: string;
+  property_id: string;
+  title: string;
+  description: string | null;
+  scheduled_date: string; // ISO date 'YYYY-MM-DD'
+  status: MaintenanceScheduleStatus;
+  notify_before_days: number;
+  email_notify: boolean;
+  created_at: string;
+  updated_at: string;
 };
