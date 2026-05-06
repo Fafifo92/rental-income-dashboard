@@ -1,8 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { Eye } from 'lucide-react';
 import { listBookings, type BookingWithListingRow } from '@/services/bookings';
+import { listProperties } from '@/services/properties';
+import { listBankAccounts } from '@/services/bankAccounts';
 import { getBookingStatus, statusUI, inferOperationalFlags } from '@/lib/bookingStatus';
 import { formatCurrency } from '@/lib/utils';
+import BookingDetailModal from './BookingDetailModal';
+import type { PropertyRow, BankAccountRow } from '@/types/database';
 
 interface ActiveBooking {
   id: string;
@@ -14,9 +19,21 @@ interface ActiveBooking {
   total_revenue: number;
   status: string;
   listing_name: string;
+  property_name: string;
+  listing_id: string | null;
+  property_id: string | null;
   channel: string | null;
   checkin_done: boolean;
   checkout_done: boolean;
+  gross_revenue: number | null;
+  channel_fees: number | null;
+  net_payout: number | null;
+  payout_date: string | null;
+  notes: string | null;
+  num_adults: number | null;
+  num_children: number | null;
+  inventory_checked: boolean;
+  operational_notes: string | null;
 }
 
 function fromRow(row: BookingWithListingRow): ActiveBooking {
@@ -30,9 +47,21 @@ function fromRow(row: BookingWithListingRow): ActiveBooking {
     total_revenue: Number(row.total_revenue),
     status: row.status ?? '',
     listing_name: row.listings?.external_name ?? '',
+    property_name: row.listings?.properties?.name ?? '',
+    listing_id: row.listing_id ?? null,
+    property_id: row.listings?.property_id ?? null,
     channel: row.channel ?? null,
     checkin_done: row.checkin_done ?? false,
     checkout_done: row.checkout_done ?? false,
+    gross_revenue: row.gross_revenue !== null && row.gross_revenue !== undefined ? Number(row.gross_revenue) : null,
+    channel_fees: row.channel_fees !== null && row.channel_fees !== undefined ? Number(row.channel_fees) : null,
+    net_payout: row.net_payout !== null && row.net_payout !== undefined ? Number(row.net_payout) : null,
+    payout_date: row.payout_date ?? null,
+    notes: row.notes ?? null,
+    num_adults: row.num_adults ?? null,
+    num_children: row.num_children ?? null,
+    inventory_checked: row.inventory_checked ?? false,
+    operational_notes: row.operational_notes ?? null,
   };
 }
 
@@ -49,6 +78,14 @@ interface Props {
 export default function ActiveBookingsWidget({ propertyIds }: Props) {
   const [bookings, setBookings] = useState<ActiveBooking[]>([]);
   const [loading, setLoading] = useState(true);
+  const [detailTarget, setDetailTarget] = useState<ActiveBooking | null>(null);
+  const [properties, setProperties] = useState<PropertyRow[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<BankAccountRow[]>([]);
+
+  useEffect(() => {
+    listProperties().then(res => { if (!res.error) setProperties(res.data ?? []); });
+    listBankAccounts().then(res => { if (!res.error) setBankAccounts((res.data ?? []).filter(a => a.is_active)); });
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -112,7 +149,7 @@ export default function ActiveBookingsWidget({ propertyIds }: Props) {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-100">
               <tr>
-                {['Estado', 'Huésped', 'Estadía', 'Canal', 'Bruto'].map(h => (
+                {['Estado', 'Huésped', 'Estadía', 'Canal', 'Bruto', ''].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                     {h}
                   </th>
@@ -161,7 +198,7 @@ export default function ActiveBookingsWidget({ propertyIds }: Props) {
                       <div className="flex flex-col min-w-0">
                         <span className="font-medium text-slate-800 truncate max-w-[160px]">{b.guest_name}</span>
                         <span className="font-mono text-[10px] text-slate-400 truncate max-w-[160px]">
-                          {b.confirmation_code}{b.listing_name ? ` · ${b.listing_name}` : ''}
+                          {b.confirmation_code}{(b.property_name || b.listing_name) ? ` · ${b.property_name || b.listing_name}` : ''}
                         </span>
                       </div>
                     </td>
@@ -179,6 +216,16 @@ export default function ActiveBookingsWidget({ propertyIds }: Props) {
                     <td className="px-4 py-3 text-right font-semibold text-slate-800 whitespace-nowrap">
                       {formatCurrency(b.total_revenue)}
                     </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => setDetailTarget(b)}
+                        title="Ver detalles de la reserva"
+                        aria-label="Ver detalles"
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                    </td>
                   </motion.tr>
                 );
               })}
@@ -186,6 +233,14 @@ export default function ActiveBookingsWidget({ propertyIds }: Props) {
           </table>
         </div>
       </div>
+      {detailTarget && (
+        <BookingDetailModal
+          booking={detailTarget}
+          properties={properties}
+          bankAccounts={bankAccounts}
+          onClose={() => setDetailTarget(null)}
+        />
+      )}
     </div>
   );
 }

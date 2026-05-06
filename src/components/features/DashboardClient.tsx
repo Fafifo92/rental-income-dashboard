@@ -10,6 +10,7 @@ import ExportMenu from './ExportMenu';
 import AlertsPanel from './AlertsPanel';
 import IncomeExpenseTab from './IncomeExpenseTab';
 import ActiveBookingsWidget from './ActiveBookingsWidget';
+import BookingDetailModal from './BookingDetailModal';
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
 import { computeFinancials, resolvePeriodRange } from '@/services/financial';
 import type { Period, FinancialKPIs, MonthlyPnL, PayoutBreakdown } from '@/services/financial';
@@ -20,7 +21,10 @@ import { useAuth } from '@/lib/useAuth';
 import { usePropertyFilter } from '@/lib/usePropertyFilter';
 import { formatCurrency } from '@/lib/utils';
 import { listInventoryItems, getDamageReconciliations, computeInventoryKpis, STATUS_LABEL, type DamageReconciliation } from '@/services/inventory';
-import type { InventoryItemRow } from '@/types/database';
+import type { InventoryItemRow, PropertyRow, BankAccountRow } from '@/types/database';
+import { getBooking, type BookingWithListingRow } from '@/services/bookings';
+import { listProperties } from '@/services/properties';
+import { listBankAccounts } from '@/services/bankAccounts';
 
 // ─── Break-even Alert ─────────────────────────────────────────────────────────
 
@@ -111,6 +115,23 @@ export default function DashboardClient() {
   const [loading, setLoading]             = useState(true);
   const [showUploader, setShowUploader]   = useState(false);
   const [importedBookings, setImportedBookings] = useState<ParsedBooking[]>([]);
+  const [calendarDetailBooking, setCalendarDetailBooking] = useState<BookingWithListingRow | null>(null);
+  const [calendarDetailLoading, setCalendarDetailLoading] = useState(false);
+  const [allProperties, setAllProperties] = useState<PropertyRow[]>([]);
+  const [allBankAccounts, setAllBankAccounts] = useState<BankAccountRow[]>([]);
+
+  useEffect(() => {
+    if (authStatus !== 'authed') return;
+    listProperties().then(res => { if (!res.error) setAllProperties(res.data ?? []); });
+    listBankAccounts().then(res => { if (!res.error) setAllBankAccounts((res.data ?? []).filter(a => a.is_active)); });
+  }, [authStatus]);
+
+  const handleCalendarBookingClick = async (bookingId: string) => {
+    setCalendarDetailLoading(true);
+    const res = await getBooking(bookingId);
+    setCalendarDetailLoading(false);
+    if (!res.error && res.data) setCalendarDetailBooking(res.data);
+  };
 
   useEffect(() => {
     if (authStatus === 'checking') return;
@@ -205,6 +226,15 @@ export default function DashboardClient() {
           <ActiveBookingsWidget propertyIds={propertyIds} />
         ) : activeTab === 'calendario' ? (
           <div className="space-y-4">
+            {calendarDetailLoading && (
+              <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20 backdrop-blur-sm">
+                <div className="bg-white rounded-xl px-6 py-4 shadow-xl flex items-center gap-3">
+                  <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                    className="w-5 h-5 border-2 border-blue-200 border-t-blue-600 rounded-full" />
+                  <span className="text-sm text-slate-600 font-medium">Cargando reserva…</span>
+                </div>
+              </div>
+            )}
             {(() => {
               const { from, to } = resolvePeriodRange(period, customRange);
               return (
@@ -216,6 +246,7 @@ export default function DashboardClient() {
                   availableNights={kpis?.availableNights ?? 0}
                   occupancyRate={kpis?.occupancyRate ?? 0}
                   breakEvenOccupancy={kpis?.breakEvenOccupancy ?? 0}
+                  onBookingClick={handleCalendarBookingClick}
                 />
               );
             })()}
@@ -426,6 +457,19 @@ export default function DashboardClient() {
           />
         )}
       </AnimatePresence>
+
+      {calendarDetailBooking && (
+        <BookingDetailModal
+          booking={{
+            ...calendarDetailBooking,
+            listing_id: calendarDetailBooking.listing_id,
+            property_id: calendarDetailBooking.listings?.property_id ?? null,
+          }}
+          properties={allProperties}
+          bankAccounts={allBankAccounts}
+          onClose={() => setCalendarDetailBooking(null)}
+        />
+      )}
     </>
   );
 }

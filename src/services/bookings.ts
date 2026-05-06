@@ -154,7 +154,24 @@ export const upsertBookings = async (
 
 /** BookingRow enriched with its parent listing (joined via listing_id FK). */
 export type BookingWithListingRow = BookingRow & {
-  listings?: { id: string; external_name: string; property_id: string } | null;
+  listings?: {
+    id: string;
+    external_name: string;
+    property_id: string;
+    properties?: { id: string; name: string } | null;
+  } | null;
+};
+
+export const getBooking = async (
+  id: string,
+): Promise<ServiceResult<BookingWithListingRow>> => {
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('*, listings(id, external_name, property_id, properties(id, name))')
+    .eq('id', id)
+    .single();
+  if (error) return { data: null, error: error.message };
+  return { data: data as BookingWithListingRow, error: null };
 };
 
 export const listBookings = async (
@@ -178,10 +195,10 @@ export const listBookings = async (
     allowedListingIds = listingsData.map((l: { id: string }) => l.id);
   }
 
-  // Join listing so each booking row carries external_name + property_id inline.
+  // Join listing + property so each row carries external_name, property_id and property name inline.
   let query = supabase
     .from('bookings')
-    .select('*, listings(id, external_name, property_id)')
+    .select('*, listings(id, external_name, property_id, properties(id, name))')
     .order('start_date', { ascending: false });
 
   if (allowedListingIds) query = query.in('listing_id', allowedListingIds);

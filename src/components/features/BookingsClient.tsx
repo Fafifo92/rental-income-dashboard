@@ -41,6 +41,7 @@ interface DisplayBooking {
   total_revenue: number;
   status: string;
   listing_name: string;
+  property_name?: string | null;
   listing_id?: string | null;
   /** Resolved from listings join — available without needing the separate listings cache. */
   property_id?: string | null;
@@ -88,6 +89,7 @@ const fromRow = (row: BookingWithListingRow): DisplayBooking => ({
   total_revenue: Number(row.total_revenue),
   status: row.status ?? '',
   listing_name: row.listings?.external_name ?? '',
+  property_name: row.listings?.properties?.name ?? null,
   listing_id: row.listing_id ?? null,
   property_id: row.listings?.property_id ?? null,
   channel: row.channel ?? null,
@@ -581,7 +583,7 @@ export default function BookingsClient() {
           <div className="flex flex-col min-w-0 max-w-[180px] sm:max-w-[220px]">
             <span className="font-medium text-slate-800 truncate" title={b.guest_name}>{b.guest_name}</span>
             <span className="font-mono text-[10px] text-slate-400 truncate">
-              {b.confirmation_code}{b.listing_name ? ` · ${b.listing_name}` : ''}
+              {b.confirmation_code}{(b.property_name ?? b.listing_name) ? ` · ${b.property_name ?? b.listing_name}` : ''}
             </span>
           </div>
         );

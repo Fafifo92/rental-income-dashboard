@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listExpenses, updateExpense, deleteExpense } from '@/services/expenses';
-import { hasBookingStarted } from '@/lib/bookingStatus';
+import {
+  hasBookingStarted, isCancelled as isBookingCancelled,
+} from '@/lib/bookingStatus';
 import { cleanDamageDescription } from '@/lib/damageDescription';
 import { toast } from '@/lib/toast';
 import { updateBooking } from '@/services/bookings';
@@ -95,6 +97,8 @@ export default function BookingDetailModal({
     cancelled_at: (booking as any).cancelled_at,
     status: booking.status,
   }), [booking.start_date, booking.end_date, (booking as any).cancelled_at, booking.status]);
+
+  const isCancelledBooking = isBookingCancelled({ status: booking.status });
   const damageDisabledReason = !propertyId
     ? 'No se puede resolver la propiedad de esta reserva'
     : !bookingStarted
@@ -255,6 +259,11 @@ export default function BookingDetailModal({
   ) => {
     const next = !opFlags[field];
     setOpError(null);
+
+    if (isCancelledBooking) {
+      setOpError('No se pueden realizar acciones operativas en reservas canceladas.');
+      return;
+    }
 
     // Regla: no se puede marcar check-out si el check-in no está hecho.
     if (field === 'checkout_done' && next && !opFlags.checkin_done) {
@@ -423,6 +432,12 @@ export default function BookingDetailModal({
                 </div>
               </div>
 
+              {isCancelledBooking && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
+                  Las acciones operativas no están disponibles para reservas canceladas.
+                </p>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4">
                 {([
                   ['checkin_done',     'Check-in hecho',      '🛬'],
@@ -430,13 +445,18 @@ export default function BookingDetailModal({
                   ['inventory_checked','Inventario revisado', '📋'],
                 ] as const).map(([key, label, icon]) => {
                   const active = opFlags[key];
-                  const disabled = key === 'checkout_done' && !active && !opFlags.checkin_done;
+                  const disabled = isCancelledBooking || (key === 'checkout_done' && !active && !opFlags.checkin_done);
+                  const disabledTitle = isCancelledBooking
+                    ? 'No disponible en reservas canceladas'
+                    : key === 'checkout_done' && !active && !opFlags.checkin_done
+                      ? 'Marca primero el check-in'
+                      : undefined;
                   return (
                     <button
                       key={key}
                       onClick={() => toggleFlag(key)}
                       disabled={disabled}
-                      title={disabled ? 'Marca primero el check-in' : undefined}
+                      title={disabledTitle}
                       className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border-2 transition ${
                         active
                           ? 'bg-emerald-50 border-emerald-500 text-emerald-800'
@@ -464,12 +484,14 @@ export default function BookingDetailModal({
               <div className="border border-slate-200 rounded-lg bg-slate-50/40">
                 <div className="px-4 py-2.5 flex items-center justify-between border-b border-slate-200">
                   <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">🧹 Aseo</p>
+                  {!isCancelledBooking && (
                   <button
                     onClick={() => setShowAddCleaning(true)}
                     className="text-xs font-semibold text-blue-600 hover:underline"
                   >
                     + Asignar aseo
                   </button>
+                  )}
                 </div>
                 {cleanings.length === 0 ? (
                   <p className="text-xs text-slate-400 text-center py-4">Aún no has asignado aseo.</p>

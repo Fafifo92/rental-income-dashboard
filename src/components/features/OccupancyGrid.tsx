@@ -10,6 +10,7 @@ interface Props {
   availableNights: number;
   occupancyRate: number;  // 0-1
   breakEvenOccupancy: number; // 0-100
+  onBookingClick?: (bookingId: string) => void;
 }
 
 const CELL_W = 38;
@@ -87,6 +88,7 @@ export default function OccupancyGrid({
   availableNights,
   occupancyRate,
   breakEvenOccupancy,
+  onBookingClick,
 }: Props) {
   const [properties, setProperties] = useState<Pick<PropertyRow, 'id' | 'name'>[]>([]);
   const [bookingsByProp, setBookingsByProp] = useState<Map<string, GanttBooking[]>>(new Map());
@@ -468,6 +470,7 @@ export default function OccupancyGrid({
                         onMouseEnter={e => setTooltip({ booking: bk, x: e.clientX, y: e.clientY })}
                         onMouseMove={e => setTooltip(t => t ? { ...t, x: e.clientX, y: e.clientY } : null)}
                         onMouseLeave={() => setTooltip(null)}
+                        onClick={() => onBookingClick?.(bk.id)}
                         style={{
                           position: 'absolute',
                           left: startOffset * CELL_W + 2,
@@ -481,7 +484,7 @@ export default function OccupancyGrid({
                           alignItems: 'center',
                           paddingLeft: 5,
                           paddingRight: 3,
-                          cursor: 'default',
+                          cursor: onBookingClick ? 'pointer' : 'default',
                           zIndex: cancelled ? 1 : 2,
                           ...(cancelled ? {
                             backgroundImage: `repeating-linear-gradient(
