@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Trash2, History, Plus } from 'lucide-react';
+import { Pencil, Trash2, History, Plus, Download } from 'lucide-react';
 import {
   listInventoryItems,
   ensureDefaultCategories,
@@ -37,6 +37,7 @@ import type {
 import { formatCurrency } from '@/lib/utils';
 import MoneyInput from '@/components/MoneyInput';
 import { useBackdropClose, makeBackdropHandlers } from '@/lib/useBackdropClose';
+import InventoryExportModal from '@/components/features/InventoryExportModal';
 import { todayISO } from '@/lib/dateUtils';
 
 type StatusFilter = 'all' | InventoryItemStatus | 'low_stock';
@@ -59,6 +60,7 @@ export default function InventoryClient(): JSX.Element {
   const [movementsTarget, setMovementsTarget] = useState<InventoryItemRow | null>(null);
   const [quickAction, setQuickAction] = useState<{ item: InventoryItemRow; type: InventoryMovementType } | null>(null);
   const [damageTarget, setDamageTarget] = useState<InventoryItemRow | null>(null);
+  const [showExport, setShowExport] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -149,12 +151,20 @@ export default function InventoryClient(): JSX.Element {
           <h1 className="text-3xl font-bold text-slate-800">📦 Inventario</h1>
           <p className="text-sm text-slate-500">Muebles, electrodomésticos, lencería e insumos por propiedad.</p>
         </div>
-        <button
-          onClick={() => setCreating(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 shadow-sm inline-flex items-center gap-1.5"
-        >
-          <Plus className="w-4 h-4" /> Nuevo item
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowExport(true)}
+            className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 hover:border-slate-300 shadow-sm inline-flex items-center gap-1.5 transition-colors"
+          >
+            <Download className="w-4 h-4" /> Exportar
+          </button>
+          <button
+            onClick={() => setCreating(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 shadow-sm inline-flex items-center gap-1.5"
+          >
+            <Plus className="w-4 h-4" /> Nuevo item
+          </button>
+        </div>
       </header>
 
       {/* KPIs */}
@@ -293,6 +303,17 @@ export default function InventoryClient(): JSX.Element {
           <MovementsModal
             item={movementsTarget}
             onClose={() => setMovementsTarget(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showExport && (
+          <InventoryExportModal
+            items={items}
+            properties={properties}
+            categories={categories}
+            onClose={() => setShowExport(false)}
           />
         )}
       </AnimatePresence>

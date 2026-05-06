@@ -195,7 +195,7 @@ export default function DashboardClient() {
             <PropertyMultiSelect properties={properties} value={propertyIds} onChange={setPropertyIds} groups={groups} tags={tags} tagAssigns={tagAssigns} />
             <PeriodSelector value={period} onChange={setPeriod} customRange={customRange} onCustomRangeChange={setCustomRange} />
             {!loading && kpis && (
-              <ExportMenu kpis={kpis} monthly={exportMonthly} period={period} />
+              <ExportMenu kpis={kpis} monthly={exportMonthly} period={period} customRange={customRange} propertyIds={propertyIds} />
             )}
           </div>
         </motion.div>

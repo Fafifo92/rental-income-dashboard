@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { exportKpisToCsv, exportMonthlyToCsv, exportToExcel } from '@/services/export';
 import type { FinancialKPIs, MonthlyPnL, Period } from '@/services/financial';
 
-const PERIOD_LABELS: Record<Period, string> = {
+const PERIOD_LABELS: Record<Exclude<Period, 'custom'>, string> = {
   'current-month':  'Este mes',
   'last-3-months':  'Últimos 3 meses',
   'this-year':      'Este año',
@@ -14,6 +14,8 @@ interface Props {
   kpis: FinancialKPIs;
   monthly: MonthlyPnL[];
   period: Period;
+  customRange?: { from: string; to: string };
+  propertyIds?: string[];
 }
 
 interface ExportOption {
@@ -23,11 +25,13 @@ interface ExportOption {
   action: () => Promise<void> | void;
 }
 
-export default function ExportMenu({ kpis, monthly, period }: Props) {
+export default function ExportMenu({ kpis, monthly, period, customRange, propertyIds }: Props) {
   const [open, setOpen]         = useState(false);
   const [loading, setLoading]   = useState<string | null>(null);
 
-  const periodLabel = PERIOD_LABELS[period];
+  const periodLabel = period === 'custom' && customRange
+    ? `${customRange.from} al ${customRange.to}`
+    : PERIOD_LABELS[period as Exclude<Period, 'custom'>];
 
   const options: ExportOption[] = [
     {
@@ -52,7 +56,18 @@ export default function ExportMenu({ kpis, monthly, period }: Props) {
       label: 'Imprimir / PDF',
       description: 'Reporte para archivar o compartir',
       icon: '',
-      action: () => window.open('/report', '_blank'),
+      action: () => {
+        const url = new URL('/report', window.location.origin);
+        url.searchParams.set('period', period);
+        if (period === 'custom' && customRange) {
+          url.searchParams.set('from', customRange.from);
+          url.searchParams.set('to', customRange.to);
+        }
+        if (propertyIds && propertyIds.length > 0) {
+          url.searchParams.set('propertyIds', propertyIds.join(','));
+        }
+        window.open(url.toString(), '_blank');
+      },
     },
   ];
 
