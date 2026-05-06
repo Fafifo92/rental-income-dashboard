@@ -246,7 +246,7 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
 
         for (const propId of occupiedProps) {
           const group = propToGroup.get(propId);
-          if (group) (row[group.id] as number)++;
+          if (group) row[group.id] = (row[group.id] as number) + 1;
         }
         return row;
       });

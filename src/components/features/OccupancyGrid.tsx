@@ -15,6 +15,7 @@ interface Props {
 const CELL_W = 34;
 const ROW_H = 44;
 const LABEL_W = 140;
+const MAX_DAYS = 180; // cap visible window to avoid freeze on "Todo"
 
 const MONTHS_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 const DOW_ES = ['D', 'L', 'M', 'X', 'J', 'V', 'S']; // indexed by JS Date.getDay()
@@ -95,6 +96,18 @@ export default function OccupancyGrid({
 
   const propIdsKey = propertyIds?.join(',') ?? '';
 
+  // Auto-scroll to today when data loads
+  useEffect(() => {
+    if (loading || !scrollRef.current) return;
+    const todayD = new Date(); todayD.setHours(0, 0, 0, 0);
+    const offset = dayDiff(fromDate, todayD);
+    if (offset >= 0 && offset < numDays) {
+      const targetX = LABEL_W + offset * CELL_W - (scrollRef.current.clientWidth / 2) + CELL_W / 2;
+      scrollRef.current.scrollLeft = Math.max(0, targetX);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -159,10 +172,31 @@ export default function OccupancyGrid({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to, propIdsKey]);
 
-  // ── Day and month data ──────────────────────────────────────────────────────
+  // ── Clamp visible range to MAX_DAYS centered on today ─────────────────────
 
-  const fromDate = isoToDate(from);
-  const toDate = isoToDate(to);
+  const rawFrom = isoToDate(from);
+  const rawTo   = isoToDate(to);
+  const rawDays = dayDiff(rawFrom, rawTo) + 1;
+
+  let fromDate: Date;
+  let toDate: Date;
+  let clamped = false;
+
+  if (rawDays > MAX_DAYS) {
+    clamped = true;
+    // Center on today if it falls within [rawFrom, rawTo], else use rawFrom
+    const todayD = new Date(); todayD.setHours(0, 0, 0, 0);
+    const center = todayD >= rawFrom && todayD <= rawTo ? todayD : rawFrom;
+    const half = Math.floor(MAX_DAYS / 2);
+    fromDate = new Date(center.getFullYear(), center.getMonth(), center.getDate() - half);
+    if (fromDate < rawFrom) fromDate = new Date(rawFrom);
+    toDate   = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate() + MAX_DAYS - 1);
+    if (toDate > rawTo) toDate = new Date(rawTo);
+  } else {
+    fromDate = rawFrom;
+    toDate   = rawTo;
+  }
+
   const numDays = dayDiff(fromDate, toDate) + 1;
 
   const todayMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); })();
@@ -210,6 +244,11 @@ export default function OccupancyGrid({
             <span className={overallPct >= breakEvenOccupancy ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold'}>
               {overallPct}% ocupado
             </span>
+            {clamped && (
+              <span className="ml-2 text-amber-600 text-xs font-medium">
+                · Mostrando {MAX_DAYS} días centrados en hoy
+              </span>
+            )}
           </p>
         </div>
         {breakEvenOccupancy > 0 && (
@@ -235,7 +274,7 @@ export default function OccupancyGrid({
       {/* Grid scroll container */}
       <div
         ref={scrollRef}
-        style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 520, position: 'relative' }}
+        style={{ overflowX: 'auto', position: 'relative' }}
       >
         <div style={{ minWidth: totalW, position: 'relative' }}>
 
