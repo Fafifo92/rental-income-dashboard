@@ -300,9 +300,10 @@ function PropertyModal({
                       key={t.id}
                       type="button"
                       onClick={() => setTagIds(prev => prev.includes(t.id) ? prev.filter(x => x !== t.id) : [...prev, t.id])}
-                      className={`px-2 py-1 text-xs font-medium rounded border ${
-                        checked ? COLOR_PILL[t.color] ?? COLOR_PILL.blue : 'bg-white text-slate-500 border-slate-200'
-                      }`}
+                      className="px-2 py-1 text-xs font-medium rounded border transition-colors"
+                      style={checked
+                        ? { backgroundColor: resolveColor(t.color), color: 'white', borderColor: resolveColor(t.color) }
+                        : { backgroundColor: 'white', color: '#64748b', borderColor: '#e2e8f0' }}
                     >
                       {checked && '✓ '}{t.name}
                     </button>
@@ -406,9 +407,10 @@ function PropertyAssignModal({
                       key={t.id}
                       type="button"
                       onClick={() => setTagIds(prev => prev.includes(t.id) ? prev.filter(x => x !== t.id) : [...prev, t.id])}
-                      className={`px-2 py-1 text-xs font-medium rounded border ${
-                        checked ? COLOR_PILL[t.color] ?? COLOR_PILL.blue : 'bg-white text-slate-500 border-slate-200'
-                      }`}
+                      className="px-2 py-1 text-xs font-medium rounded border transition-colors"
+                      style={checked
+                        ? { backgroundColor: resolveColor(t.color), color: 'white', borderColor: resolveColor(t.color) }
+                        : { backgroundColor: 'white', color: '#64748b', borderColor: '#e2e8f0' }}
                     >
                       {checked && '✓ '}{t.name}
                     </button>
@@ -999,7 +1001,7 @@ export default function PropertiesClient() {
             <div key={section.group?.id ?? 'none'}>
               <div className="flex items-center gap-2 mb-3">
                 {section.group && (
-                  <span className={`w-3 h-3 rounded-full ${COLOR_DOT[section.group.color] ?? COLOR_DOT.slate}`} />
+                  <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: resolveColor(section.group.color) }} />
                 )}
                 <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wide">
                   {section.group?.name ?? 'Sin grupo'}
