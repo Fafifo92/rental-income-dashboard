@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import DashboardSummary, { KPISkeleton } from './DashboardSummary';
 import RevenueChart from './RevenueChart';
-import OccupancyChart from './OccupancyChart';
+import OccupancyGrid from './OccupancyGrid';
 import PeriodSelector from './PeriodSelector';
 import CSVUploader from './CSVUploader';
 import ExportMenu from './ExportMenu';
@@ -249,13 +249,20 @@ export default function DashboardClient() {
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6 min-w-0">
             <RevenueChart data={monthlyPnL} />
-            <OccupancyChart
-              data={monthlyPnL}
-              breakEvenOccupancy={kpis?.breakEvenOccupancy ?? 0}
-              granularity={granularity}
-              totalNights={kpis?.totalNights ?? 0}
-              availableNights={kpis?.availableNights ?? 0}
-            />
+            {(() => {
+              const { from, to } = resolvePeriodRange(period, customRange);
+              return (
+                <OccupancyGrid
+                  from={from}
+                  to={to}
+                  propertyIds={propertyIds}
+                  totalNights={kpis?.totalNights ?? 0}
+                  availableNights={kpis?.availableNights ?? 0}
+                  occupancyRate={kpis?.occupancyRate ?? 0}
+                  breakEvenOccupancy={kpis?.breakEvenOccupancy ?? 0}
+                />
+              );
+            })()}
           </div>
 
           <motion.aside
