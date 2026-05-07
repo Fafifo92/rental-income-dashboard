@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../lib/useAuth';
+import { toast } from '@/lib/toast';
 import { listProperties, createProperty, updateProperty } from '../../services/properties';
 import {
   listPropertyGroups, createPropertyGroup, updatePropertyGroup, deletePropertyGroup,
@@ -206,6 +207,7 @@ function PropertyModal({
     if (res.error || !res.data) {
       setSaving(false);
       setError(res.error ?? 'No se pudo crear');
+      toast.error(res.error ?? 'No se pudo crear la propiedad');
       return;
     }
     const created = res.data;
@@ -217,6 +219,7 @@ function PropertyModal({
       await setPropertyTags(created.id, tagIds);
     }
     setSaving(false);
+    toast.success('Propiedad creada');
     onCreated(created as Property);
   };
 
@@ -360,10 +363,11 @@ function PropertyAssignModal({
     setSaving(true);
     setError(null);
     const upd = await updateProperty(property.id, { group_id: groupId });
-    if (upd.error) { setSaving(false); setError(upd.error); return; }
+    if (upd.error) { setSaving(false); setError(upd.error); toast.error(upd.error); return; }
     const tagRes = await setPropertyTags(property.id, tagIds);
     setSaving(false);
-    if (tagRes.error) { setError(tagRes.error); return; }
+    if (tagRes.error) { setError(tagRes.error); toast.error(tagRes.error); return; }
+    toast.success('Cambios guardados');
     onSaved(groupId, tagIds);
   };
 
@@ -467,21 +471,24 @@ function GroupsManagerModal({
   const handleAdd = async () => {
     if (!newName.trim()) return;
     const r = await createPropertyGroup({ name: newName.trim(), color: newColor });
-    if (r.error) { setError(r.error); return; }
+    if (r.error) { setError(r.error); toast.error(r.error); return; }
     setNewName(''); setNewColor('slate'); setError(null);
+    toast.success('Grupo creado');
     await refresh();
   };
 
   const handleUpdate = async (id: string, patch: Partial<{ name: string; color: string }>) => {
     const r = await updatePropertyGroup(id, patch);
-    if (r.error) { setError(r.error); return; }
+    if (r.error) { setError(r.error); toast.error(r.error); return; }
+    toast.success('Grupo actualizado');
     await refresh();
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('¿Eliminar este grupo? Las propiedades asociadas quedarán sin grupo.')) return;
     const r = await deletePropertyGroup(id);
-    if (r.error) { setError(r.error); return; }
+    if (r.error) { setError(r.error); toast.error(r.error); return; }
+    toast.success('Grupo eliminado');
     // Refleja localmente: limpiar group_id de propiedades de ese grupo
     const updated = props.map(p => p.group_id === id ? { ...p, group_id: null } : p);
     setProps(updated);
@@ -495,7 +502,7 @@ function GroupsManagerModal({
     const isAssigned = prop.group_id === groupId;
     const newGroupId = isAssigned ? null : groupId;
     const r = await updateProperty(propertyId, { group_id: newGroupId });
-    if (r.error) { setError(r.error); return; }
+    if (r.error) { setError(r.error); toast.error(r.error); return; }
     const updated = props.map(p => p.id === propertyId ? { ...p, group_id: newGroupId } : p);
     setProps(updated);
     onPropertiesChanged(updated);
@@ -668,21 +675,24 @@ function TagsManagerModal({
   const handleAdd = async () => {
     if (!newName.trim()) return;
     const r = await createPropertyTag({ name: newName.trim(), color: newColor });
-    if (r.error) { setError(r.error); return; }
+    if (r.error) { setError(r.error); toast.error(r.error); return; }
     setNewName(''); setNewColor('blue'); setError(null);
+    toast.success('Etiqueta creada');
     await refresh();
   };
 
   const handleUpdate = async (id: string, patch: Partial<{ name: string; color: string }>) => {
     const r = await updatePropertyTag(id, patch);
-    if (r.error) { setError(r.error); return; }
+    if (r.error) { setError(r.error); toast.error(r.error); return; }
+    toast.success('Etiqueta actualizada');
     await refresh();
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('¿Eliminar esta etiqueta? Se removerá de todas las propiedades.')) return;
     const r = await deletePropertyTag(id);
-    if (r.error) { setError(r.error); return; }
+    if (r.error) { setError(r.error); toast.error(r.error); return; }
+    toast.success('Etiqueta eliminada');
     await Promise.all([refresh(), refreshAssigns()]);
   };
 
@@ -691,7 +701,7 @@ function TagsManagerModal({
     const r = has
       ? await removePropertyTagAssignment(propertyId, tagId)
       : await addPropertyTagAssignment(propertyId, tagId);
-    if (r.error) { setError(r.error); return; }
+    if (r.error) { setError(r.error); toast.error(r.error); return; }
     await refreshAssigns();
   };
 

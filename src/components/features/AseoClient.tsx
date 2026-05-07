@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from '@/lib/toast';
 import { listVendors, createVendor, updateVendor, deleteVendor, type Vendor } from '@/services/vendors';
 import { listBankAccounts } from '@/services/bankAccounts';
 import {
@@ -122,7 +123,7 @@ export default function AseoClient(): JSX.Element {
       is_variable: false,
       start_year_month: null,
     });
-    if (res.error || !res.data) { setSaving(false); setErr(res.error ?? 'Error'); return; }
+    if (res.error || !res.data) { setSaving(false); setErr(res.error ?? 'Error'); toast.error(res.error ?? 'No se pudo crear el personal'); return; }
     if (form.tagIds.length > 0) {
       await setCleanerGroupMembership(res.data.id, form.tagIds);
     }
@@ -130,6 +131,7 @@ export default function AseoClient(): JSX.Element {
     setNewModal(false);
     setForm({ name: '', contact: '', tagIds: [] });
     setErr(null);
+    toast.success('Personal de aseo creado');
     await load();
   };
 
@@ -142,7 +144,9 @@ export default function AseoClient(): JSX.Element {
 
   const handleDeleteTag = async (id: string) => {
     if (!confirm('¿Eliminar etiqueta? Las personas seguirán existiendo.')) return;
-    await deleteCleanerGroup(id);
+    const res = await deleteCleanerGroup(id);
+    if (res?.error) { toast.error(res.error); return; }
+    toast.success('Etiqueta eliminada');
     setTagFilters(prev => prev.filter(t => t !== id));
     await load();
   };

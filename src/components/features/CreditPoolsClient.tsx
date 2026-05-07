@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/useAuth';
+import { toast } from '@/lib/toast';
 import { listVendors, type Vendor } from '@/services/vendors';
 import {
   listCreditPools, createCreditPool, updateCreditPool, archiveCreditPool,
@@ -151,14 +152,17 @@ export default function CreditPoolsClient() {
       ? await updateCreditPool(editing.id, payload)
       : await createCreditPool(payload);
     setSaving(false);
-    if (res.error) { setErr(res.error); return; }
+    if (res.error) { setErr(res.error); toast.error(res.error); return; }
+    toast.success(editing ? 'Bolsa actualizada' : 'Bolsa creada');
     setModalOpen(false);
     await load();
   }, [form, editing, load]);
 
   const onArchive = useCallback(async (p: CreditPoolRow) => {
     if (!confirm(`¿Archivar la bolsa "${p.name}"? No descontará más créditos de futuras reservas.`)) return;
-    await archiveCreditPool(p.id);
+    const res = await archiveCreditPool(p.id);
+    if (res?.error) { toast.error(res.error); return; }
+    toast.success(`Bolsa "${p.name}" archivada`);
     await load();
   }, [load]);
 
