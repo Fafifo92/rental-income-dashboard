@@ -31,7 +31,7 @@ import { listListings } from '@/services/listings';
 import { deleteBookingAdjustment } from '@/services/bookingAdjustments';
 import { getUpcomingAndOverdueSchedules, getSchedulesDoneNeedingExpense, completeMaintenanceSchedule } from '@/services/maintenanceSchedules';
 import { listInventoryItems } from '@/services/inventory';
-import { supabase } from '@/lib/supabase/client';
+import { getBooking } from '@/services/bookings';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import { cleanDamageDescription } from '@/lib/damageDescription';
 import type { Expense } from '@/types';
@@ -145,7 +145,7 @@ export default function ExpensesClient() {
   }, [authStatus, loadMaintenancePanel]);
 
   const handleViewBooking = useCallback(async (bookingId: string) => {
-    const { data, error } = await supabase.from('bookings').select('*').eq('id', bookingId).single();
+    const { data, error } = await getBooking(bookingId);
     if (!error && data) {
       setViewing(null);
       setViewingBooking(data as BookingRow);

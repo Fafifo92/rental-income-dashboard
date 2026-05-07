@@ -396,6 +396,31 @@ export const detectDbConflicts = async (
   return { data: conflicts, error: null };
 };
 
+export type OccupancyBooking = Pick<BookingRow, 'id' | 'listing_id' | 'confirmation_code' | 'guest_name' | 'start_date' | 'end_date' | 'status' | 'channel'>;
+
+/**
+ * Fetches bookings overlapping [from, to] for given listing IDs.
+ * Used by occupancy charts/grid — applies an optional cancelled-status filter.
+ */
+export const listBookingsForOccupancy = async (opts: {
+  from: string;
+  to: string;
+  listingIds: string[];
+  excludeCancelled?: boolean;
+}): Promise<ServiceResult<OccupancyBooking[]>> => {
+  if (!opts.listingIds.length) return { data: [], error: null };
+  let q = supabase
+    .from('bookings')
+    .select('id, listing_id, confirmation_code, guest_name, start_date, end_date, status, channel')
+    .gte('end_date', opts.from)
+    .lte('start_date', opts.to)
+    .in('listing_id', opts.listingIds);
+  if (opts.excludeCancelled) q = q.not('status', 'ilike', '%cancel%');
+  const { data, error } = await q;
+  if (error) return { data: null, error: error.message };
+  return { data: (data ?? []) as OccupancyBooking[], error: null };
+};
+
 export type OverlapCheck = {
   /** No hay solape ni colindancia. */
   ok: true;

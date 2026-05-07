@@ -45,6 +45,19 @@ export const updatePropertyGroup = async (
   return { data, error: null };
 };
 
+/** Fetches minimal group data (id, name, color) for specific group IDs — used by occupancy chart. */
+export const getPropertyGroupsByIds = async (
+  ids: string[],
+): Promise<ServiceResult<Array<{ id: string; name: string; color: string }>>> => {
+  if (!ids.length) return { data: [], error: null };
+  const { data, error } = await supabase
+    .from('property_groups')
+    .select('id, name, color')
+    .in('id', ids);
+  if (error) return { data: null, error: error.message };
+  return { data: data ?? [], error: null };
+};
+
 export const deletePropertyGroup = async (id: string): Promise<ServiceResult<true>> => {
   const { error } = await supabase.from('property_groups').delete().eq('id', id);
   if (error) return { data: null, error: error.message };

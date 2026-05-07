@@ -9,6 +9,7 @@ import {
 } from '@/services/inventory';
 import { listBookings } from '@/services/bookings';
 import { listBankAccounts } from '@/services/bankAccounts';
+import { getListingsByIds } from '@/services/listings';
 import type {
   BankAccountRow,
   BookingRow,
@@ -57,14 +58,13 @@ export function DamageReportModal({
         return b.start_date.localeCompare(a.start_date);
       });
       setBookings(sorted.slice(0, 50));
-      // Cargar source de cada listing para distinguir directo vs plataforma
+      // Load listing source to distinguish direct vs platform bookings
       const listingIds = Array.from(new Set(sorted.map(b => b.listing_id)));
       if (listingIds.length > 0) {
-        const { supabase } = await import('@/lib/supabase/client');
-        const lr = await supabase.from('listings').select('id,source').in('id', listingIds);
-        if (lr.data) {
+        const { data: listingRows } = await getListingsByIds(listingIds);
+        if (listingRows) {
           const m = new Map<string, string>();
-          for (const l of lr.data) m.set(l.id, l.source);
+          for (const l of listingRows) m.set(l.id, l.source);
           setListingSourceById(m);
         }
       }

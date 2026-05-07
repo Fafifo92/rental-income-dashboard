@@ -11,6 +11,17 @@ export const listProperties = async (): Promise<ServiceResult<PropertyRow[]>> =>
   return { data, error: null };
 };
 
+/** Slim projection used by occupancy charts — only id, name, group_id. */
+export const listPropertiesSlim = async (
+  propertyIds?: string[],
+): Promise<ServiceResult<Array<{ id: string; name: string; group_id: string | null }>>> => {
+  let query = supabase.from('properties').select('id, name, group_id').order('name');
+  if (propertyIds?.length) query = query.in('id', propertyIds);
+  const { data, error } = await query;
+  if (error) return { data: null, error: error.message };
+  return { data: data ?? [], error: null };
+};
+
 export const getProperty = async (id: string): Promise<ServiceResult<PropertyRow>> => {
   const { data, error } = await supabase
     .from('properties')
