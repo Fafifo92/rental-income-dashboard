@@ -134,6 +134,12 @@ export type Database = {
         Update: Partial<Omit<MaintenanceScheduleRow, 'id' | 'created_at' | 'updated_at'>>;
         Relationships: [];
       };
+      audit_log: {
+        Row: AuditLogRow;
+        Insert: never;  // sólo vía trigger SECURITY DEFINER
+        Update: never;  // append-only
+        Relationships: [];
+      };
       credit_pools: {
         Row: CreditPoolRow;
         Insert: Omit<CreditPoolRow, 'id' | 'created_at'>;
@@ -634,4 +640,21 @@ export type MaintenanceScheduleRow = {
   expense_registered: boolean;
   created_at: string;
   updated_at: string;
+};
+
+// ─── Audit log (migration_039) ────────────────────────────────────────────────
+
+export type AuditLogAction = 'insert' | 'update' | 'delete';
+
+/** Registro append-only de cambios en entidades críticas.
+ *  Sólo lectura desde el cliente — escritura exclusivamente vía trigger. */
+export type AuditLogRow = {
+  id: number;           // BIGSERIAL
+  user_id: string | null;
+  table_name: string;
+  record_id: string;
+  action: AuditLogAction;
+  old_data: Record<string, unknown> | null;
+  new_data: Record<string, unknown> | null;
+  occurred_at: string;
 };

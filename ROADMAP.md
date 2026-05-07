@@ -1,3 +1,5 @@
+> ⚠️ **ARCHIVO OBSOLETO** — Supersedido por `audits/05_REMEDIATION_ROADMAP.md`. No actualizar.
+
 # Masterplan & Roadmap
 
 ## Phase 0: Planning & Foundation (COMPLETED)

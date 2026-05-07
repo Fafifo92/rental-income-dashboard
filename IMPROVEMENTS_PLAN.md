@@ -1,3 +1,5 @@
+> ⚠️ **ARCHIVO OBSOLETO** — Supersedido por `audits/05_REMEDIATION_ROADMAP.md`. No actualizar.
+
 # 🛠️ Plan de Mejoras Iterativo — STR Management Pro
 
 > Bitácora viva de los cambios solicitados en la iteración del 2026-04-29.

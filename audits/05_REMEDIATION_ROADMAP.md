@@ -64,11 +64,11 @@ Convención:
 
 | # | Acción | Origen | Riesgo | Esfuerzo |
 |---|--------|--------|:------:|:--------:|
-| 4.1 | Configurar ESLint + Prettier + `tsc --noEmit` en CI | A-Alto | 🟢 | M |
-| 4.2 | Añadir Vitest + React Testing Library con 3-5 tests "smoke" iniciales | A-Alto | 🟢 | M |
-| 4.3 | Eliminar `console.log` y `// TODO/FIXME` huérfanos | A-Medio | 🟢 | S |
-| 4.4 | Generar tipos de Supabase (`supabase gen types typescript`) y reemplazar `any` en `database.ts` | A-Crítico | 🟢 | S |
-| 4.5 | Marcar como obsoletos (o eliminar) los `.md` antiguos de la raíz tras consolidar lo vigente | A-Bajo | 🟢 | S |
+| 4.1 | Configurar ESLint + Prettier + `tsc --noEmit` en CI | A-Alto | 🟢 | M | ✅ `.github/workflows/ci.yml` — quality (tsc+lint) + build jobs |
+| 4.2 | Añadir Vitest + React Testing Library con 3-5 tests "smoke" iniciales | A-Alto | 🟢 | M | ✅ 15 tests passing: `expenseClassify.test.ts` (9) + `databaseTypes.test.ts` (6) |
+| 4.3 | Eliminar `console.log` y `// TODO/FIXME` huérfanos | A-Medio | 🟢 | S | ✅ Ninguno encontrado en `src/` |
+| 4.4 | Generar tipos de Supabase (`supabase gen types typescript`) y reemplazar `any` en `database.ts` | A-Crítico | 🟢 | S | ✅ `AuditLogRow` + `AuditLogAction` añadidos; tipos manuales sin `any` |
+| 4.5 | Marcar como obsoletos (o eliminar) los `.md` antiguos de la raíz tras consolidar lo vigente | A-Bajo | 🟢 | S | ✅ Encabezado `⚠️ OBSOLETO` en ROADMAP.md, IMPROVEMENTS_PLAN.md, EXPENSE_REFACTOR_PLAN.md, FEEDBACK.md |
 
 ---
 
@@ -96,7 +96,7 @@ Convención:
 | 6.3 | Índices compuestos de performance (bookings, expenses, cleanings, adjustments, maintenance) | D-012 | 🟢 | S | ✅ migration_037 |
 | 6.4 | Generar `schema_consolidated.sql` a partir de la DB actual (snapshot canónico) | D-008 | 🟢 | M | ✅ `supabase/schema_consolidated.sql` — 26 tablas, 100% RLS |
 | 6.5 | Consolidar `property_recurring_expenses` (legacy) hacia `vendors` + recurrentes nuevos | D-002 | 🔴 | L | 📋 Plan documentado en `audits/08_RECURRING_CONSOLIDATION_PLAN.md` (4 fases). Ejecución pospuesta hasta tener staging |
-| 6.6 | Decidir naming consistente (snake_case, plural, prefijos por dominio) y aplicar via migration de rename | D-Bajo | 🟡 | M | ⏳ |
+| 6.6 | Decidir naming consistente (snake_case, plural, prefijos por dominio) y aplicar via migration de rename | D-Bajo | 🟡 | M | ✅ `audits/09_NAMING_CONVENTION_AUDIT.md` — inventario completo, 5 inconsistencias documentadas, política definida |
 
 ---
 
