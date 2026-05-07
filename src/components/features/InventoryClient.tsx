@@ -125,10 +125,13 @@ export default function InventoryClient(): JSX.Element {
     return m;
   }, [categories]);
 
-  // item_id ÔåÆ count of pending maintenance schedules
+  // overdue = scheduled_date < today, upcoming = within notify_before_days
+  const today = todayISO();
+
+  // item_id -> count of pending maintenance schedules
   const pendingMaintMap = useMemo(() => {
     const m = new Map<string, MaintenanceScheduleRow[]>();
-    const now = new Date();
+    const now = new Date(today + 'T12:00:00');
     for (const s of schedules) {
       if (s.status === 'pending') {
         // Only show badge for overdue or within the notify_before_days window
@@ -141,10 +144,8 @@ export default function InventoryClient(): JSX.Element {
       }
     }
     return m;
-  }, [schedules]);
+  }, [schedules, today]);
 
-  // overdue = scheduled_date < today, upcoming = within notify_before_days
-  const today = todayISO();
   const overdueSchedules = useMemo(
     () => schedules.filter(s => s.status === 'pending' && s.scheduled_date < today),
     [schedules, today],

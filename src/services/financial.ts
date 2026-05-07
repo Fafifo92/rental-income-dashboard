@@ -2,6 +2,7 @@ import { getDemoBookings, listBookings } from './bookings';
 import { listExpenses } from './expenses';
 import { listAllRecurringExpensesForOwner } from './recurringExpenses';
 import { listAllBookingAdjustmentsForOwner } from './bookingAdjustments';
+import { addMoney, subMoney } from '@/lib/money';
 import type { Expense } from '@/types';
 import type { PropertyRecurringExpenseRow } from '@/types/database';
 
@@ -271,9 +272,9 @@ const computeCore = (
 
   // Ajustes de reserva en el rango: cobros de daños, ingresos extra, descuentos dados
   const adjInRange = adjustments.filter(a => a.date && inRange(a.date));
-  const incomeFromAdj  = adjInRange.filter(a => a.kind !== 'discount').reduce((s, a) => s + Number(a.amount), 0);
-  const discountsGiven = adjInRange.filter(a => a.kind === 'discount').reduce((s, a) => s + Number(a.amount), 0);
-  const netAdjustmentIncome = incomeFromAdj - discountsGiven;
+  const incomeFromAdj  = adjInRange.filter(a => a.kind !== 'discount').reduce((s, a) => addMoney(s, Number(a.amount)), 0);
+  const discountsGiven = adjInRange.filter(a => a.kind === 'discount').reduce((s, a) => addMoney(s, Number(a.amount)), 0);
+  const netAdjustmentIncome = subMoney(incomeFromAdj, discountsGiven);
 
   // grossRevenue includes cancelled-with-revenue (cancellation fees earned)
   const grossRevenue = bookingRevenue + netAdjustmentIncome + cancelledRevenue;

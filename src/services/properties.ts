@@ -3,9 +3,12 @@ import type { ServiceResult } from './expenses';
 import type { PropertyRow } from '@/types/database';
 
 export const listProperties = async (): Promise<ServiceResult<PropertyRow[]>> => {
+  const { data: authData, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !authData?.user) return { data: null, error: 'No autenticado' };
   const { data, error } = await supabase
     .from('properties')
     .select('id, owner_id, name, address, base_currency, estrato, bedrooms, max_guests, notes, created_at, default_cleaning_fee, rnt, group_id')
+    .eq('owner_id', authData.user.id)
     .order('name');
   if (error) return { data: null, error: error.message };
   return { data, error: null };

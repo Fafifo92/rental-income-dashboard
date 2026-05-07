@@ -41,10 +41,11 @@ export const ensureDefaultCategories = async (): Promise<ServiceResult<Inventory
   // datos del usuario y que pueda re-asignarlos manualmente.
   const legacy = list.data.find(c => c.name.trim().toLowerCase() === 'insumo de aseo');
   if (legacy) {
-    const { count } = await supabase
+    const { count, error: countErr } = await supabase
       .from('inventory_items')
       .select('id', { count: 'exact', head: true })
       .eq('category_id', legacy.id);
+    if (countErr) return list;  // can't verify count — skip cleanup, return original list
     if (!count || count === 0) {
       await supabase.from('inventory_categories').delete().eq('id', legacy.id);
     }
