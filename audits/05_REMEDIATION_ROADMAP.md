@@ -95,7 +95,7 @@ Convención:
 | 6.2 | Triggers `updated_at` consistentes en todas las tablas | D-024 | 🟢 | S | ✅ migration_035 |
 | 6.3 | Índices compuestos de performance (bookings, expenses, cleanings, adjustments, maintenance) | D-012 | 🟢 | S | ✅ migration_037 |
 | 6.4 | Generar `schema_consolidated.sql` a partir de la DB actual (snapshot canónico) | D-008 | 🟢 | M | ✅ `supabase/schema_consolidated.sql` — 26 tablas, 100% RLS |
-| 6.5 | Consolidar `property_recurring_expenses` (legacy) hacia `vendors` + recurrentes nuevos | D-002 | 🔴 | L | 📋 Plan documentado en `audits/08_RECURRING_CONSOLIDATION_PLAN.md` (4 fases). Ejecución pospuesta hasta tener staging |
+| 6.5 | Consolidar `property_recurring_expenses` (legacy) hacia `vendors` + recurrentes nuevos | D-002 | 🔴 | L | 🟡 Fase A ✅ `migration_041_recurring_audit_phase_a.sql` (auditoría read-only, RAISE NOTICE). Fase B (backfill) requiere staging — pospuesto |
 | 6.6 | Decidir naming consistente (snake_case, plural, prefijos por dominio) y aplicar via migration de rename | D-Bajo | 🟡 | M | ✅ `audits/09_NAMING_CONVENTION_AUDIT.md` — inventario completo, 5 inconsistencias documentadas, política definida |
 
 ---
@@ -123,11 +123,22 @@ Convención:
 
 ## 📈 Definición de "auditoría completada"
 
-- [ ] Bloque 0 completado.
-- [ ] Bloque 1 completado y desplegado en prod.
+- [x] Bloque 0 completado.
+- [x] Bloque 1 completado y desplegado en prod.
 - [ ] Bloque 2 ejecutado (si el usuario decidió limpiar bookings).
-- [ ] Bloque 3 desplegado en prod sin regresiones.
-- [ ] Bloque 4 establecido como CI obligatorio en `main`.
-- [ ] Bloque 5 al menos al 50% (3 de 6 acciones).
-- [ ] Bloque 6 al menos al 50%.
-- [ ] Re-auditoría confirma que críticos quedaron en 0 y altos en ≤5.
+- [x] Bloque 3 desplegado en prod sin regresiones.
+- [x] Bloque 4 establecido como CI obligatorio en `main`.
+- [x] Bloque 5 al menos al 50% (3 de 6 acciones). — **6/6 ✅**
+- [x] Bloque 6 al menos al 50%. — **5/6 ✅ (6.5 en Fase A)**
+- [x] Re-auditoría confirma que críticos quedaron en 0 y altos en ≤5.
+
+## 🩺 Health Check global
+
+`supabase/migration_042_health_check.sql` — script READ-ONLY que valida en una sola pasada:
+tablas, RLS, FKs, índices, triggers `updated_at`, `audit_log`, backfill `vendor_id`,
+huérfanos referenciales. Ejecutarlo en SQL editor cuando se quiera auditar el estado.
+
+## 🐛 Bug Review
+
+`audits/10_BUG_REVIEW.md` — reporte exhaustivo (15 categorías) con bugs encontrados,
+severidad, archivo:línea y fix sugerido. Pendiente de aplicación iterativa.
