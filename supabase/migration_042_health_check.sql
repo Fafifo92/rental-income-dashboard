@@ -1,345 +1,320 @@
 -- ============================================================
--- migration_042_health_check.sql
+-- migration_042_health_check.sql  (v2 — retorna filas)
 -- ============================================================
 -- HEALTH CHECK COMPLETO de la base de datos tras las
--- auditorías y migraciones 001-041.
+-- auditorias y migraciones 001-041.
 --
--- PROPÓSITO: validar de UN SOLO TIRO que todo lo prometido por
---   las auditorías quedó en orden:
---   • Tablas críticas existen
---   • RLS habilitado en TODAS las tablas públicas
---   • FKs críticas presentes (incluida listings.property_id)
---   • Índices críticos creados (mig_034, mig_037)
---   • Triggers updated_at instalados (mig_035)
---   • audit_log + triggers instalados (mig_039)
---   • Backfill de vendor_id completo (mig_040)
+-- ESTA VERSION devuelve una tabla de resultados visible en el
+-- SQL editor de Supabase (columnas: check_name, status, detail).
+-- Es READ-ONLY — no modifica nada. Idempotente.
 --
--- ESTA MIGRACIÓN ES READ-ONLY — no modifica nada. Reporta vía
--- RAISE NOTICE / RAISE WARNING qué pasó cada check y cuáles
--- (si hay) fallaron. Es idempotente y se puede correr cuantas
--- veces se quiera.
---
--- USO: ejecutar completo en el SQL editor y leer los NOTICEs.
--- Si aparece "❌" en cualquier línea, hay algo que requiere
--- atención manual.
+-- USO: ejecutar completo. Ver columna "status":
+--   PASS    = todo en orden
+--   WARN    = no bloqueante, revisar
+--   FAIL    = problema que requiere accion
 -- ============================================================
 
-DO $hc$
-DECLARE
-  v_count       INT;
-  v_expected    INT;
-  v_pass        INT := 0;
-  v_fail        INT := 0;
-  v_warn        INT := 0;
-  v_msg         TEXT;
-  r             RECORD;
+WITH
+-- ─── 1. Tablas criticas ──────────────────────────────────────
+tables_check AS (
+  SELECT
+    'CHECK 1: Tablas criticas' AS check_name,
+    CASE WHEN missing = 0 THEN 'PASS' ELSE 'FAIL' END AS status,
+    CASE WHEN missing = 0
+         THEN 'Todas las ' || total::text || ' tablas criticas existen'
+         ELSE missing::text || ' tabla(s) faltante(s): ' || missing_names
+    END AS detail
+  FROM (
+    SELECT
+      COUNT(*) AS total,
+      COUNT(*) FILTER (WHERE t.table_name IS NULL) AS missing,
+      string_agg(e.tbl, ', ') FILTER (WHERE t.table_name IS NULL) AS missing_names
+    FROM unnest(ARRAY[
+      'profiles','properties','property_groups','property_tags','property_tag_assignments',
+      'listings','bookings','bank_accounts','expenses','property_recurring_expenses',
+      'recurring_expense_periods','vendors','vendor_properties','shared_bills',
+      'booking_adjustments','booking_cleanings','cleaners','cleaner_groups',
+      'inventory_items','inventory_maintenance_schedules','credit_pools',
+      'credit_pool_consumptions','expense_groups','audit_log'
+    ]) AS e(tbl)
+    LEFT JOIN information_schema.tables t
+      ON t.table_schema = 'public' AND t.table_name = e.tbl
+  ) x
+),
 
-  -- Tablas críticas que DEBEN existir
-  c_critical_tables TEXT[] := ARRAY[
-    'profiles','properties','property_groups','property_tags','property_tag_assignments',
-    'listings','bookings','bank_accounts','expenses','property_recurring_expenses',
-    'recurring_expense_periods','vendors','vendor_properties','shared_bills',
-    'booking_adjustments','booking_cleanings','cleaners','cleaner_groups',
-    'inventory_items','inventory_maintenance_schedules','credit_pools',
-    'credit_pool_consumptions','expense_groups','audit_log'
-  ];
-
-  -- FKs críticas: (table, column, ref_table)
-  c_critical_fks TEXT[][] := ARRAY[
-    ['listings','property_id','properties'],
-    ['bookings','listing_id','listings'],
-    ['expenses','property_id','properties'],
-    ['expenses','vendor_id','vendors'],
-    ['property_recurring_expenses','property_id','properties'],
-    ['property_recurring_expenses','vendor_id','vendors'],
-    ['recurring_expense_periods','recurring_id','property_recurring_expenses'],
-    ['vendor_properties','vendor_id','vendors'],
-    ['vendor_properties','property_id','properties'],
-    ['booking_adjustments','booking_id','bookings'],
-    ['booking_cleanings','booking_id','bookings'],
-    ['credit_pool_consumptions','pool_id','credit_pools']
-  ];
-
-  -- Índices críticos esperados
-  c_critical_indexes TEXT[] := ARRAY[
-    'idx_properties_owner','idx_listings_property','idx_bookings_listing',
-    'idx_bookings_listing_dates','idx_expenses_owner','idx_expenses_owner_date',
-    'idx_expenses_vendor_id','idx_bank_accounts_owner_id','idx_recurring_periods_rec_month',
-    'idx_audit_log_table_record','idx_audit_log_user','idx_audit_log_occurred_at'
-  ];
-
-  -- Tablas que DEBEN tener trigger updated_at (mig_035)
-  c_updated_at_tables TEXT[] := ARRAY[
-    'properties','listings','bookings','bank_accounts','expenses',
-    'property_recurring_expenses','vendors','booking_adjustments'
-  ];
-
-  -- Tablas que DEBEN tener trigger de audit_log (mig_039)
-  c_audit_log_tables TEXT[] := ARRAY[
-    'properties','expenses','bookings','vendors','inventory_items'
-  ];
-BEGIN
-  RAISE NOTICE '════════════════════════════════════════════════════════════';
-  RAISE NOTICE '  HEALTH CHECK — rental-income-dashboard DB';
-  RAISE NOTICE '  Fecha: %', now();
-  RAISE NOTICE '════════════════════════════════════════════════════════════';
-
-  -- ─────────────────────────────────────────────────────
-  -- CHECK 1: Tablas críticas existen
-  -- ─────────────────────────────────────────────────────
-  RAISE NOTICE '';
-  RAISE NOTICE '🔎 CHECK 1: Tablas críticas (% esperadas)', array_length(c_critical_tables, 1);
-  FOR i IN 1..array_length(c_critical_tables, 1) LOOP
-    SELECT COUNT(*) INTO v_count
-    FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = c_critical_tables[i];
-    IF v_count = 1 THEN
-      v_pass := v_pass + 1;
-    ELSE
-      v_fail := v_fail + 1;
-      RAISE WARNING '  ❌ Tabla faltante: %', c_critical_tables[i];
-    END IF;
-  END LOOP;
-  RAISE NOTICE '  ✅ Tablas presentes: %/%', v_pass, array_length(c_critical_tables, 1);
-
-  -- ─────────────────────────────────────────────────────
-  -- CHECK 2: RLS habilitado en TODAS las tablas públicas
-  -- ─────────────────────────────────────────────────────
-  RAISE NOTICE '';
-  RAISE NOTICE '🔎 CHECK 2: RLS habilitado en tablas públicas';
-  v_count := 0;
-  FOR r IN
-    SELECT c.relname
+-- ─── 2. RLS habilitado ───────────────────────────────────────
+rls_check AS (
+  SELECT
+    'CHECK 2: RLS en tablas publicas' AS check_name,
+    CASE WHEN no_rls = 0 THEN 'PASS' ELSE 'FAIL' END AS status,
+    CASE WHEN no_rls = 0
+         THEN 'Todas las tablas publicas tienen RLS habilitado'
+         ELSE no_rls::text || ' tabla(s) sin RLS: ' || names
+    END AS detail
+  FROM (
+    SELECT
+      COUNT(*) AS no_rls,
+      string_agg(c.relname, ', ') AS names
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = 'public'
       AND c.relkind = 'r'
       AND c.relrowsecurity = false
-      AND c.relname NOT LIKE 'pg_%'
-  LOOP
-    v_count := v_count + 1;
-    RAISE WARNING '  ❌ RLS NO habilitado en: %', r.relname;
-  END LOOP;
-  IF v_count = 0 THEN
-    v_pass := v_pass + 1;
-    RAISE NOTICE '  ✅ Todas las tablas públicas tienen RLS habilitado.';
-  ELSE
-    v_fail := v_fail + v_count;
-    RAISE WARNING '  ❌ % tabla(s) sin RLS — riesgo crítico de seguridad.', v_count;
-  END IF;
+  ) x
+),
 
-  -- ─────────────────────────────────────────────────────
-  -- CHECK 3: FKs críticas
-  -- ─────────────────────────────────────────────────────
-  RAISE NOTICE '';
-  RAISE NOTICE '🔎 CHECK 3: FKs críticas (% esperadas)', array_length(c_critical_fks, 1);
-  v_expected := array_length(c_critical_fks, 1);
-  v_count := 0;
-  FOR i IN 1..v_expected LOOP
-    PERFORM 1
-    FROM information_schema.table_constraints tc
-    JOIN information_schema.key_column_usage kcu
-      ON tc.constraint_name = kcu.constraint_name
-     AND tc.table_schema = kcu.table_schema
-    JOIN information_schema.constraint_column_usage ccu
-      ON tc.constraint_name = ccu.constraint_name
-    WHERE tc.constraint_type = 'FOREIGN KEY'
-      AND tc.table_schema = 'public'
-      AND tc.table_name   = c_critical_fks[i][1]
-      AND kcu.column_name = c_critical_fks[i][2]
-      AND ccu.table_name  = c_critical_fks[i][3];
-    IF FOUND THEN
-      v_count := v_count + 1;
-    ELSE
-      v_fail := v_fail + 1;
-      RAISE WARNING '  ❌ FK faltante: %.% -> %', c_critical_fks[i][1], c_critical_fks[i][2], c_critical_fks[i][3];
-    END IF;
-  END LOOP;
-  v_pass := v_pass + v_count;
-  RAISE NOTICE '  ✅ FKs presentes: %/%', v_count, v_expected;
+-- ─── 3. FKs criticas ─────────────────────────────────────────
+fks_check AS (
+  SELECT
+    'CHECK 3: FKs criticas' AS check_name,
+    CASE WHEN missing = 0 THEN 'PASS' ELSE 'FAIL' END AS status,
+    CASE WHEN missing = 0
+         THEN 'Las 12 FKs criticas presentes'
+         ELSE missing::text || ' FK(s) faltante(s): ' || missing_names
+    END AS detail
+  FROM (
+    SELECT
+      COUNT(*) FILTER (WHERE tc.constraint_name IS NULL) AS missing,
+      string_agg(e.tbl || '.' || e.col, ', ') FILTER (WHERE tc.constraint_name IS NULL) AS missing_names
+    FROM (VALUES
+      ('listings','property_id','properties'),
+      ('bookings','listing_id','listings'),
+      ('expenses','property_id','properties'),
+      ('expenses','vendor_id','vendors'),
+      ('property_recurring_expenses','property_id','properties'),
+      ('property_recurring_expenses','vendor_id','vendors'),
+      ('recurring_expense_periods','recurring_id','property_recurring_expenses'),
+      ('vendor_properties','vendor_id','vendors'),
+      ('vendor_properties','property_id','properties'),
+      ('booking_adjustments','booking_id','bookings'),
+      ('booking_cleanings','booking_id','bookings'),
+      ('credit_pool_consumptions','pool_id','credit_pools')
+    ) AS e(tbl, col, ref_tbl)
+    LEFT JOIN (
+      SELECT DISTINCT tc.table_name, kcu.column_name, ccu.table_name AS ref_table, tc.constraint_name
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+      JOIN information_schema.constraint_column_usage ccu
+        ON tc.constraint_name = ccu.constraint_name
+      WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+    ) tc ON tc.table_name = e.tbl AND tc.column_name = e.col AND tc.ref_table = e.ref_tbl
+  ) x
+),
 
-  -- ─────────────────────────────────────────────────────
-  -- CHECK 4: Índices críticos
-  -- ─────────────────────────────────────────────────────
-  RAISE NOTICE '';
-  RAISE NOTICE '🔎 CHECK 4: Índices críticos (% esperados)', array_length(c_critical_indexes, 1);
-  v_expected := array_length(c_critical_indexes, 1);
-  v_count := 0;
-  FOR i IN 1..v_expected LOOP
-    PERFORM 1
-    FROM pg_indexes
-    WHERE schemaname = 'public' AND indexname = c_critical_indexes[i];
-    IF FOUND THEN
-      v_count := v_count + 1;
-    ELSE
-      v_fail := v_fail + 1;
-      RAISE WARNING '  ❌ Índice faltante: %', c_critical_indexes[i];
-    END IF;
-  END LOOP;
-  v_pass := v_pass + v_count;
-  RAISE NOTICE '  ✅ Índices presentes: %/%', v_count, v_expected;
+-- ─── 4. Indices criticos ─────────────────────────────────────
+indexes_check AS (
+  SELECT
+    'CHECK 4: Indices criticos' AS check_name,
+    CASE WHEN missing = 0 THEN 'PASS' ELSE 'FAIL' END AS status,
+    CASE WHEN missing = 0
+         THEN 'Los 12 indices criticos presentes'
+         ELSE missing::text || ' indice(s) faltante(s): ' || missing_names
+    END AS detail
+  FROM (
+    SELECT
+      COUNT(*) FILTER (WHERE pi.indexname IS NULL) AS missing,
+      string_agg(e.idx, ', ') FILTER (WHERE pi.indexname IS NULL) AS missing_names
+    FROM unnest(ARRAY[
+      'idx_properties_owner','idx_listings_property','idx_bookings_listing',
+      'idx_bookings_listing_dates','idx_expenses_owner','idx_expenses_owner_date',
+      'idx_expenses_vendor_id','idx_bank_accounts_owner_id',
+      'idx_recurring_periods_rec_month',
+      'idx_audit_log_table_record','idx_audit_log_user','idx_audit_log_occurred_at'
+    ]) AS e(idx)
+    LEFT JOIN pg_indexes pi ON pi.schemaname = 'public' AND pi.indexname = e.idx
+  ) x
+),
 
-  -- ─────────────────────────────────────────────────────
-  -- CHECK 5: Triggers updated_at (mig_035)
-  -- ─────────────────────────────────────────────────────
-  RAISE NOTICE '';
-  RAISE NOTICE '🔎 CHECK 5: Triggers updated_at (% tablas)', array_length(c_updated_at_tables, 1);
-  v_expected := array_length(c_updated_at_tables, 1);
-  v_count := 0;
-  FOR i IN 1..v_expected LOOP
-    PERFORM 1
-    FROM information_schema.triggers
-    WHERE event_object_schema = 'public'
-      AND event_object_table  = c_updated_at_tables[i]
-      AND action_statement ILIKE '%updated_at%';
-    IF FOUND THEN
-      v_count := v_count + 1;
-    ELSE
-      v_warn := v_warn + 1;
-      RAISE WARNING '  ⚠️  Trigger updated_at faltante en: %', c_updated_at_tables[i];
-    END IF;
-  END LOOP;
-  v_pass := v_pass + v_count;
-  RAISE NOTICE '  ✅ Triggers updated_at: %/%', v_count, v_expected;
+-- ─── 5. Triggers updated_at ──────────────────────────────────
+updated_at_check AS (
+  SELECT
+    'CHECK 5: Triggers updated_at' AS check_name,
+    CASE WHEN missing = 0 THEN 'PASS' ELSE 'WARN' END AS status,
+    CASE WHEN missing = 0
+         THEN 'Triggers updated_at en las 8 tablas esperadas'
+         ELSE missing::text || ' trigger(s) faltante(s): ' || missing_names
+    END AS detail
+  FROM (
+    SELECT
+      COUNT(*) FILTER (WHERE trg.trigger_name IS NULL) AS missing,
+      string_agg(e.tbl, ', ') FILTER (WHERE trg.trigger_name IS NULL) AS missing_names
+    FROM unnest(ARRAY[
+      'properties','listings','bookings','bank_accounts','expenses',
+      'property_recurring_expenses','vendors','booking_adjustments'
+    ]) AS e(tbl)
+    LEFT JOIN (
+      SELECT DISTINCT event_object_table, trigger_name
+      FROM information_schema.triggers
+      WHERE event_object_schema = 'public'
+        AND trigger_name LIKE 'trg_%_updated_at'
+    ) trg ON trg.event_object_table = e.tbl
+  ) x
+),
 
-  -- ─────────────────────────────────────────────────────
-  -- CHECK 6: audit_log (mig_039)
-  -- ─────────────────────────────────────────────────────
-  RAISE NOTICE '';
-  RAISE NOTICE '🔎 CHECK 6: audit_log + triggers';
-  SELECT COUNT(*) INTO v_count
-  FROM information_schema.tables
-  WHERE table_schema = 'public' AND table_name = 'audit_log';
-  IF v_count = 1 THEN
-    v_pass := v_pass + 1;
-    RAISE NOTICE '  ✅ Tabla audit_log existe.';
-  ELSE
-    v_fail := v_fail + 1;
-    RAISE WARNING '  ❌ Tabla audit_log NO existe — mig_039 no aplicada.';
-  END IF;
+-- ─── 6. audit_log tabla ──────────────────────────────────────
+audit_table_check AS (
+  SELECT
+    'CHECK 6a: Tabla audit_log' AS check_name,
+    CASE WHEN n > 0 THEN 'PASS' ELSE 'FAIL' END AS status,
+    CASE WHEN n > 0 THEN 'Tabla audit_log existe'
+         ELSE 'Tabla audit_log NO existe — mig_039 no aplicada' END AS detail
+  FROM (SELECT COUNT(*) AS n FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'audit_log') x
+),
 
-  v_expected := array_length(c_audit_log_tables, 1);
-  v_count := 0;
-  FOR i IN 1..v_expected LOOP
-    PERFORM 1
-    FROM information_schema.triggers
-    WHERE event_object_schema = 'public'
-      AND event_object_table  = c_audit_log_tables[i]
-      AND trigger_name LIKE 'trg_audit_%';
-    IF FOUND THEN
-      v_count := v_count + 1;
-    ELSE
-      v_fail := v_fail + 1;
-      RAISE WARNING '  ❌ Trigger audit_log faltante en: %', c_audit_log_tables[i];
-    END IF;
-  END LOOP;
-  v_pass := v_pass + v_count;
-  RAISE NOTICE '  ✅ Triggers audit_log: %/%', v_count, v_expected;
+-- ─── 7. audit_log triggers ───────────────────────────────────
+audit_triggers_check AS (
+  SELECT
+    'CHECK 6b: Triggers audit_log' AS check_name,
+    CASE WHEN missing = 0 THEN 'PASS' ELSE 'FAIL' END AS status,
+    CASE WHEN missing = 0
+         THEN 'Triggers audit_log en las 5 tablas criticas'
+         ELSE missing::text || ' trigger(s) faltante(s): ' || missing_names
+    END AS detail
+  FROM (
+    SELECT
+      COUNT(*) FILTER (WHERE trg.trigger_name IS NULL) AS missing,
+      string_agg(e.tbl, ', ') FILTER (WHERE trg.trigger_name IS NULL) AS missing_names
+    FROM unnest(ARRAY[
+      'properties','expenses','bookings','vendors','inventory_items'
+    ]) AS e(tbl)
+    LEFT JOIN (
+      SELECT DISTINCT event_object_table, trigger_name
+      FROM information_schema.triggers
+      WHERE event_object_schema = 'public'
+        AND trigger_name LIKE 'trg_audit_%'
+    ) trg ON trg.event_object_table = e.tbl
+  ) x
+),
 
-  -- ─────────────────────────────────────────────────────
-  -- CHECK 7: Backfill vendor_id (mig_040)
-  -- ─────────────────────────────────────────────────────
-  RAISE NOTICE '';
-  RAISE NOTICE '🔎 CHECK 7: Backfill vendor_id (mig_040)';
-  SELECT COUNT(*) INTO v_count
-  FROM public.expenses
-  WHERE vendor_id IS NULL
-    AND vendor IS NOT NULL
-    AND btrim(vendor) <> '';
-  IF v_count = 0 THEN
-    v_pass := v_pass + 1;
-    RAISE NOTICE '  ✅ expenses: 0 filas con vendor TEXT no vacío y vendor_id NULL.';
-  ELSE
-    v_warn := v_warn + 1;
-    RAISE WARNING '  ⚠️  expenses: % filas pendientes de backfill (re-correr mig_040).', v_count;
-  END IF;
+-- ─── 8. Backfill vendor_id (expenses) ────────────────────────
+backfill_expenses_check AS (
+  SELECT
+    'CHECK 7a: Backfill vendor_id en expenses' AS check_name,
+    CASE WHEN n = 0 THEN 'PASS' ELSE 'WARN' END AS status,
+    CASE WHEN n = 0
+         THEN '0 expenses con vendor TEXT sin vendor_id (backfill completo)'
+         ELSE n::text || ' fila(s) pendientes — re-ejecutar mig_040'
+    END AS detail
+  FROM (
+    SELECT COUNT(*) AS n
+    FROM public.expenses
+    WHERE vendor_id IS NULL AND vendor IS NOT NULL AND btrim(vendor) <> ''
+  ) x
+),
 
-  SELECT COUNT(*) INTO v_count
-  FROM public.property_recurring_expenses
-  WHERE vendor_id IS NULL
-    AND vendor IS NOT NULL
-    AND btrim(vendor) <> '';
-  IF v_count = 0 THEN
-    v_pass := v_pass + 1;
-    RAISE NOTICE '  ✅ property_recurring_expenses: 0 filas pendientes.';
-  ELSE
-    v_warn := v_warn + 1;
-    RAISE WARNING '  ⚠️  property_recurring_expenses: % filas pendientes.', v_count;
-  END IF;
+-- ─── 9. Backfill vendor_id (recurring) ───────────────────────
+backfill_recurring_check AS (
+  SELECT
+    'CHECK 7b: Backfill vendor_id en property_recurring_expenses' AS check_name,
+    CASE WHEN n = 0 THEN 'PASS' ELSE 'WARN' END AS status,
+    CASE WHEN n = 0
+         THEN '0 filas con vendor TEXT sin vendor_id'
+         ELSE n::text || ' fila(s) pendientes — re-ejecutar mig_040'
+    END AS detail
+  FROM (
+    SELECT COUNT(*) AS n
+    FROM public.property_recurring_expenses
+    WHERE vendor_id IS NULL AND vendor IS NOT NULL AND btrim(vendor) <> ''
+  ) x
+),
 
-  -- ─────────────────────────────────────────────────────
-  -- CHECK 8: Integridad referencial (huérfanos)
-  -- ─────────────────────────────────────────────────────
-  RAISE NOTICE '';
-  RAISE NOTICE '🔎 CHECK 8: Integridad referencial (huérfanos)';
+-- ─── 10. Huerfanos: expenses → properties ────────────────────
+orphan_expenses_check AS (
+  SELECT
+    'CHECK 8a: Huerfanos expenses.property_id' AS check_name,
+    CASE WHEN n = 0 THEN 'PASS' ELSE 'FAIL' END AS status,
+    CASE WHEN n = 0 THEN '0 expenses con property_id huerfano'
+         ELSE n::text || ' expense(s) con property_id sin propiedad valida' END AS detail
+  FROM (
+    SELECT COUNT(*) AS n FROM public.expenses e
+    WHERE e.property_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM public.properties p WHERE p.id = e.property_id)
+  ) x
+),
 
-  -- expenses sin property válida
-  SELECT COUNT(*) INTO v_count
-  FROM public.expenses e
-  WHERE e.property_id IS NOT NULL
-    AND NOT EXISTS (SELECT 1 FROM public.properties p WHERE p.id = e.property_id);
-  IF v_count = 0 THEN
-    v_pass := v_pass + 1;
-  ELSE
-    v_fail := v_fail + 1;
-    RAISE WARNING '  ❌ expenses con property_id huérfano: %', v_count;
-  END IF;
+-- ─── 11. Huerfanos: bookings → listings ──────────────────────
+orphan_bookings_check AS (
+  SELECT
+    'CHECK 8b: Huerfanos bookings.listing_id' AS check_name,
+    CASE WHEN n = 0 THEN 'PASS' ELSE 'FAIL' END AS status,
+    CASE WHEN n = 0 THEN '0 bookings con listing_id huerfano'
+         ELSE n::text || ' booking(s) con listing_id sin listing valido' END AS detail
+  FROM (
+    SELECT COUNT(*) AS n FROM public.bookings b
+    WHERE NOT EXISTS (SELECT 1 FROM public.listings l WHERE l.id = b.listing_id)
+  ) x
+),
 
-  -- bookings sin listing válido
-  SELECT COUNT(*) INTO v_count
-  FROM public.bookings b
-  WHERE NOT EXISTS (SELECT 1 FROM public.listings l WHERE l.id = b.listing_id);
-  IF v_count = 0 THEN
-    v_pass := v_pass + 1;
-  ELSE
-    v_fail := v_fail + 1;
-    RAISE WARNING '  ❌ bookings con listing_id huérfano: %', v_count;
-  END IF;
+-- ─── 12. Huerfanos: listings → properties ────────────────────
+orphan_listings_check AS (
+  SELECT
+    'CHECK 8c: Huerfanos listings.property_id' AS check_name,
+    CASE WHEN n = 0 THEN 'PASS' ELSE 'FAIL' END AS status,
+    CASE WHEN n = 0 THEN '0 listings con property_id huerfano'
+         ELSE n::text || ' listing(s) con property_id sin propiedad valida' END AS detail
+  FROM (
+    SELECT COUNT(*) AS n FROM public.listings l
+    WHERE NOT EXISTS (SELECT 1 FROM public.properties p WHERE p.id = l.property_id)
+  ) x
+),
 
-  -- listings sin property válida
-  SELECT COUNT(*) INTO v_count
-  FROM public.listings l
-  WHERE NOT EXISTS (SELECT 1 FROM public.properties p WHERE p.id = l.property_id);
-  IF v_count = 0 THEN
-    v_pass := v_pass + 1;
-  ELSE
-    v_fail := v_fail + 1;
-    RAISE WARNING '  ❌ listings con property_id huérfano: %', v_count;
-  END IF;
+-- ─── 13. Huerfanos: recurring_periods → recurring ─────────────
+orphan_periods_check AS (
+  SELECT
+    'CHECK 8d: Huerfanos recurring_expense_periods.recurring_id' AS check_name,
+    CASE WHEN n = 0 THEN 'PASS' ELSE 'FAIL' END AS status,
+    CASE WHEN n = 0 THEN '0 periodos recurrentes huerfanos'
+         ELSE n::text || ' periodo(s) sin parent recurring valido' END AS detail
+  FROM (
+    SELECT COUNT(*) AS n FROM public.recurring_expense_periods rep
+    WHERE NOT EXISTS (
+      SELECT 1 FROM public.property_recurring_expenses pre WHERE pre.id = rep.recurring_id
+    )
+  ) x
+),
 
-  -- recurring_expense_periods sin recurring válido
-  SELECT COUNT(*) INTO v_count
-  FROM public.recurring_expense_periods rep
-  WHERE NOT EXISTS (
-    SELECT 1 FROM public.property_recurring_expenses pre WHERE pre.id = rep.recurring_id
-  );
-  IF v_count = 0 THEN
-    v_pass := v_pass + 1;
-  ELSE
-    v_fail := v_fail + 1;
-    RAISE WARNING '  ❌ recurring_expense_periods huérfanos: %', v_count;
-  END IF;
+-- ─── UNION de todos los checks ────────────────────────────────
+all_checks AS (
+  SELECT * FROM tables_check UNION ALL
+  SELECT * FROM rls_check UNION ALL
+  SELECT * FROM fks_check UNION ALL
+  SELECT * FROM indexes_check UNION ALL
+  SELECT * FROM updated_at_check UNION ALL
+  SELECT * FROM audit_table_check UNION ALL
+  SELECT * FROM audit_triggers_check UNION ALL
+  SELECT * FROM backfill_expenses_check UNION ALL
+  SELECT * FROM backfill_recurring_check UNION ALL
+  SELECT * FROM orphan_expenses_check UNION ALL
+  SELECT * FROM orphan_bookings_check UNION ALL
+  SELECT * FROM orphan_listings_check UNION ALL
+  SELECT * FROM orphan_periods_check
+),
 
-  RAISE NOTICE '  ✅ Sin huérfanos detectados (4 checks de integridad).';
+-- ─── Resumen final ────────────────────────────────────────────
+summary AS (
+  SELECT
+    '=== RESUMEN ===' AS check_name,
+    CASE
+      WHEN COUNT(*) FILTER (WHERE status = 'FAIL') = 0
+       AND COUNT(*) FILTER (WHERE status = 'WARN') = 0 THEN 'PASS'
+      WHEN COUNT(*) FILTER (WHERE status = 'FAIL') = 0 THEN 'WARN'
+      ELSE 'FAIL'
+    END AS status,
+    COUNT(*) FILTER (WHERE status = 'PASS')::text || ' PASS  |  ' ||
+    COUNT(*) FILTER (WHERE status = 'WARN')::text || ' WARN  |  ' ||
+    COUNT(*) FILTER (WHERE status = 'FAIL')::text || ' FAIL  — ' ||
+    CASE
+      WHEN COUNT(*) FILTER (WHERE status = 'FAIL') = 0
+       AND COUNT(*) FILTER (WHERE status = 'WARN') = 0 THEN '🎉 Sistema completamente sano'
+      WHEN COUNT(*) FILTER (WHERE status = 'FAIL') = 0 THEN '✅ Sin fallos criticos — revisar warnings'
+      ELSE '⚠️ Hay fallos — revisar filas con FAIL arriba'
+    END AS detail
+  FROM all_checks
+)
 
-  -- ─────────────────────────────────────────────────────
-  -- RESUMEN FINAL
-  -- ─────────────────────────────────────────────────────
-  RAISE NOTICE '';
-  RAISE NOTICE '════════════════════════════════════════════════════════════';
-  RAISE NOTICE '  RESUMEN HEALTH CHECK';
-  RAISE NOTICE '────────────────────────────────────────────────────────────';
-  RAISE NOTICE '  ✅ Pasaron:    %', v_pass;
-  RAISE NOTICE '  ⚠️  Warnings:  %', v_warn;
-  RAISE NOTICE '  ❌ Fallaron:   %', v_fail;
-  RAISE NOTICE '════════════════════════════════════════════════════════════';
-  IF v_fail = 0 AND v_warn = 0 THEN
-    RAISE NOTICE '  🎉 SISTEMA COMPLETAMENTE SANO. Auditoría en orden.';
-  ELSIF v_fail = 0 THEN
-    RAISE NOTICE '  ✅ Sin fallos críticos. Revisar warnings (no bloqueantes).';
-  ELSE
-    RAISE NOTICE '  ⚠️  HAY FALLOS — revisar mensajes WARNING arriba.';
-  END IF;
-  RAISE NOTICE '════════════════════════════════════════════════════════════';
-END;
-$hc$ LANGUAGE plpgsql;
+SELECT * FROM all_checks
+UNION ALL
+SELECT * FROM summary
+ORDER BY check_name;

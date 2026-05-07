@@ -115,10 +115,11 @@ BEGIN
   RAISE NOTICE '   shared_bills creados:                     %', v_shared_bills_total;
   RAISE NOTICE '   vendors con day_of_month + default_amount: %', v_vendors_recurring_ready;
 
-  -- ── 6. Owners afectados ──────────────────────────────────
-  SELECT COUNT(DISTINCT owner_id) INTO v_owners_with_recurring
-  FROM public.property_recurring_expenses
-  WHERE valid_to IS NULL;
+    -- ─── 6. Owners afectados (via join a properties) ──────────────
+  SELECT COUNT(DISTINCT p.owner_id) INTO v_owners_with_recurring
+  FROM public.property_recurring_expenses pre
+  JOIN public.properties p ON p.id = pre.property_id
+  WHERE pre.valid_to IS NULL;
 
   RAISE NOTICE '';
   RAISE NOTICE '── 6. Cobertura por owner ──';
