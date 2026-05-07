@@ -78,7 +78,7 @@ Convención:
 
 | # | Acción | Origen | Riesgo | Esfuerzo |
 |---|--------|--------|:------:|:--------:|
-| 5.1 | Extraer hooks de data-fetching de `*Client.tsx` hacia `src/lib/hooks/` (`useBookings`, `useExpenses`, ...) | A-Crítico | 🟡 | L |
+| 5.1 | Extraer hooks de data-fetching de `*Client.tsx` hacia `src/lib/hooks/` (`useBookingsList`, `useExpensesList`, `useDashboardData`, `useReferenceData`) | A-Crítico | 🟢 | L |
 | 5.2 | Romper `InventoryClient.tsx` (90 KB) en sub-componentes + hooks | A-Crítico | 🔴 | L |
 | 5.3 | Romper `BookingDetailModal.tsx` (75 KB) en steps/secciones independientes | A-Crítico | 🔴 | L |
 | 5.4 | Romper `BookingsClient.tsx`, `AseoClient.tsx`, `ExpensesClient.tsx`, `PropertiesClient.tsx`, `VendorsClient.tsx` (uno por sprint) | A-Crítico | 🔴 | XL |

@@ -1,18 +1,17 @@
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  listBookings, getDemoBookings, saveDemoBookings, insertBooking,
+  getDemoBookings, saveDemoBookings, insertBooking,
   updateBooking, deleteBooking, checkBookingOverlap,
   generateDirectBookingCode, type BookingFilters,
 } from '@/services/bookings';
-import { listProperties } from '@/services/properties';
-import { findOrCreateListing, listListings } from '@/services/listings';
-import { listBankAccounts } from '@/services/bankAccounts';
+import { findOrCreateListing } from '@/services/listings';
 import { runAutoCheckins } from '@/services/creditPools';
-import type { PropertyRow, BankAccountRow, ListingRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { useAuth } from '@/lib/useAuth';
 import { usePropertyFilter } from '@/lib/usePropertyFilter';
+import { useBookingsList } from '@/lib/hooks/useBookingsList';
+import { useReferenceData } from '@/lib/hooks/useReferenceData';
 import DataTable from './DataTable';
 import CSVUploader from './CSVUploader';
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
@@ -26,7 +25,7 @@ import {
   type DisplayBooking, type BookingForm,
   EMPTY_FORM, EMPTY_FILTERS,
 } from './bookings/types';
-import { fromRow, fromDemo, todayISO, getSmartDefaultStartDate } from './bookings/helpers';
+import { fromDemo, todayISO, getSmartDefaultStartDate } from './bookings/helpers';
 import { useBookingsColumns } from './bookings/useBookingsColumns';
 import BookingsKPICards, { buildBookingKPIs } from './bookings/BookingsKPICards';
 import BookingsFilterBar from './bookings/BookingsFilterBar';
@@ -38,9 +37,6 @@ export default function BookingsClient() {
   // ── ALL HOOKS — must come before any conditional returns ──────────────────
   const authStatus = useAuth();
   const { properties: allProperties, propertyIds, setPropertyIds, groups, tags, tagAssigns } = usePropertyFilter();
-  const [bookings, setBookings]     = useState<DisplayBooking[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [isDemo, setIsDemo]         = useState(false);
   const [filters, setFilters]       = useState<BookingFilters>(EMPTY_FILTERS);
   const [search, setSearch]         = useState('');
   const [showModal, setShowModal]     = useState(false);
@@ -53,12 +49,30 @@ export default function BookingsClient() {
   const [overlapAck, setOverlapAck] = useState(false);
   const [editingId, setEditingId]     = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DisplayBooking | null>(null);
-  const [properties, setProperties]   = useState<PropertyRow[]>([]);
-  const [bankAccounts, setBankAccounts] = useState<BankAccountRow[]>([]);
   const [payoutTarget, setPayoutTarget] = useState<DisplayBooking | null>(null);
   const [detailTarget, setDetailTarget] = useState<DisplayBooking | null>(null);
-  const [listings, setListings] = useState<ListingRow[]>([]);
   const [statusFilter, setStatusFilter] = useState<DerivedBookingStatus | 'all'>('all');
+
+  const demoFallback = useCallback((f: BookingFilters): DisplayBooking[] => {
+    let demo = getDemoBookings().map(fromDemo);
+    if (f.search) {
+      const q = f.search.toLowerCase();
+      demo = demo.filter(
+        b => b.guest_name.toLowerCase().includes(q) || b.confirmation_code.toLowerCase().includes(q),
+      );
+    }
+    if (f.dateFrom) demo = demo.filter(b => b.start_date >= f.dateFrom!);
+    if (f.dateTo)   demo = demo.filter(b => b.start_date <= f.dateTo!);
+    return demo;
+  }, []);
+
+  const { bookings, setBookings, loading, isDemo, reload } = useBookingsList({
+    filters, propertyIds, demoFallback,
+  });
+
+  const { properties, bankAccounts, listings } = useReferenceData({
+    authStatus, withProperties: true, withBankAccounts: true, withListings: true,
+  });
 
   // ESC cierra el modal abierto (sin cerrar por clic fuera — ver onClick del overlay)
   useEffect(() => {
@@ -73,43 +87,16 @@ export default function BookingsClient() {
     return () => window.removeEventListener('keydown', onKey);
   }, [showModal, deleteTarget, payoutTarget, detailTarget]);
 
-  const load = useCallback(async (f: BookingFilters) => {
-    setLoading(true);
-    const result = await listBookings(f);
-    if (result.error) {
-      let demo = getDemoBookings().map(fromDemo);
-      if (f.search) {
-        const q = f.search.toLowerCase();
-        demo = demo.filter(
-          b => b.guest_name.toLowerCase().includes(q) || b.confirmation_code.toLowerCase().includes(q),
-        );
-      }
-      if (f.dateFrom) demo = demo.filter(b => b.start_date >= f.dateFrom!);
-      if (f.dateTo)   demo = demo.filter(b => b.start_date <= f.dateTo!);
-      setBookings(demo);
-      setIsDemo(true);
-    } else {
-      setBookings((result.data ?? []).map(fromRow));
-      setIsDemo(false);
-    }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { load({ ...filters, propertyIds }); }, [filters, propertyIds, load]);
-
   useEffect(() => {
     if (authStatus === 'authed') {
-      listProperties().then(res => { if (!res.error) setProperties(res.data ?? []); });
-      listBankAccounts().then(res => { if (!res.error) setBankAccounts((res.data ?? []).filter(a => a.is_active)); });
-      listListings().then(res => { if (!res.error) setListings(res.data ?? []); });
       // Check-in automático "lazy": al cargar la app, busca reservas confirmadas
       // cuyo check-in ya pasó y no está marcado, las marca y consume créditos
       // del seguro activo. Recarga la lista al terminar si hubo cambios.
       runAutoCheckins().then(res => {
-        if (res.processed > 0) load({ ...filters, propertyIds });
+        if (res.processed > 0) reload();
       }).catch(() => { /* silent */ });
     }
-  }, [authStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authStatus, reload]);
 
   const applySearch = useCallback(
     () => setFilters(prev => ({ ...prev, search })),
@@ -363,12 +350,12 @@ export default function BookingsClient() {
       setEditingPropertyId(null);
       setOverlapAck(false);
       setForm(EMPTY_FORM);
-      await load({ ...filters, propertyIds });
+      await reload();
     } catch {
       toast.error('Error inesperado al guardar.');
     }
     setFormLoading(false);
-  }, [form, editingId, editingListingId, editingPropertyId, overlapAck, authStatus, properties, filters, propertyIds, load]);
+  }, [form, editingId, editingListingId, editingPropertyId, overlapAck, authStatus, properties, reload]);
 
   const handleEdit = useCallback((b: DisplayBooking) => {
     setEditingId(b.id);
@@ -414,8 +401,8 @@ export default function BookingsClient() {
     if (res.error) { toast.error(res.error); return; }
     toast.success('Reserva eliminada');
     setDeleteTarget(null);
-    await load({ ...filters, propertyIds });
-  }, [deleteTarget, filters, propertyIds, load]);
+    await reload();
+  }, [deleteTarget, reload]);
 
   const handleViewDetail = useCallback((b: DisplayBooking) => setDetailTarget(b), []);
   const handlePayout = useCallback((b: DisplayBooking) => setPayoutTarget(b), []);
@@ -564,7 +551,7 @@ export default function BookingsClient() {
         {showImporter && (
           <CSVUploader
             onClose={() => setShowImporter(false)}
-            onImport={() => { setShowImporter(false); load({ ...filters, propertyIds }); }}
+            onImport={() => { setShowImporter(false); reload(); }}
           />
         )}
       </AnimatePresence>
@@ -595,7 +582,7 @@ export default function BookingsClient() {
             }}
             bankAccounts={bankAccounts}
             onClose={() => setPayoutTarget(null)}
-            onSaved={() => { setPayoutTarget(null); load({ ...filters, propertyIds }); }}
+            onSaved={() => { setPayoutTarget(null); reload(); }}
           />
         )}
       </AnimatePresence>

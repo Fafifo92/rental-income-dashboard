@@ -18,7 +18,6 @@ import RecurringPendingPanel from './RecurringPendingPanel';
 import SharedBillsPendingPanel from './SharedBillsPendingPanel';
 import { toast } from '@/lib/toast';
 import {
-  listExpenses,
   createExpense,
   createSharedExpense,
   updateExpense,
@@ -26,8 +25,6 @@ import {
   deleteExpense,
   type ExpenseFilters,
 } from '@/services/expenses';
-import { listBankAccounts } from '@/services/bankAccounts';
-import { listListings } from '@/services/listings';
 import { deleteBookingAdjustment } from '@/services/bookingAdjustments';
 import { getUpcomingAndOverdueSchedules, getSchedulesDoneNeedingExpense, completeMaintenanceSchedule } from '@/services/maintenanceSchedules';
 import { listInventoryItems } from '@/services/inventory';
@@ -35,11 +32,13 @@ import { getBooking } from '@/services/bookings';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import { cleanDamageDescription } from '@/lib/damageDescription';
 import type { Expense } from '@/types';
-import { type BankAccountRow, type BookingRow, type ListingRow, type ExpenseSection, type ExpenseSubcategory, type MaintenanceScheduleRow, type InventoryItemRow, EXPENSE_SUBCATEGORY_META } from '@/types/database';
+import { type BookingRow, type ExpenseSection, type ExpenseSubcategory, type MaintenanceScheduleRow, type InventoryItemRow, EXPENSE_SUBCATEGORY_META } from '@/types/database';
 import { classifyExpense } from '@/lib/expenseClassify';
 import { formatCurrency } from '@/lib/utils';
 import { useAuth } from '@/lib/useAuth';
 import { usePropertyFilter } from '@/lib/usePropertyFilter';
+import { useExpensesList } from '@/lib/hooks/useExpensesList';
+import { useReferenceData } from '@/lib/hooks/useReferenceData';
 
 // Shown while Supabase isn't connected yet
 const dispatchRecurringChange = () => {
@@ -65,9 +64,6 @@ const EMPTY_FILTERS: ExpenseFilters = {};
 export default function ExpensesClient() {
   const authStatus = useAuth();
   const { properties, propertyIds, setPropertyIds, groups, tags, tagAssigns } = usePropertyFilter();
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [dbConnected, setDbConnected] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [showChooser, setShowChooser] = useState(false);
   const [showDamageFlow, setShowDamageFlow] = useState(false);
@@ -83,8 +79,6 @@ export default function ExpensesClient() {
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
   const [filters, setFilters] = useState<ExpenseFilters>(EMPTY_FILTERS);
   const [saveError, setSaveError] = useState('');
-  const [bankAccounts, setBankAccounts] = useState<BankAccountRow[]>([]);
-  const [listings, setListings] = useState<ListingRow[]>([]);
   const [viewingBooking, setViewingBooking] = useState<BookingRow | null>(null);
   const [tab, setTab] = useState<'all' | ExpenseSection | 'others'>('all');
   const [subFilter, setSubFilter] = useState<ExpenseSubcategory | null>(null);
@@ -95,6 +89,28 @@ export default function ExpensesClient() {
   const [inventoryItemsMap, setInventoryItemsMap] = useState<Map<string, InventoryItemRow>>(new Map());
   const [linkedMaintScheduleId, setLinkedMaintScheduleId] = useState<string | null>(null);
   const [maintPrefillInfo, setMaintPrefillInfo] = useState<{ itemName: string; scheduleTitle: string } | null>(null);
+
+  const demoFallback = useCallback((f: ExpenseFilters): Expense[] => {
+    let demo = DEMO_EXPENSES;
+    if (f.category) demo = demo.filter(e => e.category === f.category);
+    if (f.type) demo = demo.filter(e => e.type === f.type);
+    if (f.status) demo = demo.filter(e => e.status === f.status);
+    if (f.dateFrom) demo = demo.filter(e => e.date >= f.dateFrom!);
+    if (f.dateTo) demo = demo.filter(e => e.date <= f.dateTo!);
+    if (f.search) {
+      const q = f.search.toLowerCase();
+      demo = demo.filter(e => e.category.toLowerCase().includes(q) || e.description?.toLowerCase().includes(q));
+    }
+    return demo;
+  }, []);
+
+  const { expenses, setExpenses, loading, dbConnected, reload: reloadExpenses } = useExpensesList({
+    filters, propertyIds, demoFallback,
+  });
+
+  const { bankAccounts, listings } = useReferenceData({
+    authStatus, withBankAccounts: true, withListings: true,
+  });
 
   const loadMaintenancePanel = useCallback(async () => {
     const [schedRes, doneRes, itemsRes] = await Promise.all([
@@ -109,39 +125,8 @@ export default function ExpensesClient() {
     }
   }, []);
 
-  const loadExpenses = useCallback(async (f: ExpenseFilters, propIds?: string[]) => {
-    setLoading(true);
-    const result = await listExpenses(propIds, f);
-    if (result.error) {
-      let demo = DEMO_EXPENSES;
-      if (f.category) demo = demo.filter(e => e.category === f.category);
-      if (f.type) demo = demo.filter(e => e.type === f.type);
-      if (f.status) demo = demo.filter(e => e.status === f.status);
-      if (f.dateFrom) demo = demo.filter(e => e.date >= f.dateFrom!);
-      if (f.dateTo) demo = demo.filter(e => e.date <= f.dateTo!);
-      if (f.search) {
-        const q = f.search.toLowerCase();
-        demo = demo.filter(e => e.category.toLowerCase().includes(q) || e.description?.toLowerCase().includes(q));
-      }
-      setExpenses(demo);
-      setDbConnected(false);
-    } else {
-      setExpenses(result.data ?? []);
-      setDbConnected(true);
-    }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { loadExpenses(filters, propertyIds); }, [filters, propertyIds, loadExpenses]);
-
   useEffect(() => {
-    if (authStatus === 'authed') {
-      listBankAccounts().then(res => {
-        if (!res.error) setBankAccounts((res.data ?? []).filter(a => a.is_active));
-      });
-      listListings().then(res => { if (!res.error) setListings(res.data ?? []); });
-      loadMaintenancePanel();
-    }
+    if (authStatus === 'authed') loadMaintenancePanel();
   }, [authStatus, loadMaintenancePanel]);
 
   const handleViewBooking = useCallback(async (bookingId: string) => {
@@ -439,7 +424,7 @@ export default function ExpensesClient() {
         {/* Facturas compartidas pendientes (vendors con N propiedades) */}
         <SharedBillsPendingPanel
           onChanged={() => {
-            loadExpenses(filters, propertyIds);
+            reloadExpenses();
             if (typeof window !== 'undefined') {
               window.dispatchEvent(new CustomEvent('recurring-period-changed'));
             }
@@ -450,7 +435,7 @@ export default function ExpensesClient() {
         <RecurringPendingPanel
           propertyFilter={propertyIds.length === 1 ? propertyIds[0] : null}
           onChanged={() => {
-            loadExpenses(filters, propertyIds);
+            reloadExpenses();
             if (typeof window !== 'undefined') {
               window.dispatchEvent(new CustomEvent('recurring-period-changed'));
             }
@@ -779,7 +764,7 @@ export default function ExpensesClient() {
             onClose={() => setShowDamageFlow(false)}
             onSaved={() => {
               setShowDamageFlow(false);
-              loadExpenses(filters, propertyIds);
+              reloadExpenses();
             }}
           />
         )}
