@@ -361,6 +361,13 @@ export default function BookingsClient() {
     setEditingId(b.id);
     setEditingListingId(b.listing_id ?? null);
     setEditingPropertyId(b.property_id ?? null);
+    // Auto-normalize: if end_date is past but status is still "active", correct to Completada
+    const today = todayISO();
+    let normalizedStatus = b.status;
+    if (b.end_date && b.end_date < today &&
+        (normalizedStatus === 'Reservada' || normalizedStatus === 'En curso' || normalizedStatus === 'Inicia hoy')) {
+      normalizedStatus = 'Completada';
+    }
     setForm({
       guest_name: b.guest_name === '—' ? '' : b.guest_name,
       confirmation_code: b.confirmation_code,
@@ -368,7 +375,7 @@ export default function BookingsClient() {
       end_date: b.end_date,
       num_nights: String(b.num_nights),
       total_revenue: String(b.total_revenue),
-      status: b.status,
+      status: normalizedStatus,
       listing_name: b.listing_name,
       property_id: b.property_id ?? '',
       channel: b.channel ?? '',
@@ -599,6 +606,11 @@ export default function BookingsClient() {
               resolvePropertyId={(lid) => {
                 if (!lid) return null;
                 return listings.find(l => l.id === lid)?.property_id ?? null;
+              }}
+              onPayout={() => {
+                const target = detailTarget;
+                setDetailTarget(null);
+                setPayoutTarget(target);
               }}
             />
           )}

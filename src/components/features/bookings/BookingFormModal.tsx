@@ -64,6 +64,7 @@ export default function BookingFormModal({
                     className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white">
                     <option value="Reservada">Reservada</option>
                     <option value="Inicia hoy">Inicia hoy</option>
+                    <option value="En curso">En curso</option>
                     <option value="Completada">Completada</option>
                     <option value="Cancelada">Cancelada</option>
                   </select>

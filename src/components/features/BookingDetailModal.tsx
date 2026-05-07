@@ -67,10 +67,12 @@ interface Props {
   onClose: () => void;
   /** Resuelve property_id a partir de listing_id (BookingsClient se lo pasa). */
   resolvePropertyId?: (listingId: string | null | undefined) => string | null;
+  /** Abre el modal de payout para esta reserva. */
+  onPayout?: () => void;
 }
 
 export default function BookingDetailModal({
-  booking, properties, bankAccounts, onClose, resolvePropertyId,
+  booking, properties, bankAccounts, onClose, resolvePropertyId, onPayout,
 }: Props) {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -854,6 +856,14 @@ export default function BookingDetailModal({
                   title="Faltan tareas operativas"
                 >
                   Marcar completada
+                </button>
+              )}
+              {onPayout && !isBookingCancelled(booking) && (
+                <button
+                  onClick={() => { onClose(); onPayout(); }}
+                  className="px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg inline-flex items-center gap-1.5"
+                >
+                  💳 Payout
                 </button>
               )}
             </div>
