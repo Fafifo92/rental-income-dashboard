@@ -14,7 +14,7 @@ import type {
   InventoryMovementType,
 } from '@/types/database';
 import { useBackdropClose } from '@/lib/useBackdropClose';
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────────
 export function QuickMovementModal({
   item, type, onClose, onSave,
 }: {
@@ -72,7 +72,7 @@ export function QuickMovementModal({
           {showQty && (
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">
-                Cantidad ({cfg.sign > 0 ? '+' : 'ÔêÆ'})
+                Cantidad ({cfg.sign > 0 ? '+' : '−'})
               </label>
               <input
                 type="number" step="0.01" min="0" value={qty ?? ''} autoFocus
@@ -92,7 +92,7 @@ export function QuickMovementModal({
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
             <button type="submit" disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
-              {saving ? 'GuardandoÔÇª' : 'Confirmar'}
+              {saving ? 'Guardando…' : 'Confirmar'}
             </button>
           </div>
         </form>
@@ -101,7 +101,7 @@ export function QuickMovementModal({
   );
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────────
 export function MovementsModal({ item, onClose }: { item: InventoryItemRow; onClose: () => void }) {
   const backdrop = useBackdropClose(onClose);
   const [movements, setMovements] = useState<InventoryMovementRow[]>([]);
@@ -126,12 +126,12 @@ export function MovementsModal({ item, onClose }: { item: InventoryItemRow; onCl
         className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <div className="px-6 py-4 border-b border-slate-100">
-          <h3 className="text-lg font-bold text-slate-800">­ƒô£ Historial de "{item.name}"</h3>
+          <h3 className="text-lg font-bold text-slate-800">📜 Historial de "{item.name}"</h3>
           <p className="text-xs text-slate-500">Bitácora completa de movimientos.</p>
         </div>
         <div className="p-6">
           {loading ? (
-            <p className="text-sm text-slate-500">CargandoÔÇª</p>
+            <p className="text-sm text-slate-500">Cargando…</p>
           ) : movements.length === 0 ? (
             <p className="text-sm text-slate-500 text-center py-6">Sin movimientos registrados.</p>
           ) : (
@@ -153,7 +153,7 @@ export function MovementsModal({ item, onClose }: { item: InventoryItemRow; onCl
                         )}
                         {m.new_status && (
                           <span className={`text-[10px] px-1.5 py-0.5 rounded ${STATUS_STYLE[m.new_status]}`}>
-                            ÔåÆ {STATUS_LABEL[m.new_status]}
+                            → {STATUS_LABEL[m.new_status]}
                           </span>
                         )}
                       </div>

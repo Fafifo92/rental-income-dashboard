@@ -10,7 +10,7 @@ import type {
 import type { CreateInventoryItemInput } from '@/services/inventory';
 import { useBackdropClose } from '@/lib/useBackdropClose';
 import MoneyInput from '@/components/MoneyInput';
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────────
 export function ItemFormModal({
   item, properties, categories, items, onCreateCategory, onClose, onSave,
 }: {
@@ -139,7 +139,7 @@ export function ItemFormModal({
                 className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
               >
                 {!propertyId && (
-                  <option value="" disabled>ÔÇö Selecciona una propiedad ÔÇö</option>
+                  <option value="" disabled>— Selecciona una propiedad —</option>
                 )}
                 {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
@@ -224,7 +224,7 @@ export function ItemFormModal({
               <label className="block text-xs font-semibold text-slate-600 mb-1">Descripción</label>
               <textarea
                 value={description} onChange={e => setDescription(e.target.value)} rows={2}
-                placeholder="Marca, modelo, color, detalles relevantesÔÇª"
+                placeholder="Marca, modelo, color, detalles relevantes…"
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
@@ -236,7 +236,7 @@ export function ItemFormModal({
                 className="mt-0.5 w-4 h-4 rounded border-sky-300 text-sky-600 focus:ring-sky-500"
               />
               <label htmlFor="is_consumable" className="text-xs text-sky-900 cursor-pointer flex-1">
-                <span className="font-semibold">Es un insumo consumible</span> (jabón, detergente, papel higiénicoÔÇª). Se podrá registrar consumo y alertar cuando llegue al stock mínimo.
+                <span className="font-semibold">Es un insumo consumible</span> (jabón, detergente, papel higiénico…). Se podrá registrar consumo y alertar cuando llegue al stock mínimo.
               </label>
             </div>
 
@@ -308,7 +308,7 @@ export function ItemFormModal({
               type="submit" disabled={saving}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
             >
-              {saving ? 'GuardandoÔÇª' : item ? 'Guardar cambios' : 'Crear item'}
+              {saving ? 'Guardando…' : item ? 'Guardar cambios' : 'Crear item'}
             </button>
           </div>
         </form>

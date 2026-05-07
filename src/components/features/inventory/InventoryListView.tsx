@@ -14,9 +14,9 @@ import type {
   PropertyRow,
 } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// Vista categorizada: Propiedad ÔåÆ Categoría ÔåÆ items en filas compactas
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────────
+// Vista categorizada: Propiedad → Categoría → items en filas compactas
+// ──────────────────────────────────────────────────────────────────────────
 export function CategorizedInventoryView({
   items, properties, categories, propMap, catMap,
   pendingMaintMap, onQuick, onHistory, onEdit, onDelete, onScheduleMaintenance,
@@ -34,7 +34,7 @@ export function CategorizedInventoryView({
   onScheduleMaintenance: (it: InventoryItemRow, schedule?: MaintenanceScheduleRow) => void;
 }) {
   void properties; // reservado para futuras sub-vistas
-  // Agrupamos: propertyId ÔåÆ categoryKey ÔåÆ items
+  // Agrupamos: propertyId → categoryKey → items
   const groups = useMemo(() => {
     const byProp = new Map<string, Map<string, InventoryItemRow[]>>();
     for (const it of items) {
@@ -85,7 +85,7 @@ export function CategorizedInventoryView({
               className="w-full px-5 py-3 flex items-center justify-between bg-slate-50 hover:bg-slate-100 border-b border-slate-200"
             >
               <div className="flex items-center gap-2 text-left">
-                <span className="text-base">­ƒÅá</span>
+                <span className="text-base">🏠</span>
                 <span className="font-bold text-slate-800">{prop?.name ?? 'Sin propiedad'}</span>
                 <span className="text-xs text-slate-500">· {totalItems} {totalItems === 1 ? 'item' : 'items'}</span>
               </div>
@@ -93,7 +93,7 @@ export function CategorizedInventoryView({
                 animate={{ rotate: propCollapsed ? -90 : 0 }}
                 transition={{ duration: 0.2 }}
                 className="text-slate-400 text-sm inline-block"
-              >Ôû¥</motion.span>
+              >▾</motion.span>
             </button>
             <AnimatePresence initial={false}>
               {!propCollapsed && (
@@ -118,7 +118,7 @@ export function CategorizedInventoryView({
                             className="w-full px-5 py-2 flex items-center justify-between text-left hover:bg-slate-50"
                           >
                             <div className="flex items-center gap-2">
-                              <span className="text-base">{cat?.icon ?? '­ƒôª'}</span>
+                              <span className="text-base">{cat?.icon ?? '📦'}</span>
                               <span className="font-semibold text-slate-700 text-sm">{cat?.name ?? 'Sin categoría'}</span>
                               <span className="text-[11px] text-slate-400">({arr.length})</span>
                             </div>
@@ -126,7 +126,7 @@ export function CategorizedInventoryView({
                               animate={{ rotate: catCollapsed ? -90 : 0 }}
                               transition={{ duration: 0.2 }}
                               className="text-slate-400 text-xs inline-block"
-                            >Ôû¥</motion.span>
+                            >▾</motion.span>
                           </button>
                           <AnimatePresence initial={false}>
                             {!catCollapsed && (
@@ -192,7 +192,7 @@ export function ItemRow({
           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${STATUS_STYLE[item.status]}`}>
             {STATUS_LABEL[item.status]}
           </span>
-          {lowStock && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">ÔÜá Stock bajo</span>}
+          {lowStock && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">⚠ Stock bajo</span>}
           {hasPendingMaint && (
             <button
               onClick={() => onScheduleMaintenance(item, pendingSchedules[0])}
@@ -203,12 +203,12 @@ export function ItemRow({
               }`}
               title={`${pendingSchedules.length} mantenimiento(s) programado(s)`}
             >
-              {hasOverdueMaint ? '­ƒö┤ Mantenimiento vencido' : '­ƒƒí Mantenimiento próximo'}
+              {hasOverdueMaint ? '🔴 Mantenimiento vencido' : '🟡 Mantenimiento próximo'}
             </button>
           )}
         </div>
         <p className="text-[11px] text-slate-500 truncate">
-          {item.location ?? 'ÔÇö'}
+          {item.location ?? '—'}
           {item.description ? ` · ${item.description}` : ''}
         </p>
       </div>
@@ -234,7 +234,7 @@ export function ItemRow({
                 className="px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 rounded"
                 title="Registrar consumo"
               >
-                ÔêÆ Usar
+                − Usar
               </button>
             )}
           </>
@@ -245,7 +245,7 @@ export function ItemRow({
             className="px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50 rounded"
             title="Reportar daño"
           >
-            ÔÜá Daño
+            ⚠ Daño
           </button>
         )}
         <button

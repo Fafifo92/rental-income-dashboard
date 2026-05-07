@@ -201,7 +201,7 @@ export default function InventoryClient(): JSX.Element {
     <div>
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-slate-800">­ƒôª Inventario</h1>
+          <h1 className="text-3xl font-bold text-slate-800">📦 Inventario</h1>
           <p className="text-sm text-slate-500">Muebles, electrodomésticos, lencería e insumos por propiedad.</p>
         </div>
         <div className="flex items-center gap-2">
@@ -238,7 +238,7 @@ export default function InventoryClient(): JSX.Element {
           {overdueSchedules.length > 0 && (
             <div className="bg-red-50 border border-red-200 rounded-xl p-3">
               <p className="text-xs font-bold text-red-700 mb-2">
-                ­ƒö┤ {overdueSchedules.length} mantenimiento{overdueSchedules.length > 1 ? 's' : ''} vencido{overdueSchedules.length > 1 ? 's' : ''}
+                🔴 {overdueSchedules.length} mantenimiento{overdueSchedules.length > 1 ? 's' : ''} vencido{overdueSchedules.length > 1 ? 's' : ''}
               </p>
               <ul className="space-y-1">
                 {overdueSchedules.map(s => {
@@ -246,7 +246,7 @@ export default function InventoryClient(): JSX.Element {
                   return (
                     <li key={s.id} className="flex items-center justify-between gap-2">
                       <span className="text-xs text-red-700">
-                        <span className="font-medium">{it?.name ?? 'ÔÇö'}</span> · {s.title} · <span className="font-mono">{s.scheduled_date}</span>
+                        <span className="font-medium">{it?.name ?? '—'}</span> · {s.title} · <span className="font-mono">{s.scheduled_date}</span>
                       </span>
                       <button
                         onClick={() => it && setMaintenanceTarget({ item: it, schedule: s })}
@@ -263,7 +263,7 @@ export default function InventoryClient(): JSX.Element {
           {upcomingSchedules.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
               <p className="text-xs font-bold text-amber-700 mb-2">
-                ­ƒƒí {upcomingSchedules.length} mantenimiento{upcomingSchedules.length > 1 ? 's' : ''} próximo{upcomingSchedules.length > 1 ? 's' : ''}
+                🟡 {upcomingSchedules.length} mantenimiento{upcomingSchedules.length > 1 ? 's' : ''} próximo{upcomingSchedules.length > 1 ? 's' : ''}
               </p>
               <ul className="space-y-1">
                 {upcomingSchedules.map(s => {
@@ -271,7 +271,7 @@ export default function InventoryClient(): JSX.Element {
                   return (
                     <li key={s.id} className="flex items-center justify-between gap-2">
                       <span className="text-xs text-amber-700">
-                        <span className="font-medium">{it?.name ?? 'ÔÇö'}</span> · {s.title} · <span className="font-mono">{s.scheduled_date}</span>
+                        <span className="font-medium">{it?.name ?? '—'}</span> · {s.title} · <span className="font-mono">{s.scheduled_date}</span>
                       </span>
                       <button
                         onClick={() => it && setMaintenanceTarget({ item: it, schedule: s })}
@@ -298,7 +298,7 @@ export default function InventoryClient(): JSX.Element {
               : 'text-slate-500 border-transparent hover:text-slate-700'
           }`}
         >
-          ­ƒôª Inventario
+          📦 Inventario
         </button>
         <button
           onClick={() => setActiveTab('history')}
@@ -308,7 +308,7 @@ export default function InventoryClient(): JSX.Element {
               : 'text-slate-500 border-transparent hover:text-slate-700'
           }`}
         >
-          ­ƒöº Historial de mantenimiento
+          🔧 Historial de mantenimiento
           {allSchedules.filter(s => s.status === 'done').length > 0 && (
             <span className="ml-1.5 text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full">
               {allSchedules.filter(s => s.status === 'done').length}
@@ -317,7 +317,7 @@ export default function InventoryClient(): JSX.Element {
         </button>
       </div>
 
-      {/* ÔöÇÔöÇ History Tab ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ */}
+      {/* ── History Tab ─────────────────────────────────────────────────── */}
       {activeTab === 'history' && (
         <MaintenanceHistoryView
           schedules={allSchedules}
@@ -341,7 +341,7 @@ export default function InventoryClient(): JSX.Element {
         />
       )}
 
-      {/* ÔöÇÔöÇ Items Tab ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ */}
+      {/* ── Items Tab ───────────────────────────────────────────────────── */}
       {activeTab === 'items' && (
         <>
       {/* Filtros */}
@@ -373,22 +373,22 @@ export default function InventoryClient(): JSX.Element {
           <option value="damaged">Dañado</option>
           <option value="lost">Perdido</option>
           <option value="depleted">Agotado</option>
-          <option value="low_stock">ÔÜá Stock bajo</option>
+          <option value="low_stock">⚠ Stock bajo</option>
         </select>
         <input
           type="search"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Buscar por nombre, descripción o ubicaciónÔÇª"
+          placeholder="Buscar por nombre, descripción o ubicación…"
           className="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
         />
       </div>
 
       {loading ? (
-        <p className="text-slate-500">Cargando inventarioÔÇª</p>
+        <p className="text-slate-500">Cargando inventario…</p>
       ) : filteredItems.length === 0 ? (
         <div className="bg-white rounded-xl border-2 border-dashed border-slate-200 p-12 text-center">
-          <div className="text-4xl mb-3">­ƒôª</div>
+          <div className="text-4xl mb-3">📦</div>
           <p className="text-slate-600 font-medium mb-1">
             {items.length === 0 ? 'Aún no has registrado items' : 'Sin resultados con los filtros actuales'}
           </p>
@@ -503,7 +503,7 @@ export default function InventoryClient(): JSX.Element {
   );
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────────
 function KPI({ label, value, tone, highlight }: {
   label: string;
   value: string;
