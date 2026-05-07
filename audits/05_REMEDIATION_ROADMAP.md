@@ -80,7 +80,7 @@ Convención:
 |---|--------|--------|:------:|:--------:|
 | 5.1 | Extraer hooks de data-fetching de `*Client.tsx` hacia `src/lib/hooks/` (`useBookingsList`, `useExpensesList`, `useDashboardData`, `useReferenceData`) | A-Crítico | 🟢 | L | ✅ |
 | 5.2 | Romper `InventoryClient.tsx` (90 KB) en sub-componentes + hooks | A-Crítico | 🔴 | L | ✅ (checkpoint 003) |
-| 5.3 | Romper `BookingDetailModal.tsx` (75 KB) en steps/secciones independientes | A-Crítico | 🔴 | L | ⏳ |
+| 5.3 | Romper `BookingDetailModal.tsx` (75 KB) en steps/secciones independientes | A-Crítico | 🔴 | L | ✅ (1551→929 + 7 sub-archivos) |
 | 5.4 | Romper `BookingsClient.tsx`, `AseoClient.tsx`, `ExpensesClient.tsx`, `PropertiesClient.tsx`, `VendorsClient.tsx` (uno por sprint) | A-Crítico | 🔴 | XL | 🟡 BookingsClient ✅ · ExpensesClient ✅ (993→530) |
 | 5.5 | Mover acceso directo a `supabase.from(...)` desde componentes a la capa `services/` (DIP) | A-Crítico | 🟡 | L | ✅ |
 | 5.6 | Aplicar Strategy Pattern a clasificación de gastos / tipos de booking (eliminar switch gigantes) | A-Alto | 🟡 | M |
