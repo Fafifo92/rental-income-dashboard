@@ -1,5 +1,5 @@
 -- ============================================================
--- migration_042_health_check.sql  (v2 — retorna filas)
+-- migration_042_health_check.sql  (v3 — corregido post-mig_043)
 -- ============================================================
 -- HEALTH CHECK COMPLETO de la base de datos tras las
 -- auditorias y migraciones 001-041.
@@ -33,9 +33,9 @@ tables_check AS (
       'profiles','properties','property_groups','property_tags','property_tag_assignments',
       'listings','bookings','bank_accounts','expenses','property_recurring_expenses',
       'recurring_expense_periods','vendors','vendor_properties','shared_bills',
-      'booking_adjustments','booking_cleanings','cleaners','cleaner_groups',
+      'booking_adjustments','booking_cleanings','cleaner_groups',
       'inventory_items','inventory_maintenance_schedules','credit_pools',
-      'credit_pool_consumptions','expense_groups','audit_log'
+      'credit_pool_consumptions','cleaner_group_members','audit_log'
     ]) AS e(tbl)
     LEFT JOIN information_schema.tables t
       ON t.table_schema = 'public' AND t.table_name = e.tbl
@@ -137,18 +137,21 @@ updated_at_check AS (
     END AS detail
   FROM (
     SELECT
-      COUNT(*) FILTER (WHERE trg.trigger_name IS NULL) AS missing,
-      string_agg(e.tbl, ', ') FILTER (WHERE trg.trigger_name IS NULL) AS missing_names
+      COUNT(*) FILTER (WHERE trg.tbl IS NULL) AS missing,
+      string_agg(e.tbl, ', ') FILTER (WHERE trg.tbl IS NULL) AS missing_names
     FROM unnest(ARRAY[
       'properties','listings','bookings','bank_accounts','expenses',
       'property_recurring_expenses','vendors','booking_adjustments'
     ]) AS e(tbl)
     LEFT JOIN (
-      SELECT DISTINCT event_object_table, trigger_name
-      FROM information_schema.triggers
-      WHERE event_object_schema = 'public'
-        AND trigger_name LIKE 'trg_%_updated_at'
-    ) trg ON trg.event_object_table = e.tbl
+      SELECT DISTINCT c.relname AS tbl
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND t.tgname LIKE 'trg_%_updated_at'
+        AND NOT t.tgisinternal
+    ) trg ON trg.tbl = e.tbl
   ) x
 ),
 
@@ -180,11 +183,14 @@ audit_triggers_check AS (
       'properties','expenses','bookings','vendors','inventory_items'
     ]) AS e(tbl)
     LEFT JOIN (
-      SELECT DISTINCT event_object_table, trigger_name
-      FROM information_schema.triggers
-      WHERE event_object_schema = 'public'
-        AND trigger_name LIKE 'trg_audit_%'
-    ) trg ON trg.event_object_table = e.tbl
+      SELECT DISTINCT c.relname AS tbl
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND t.tgname LIKE 'trg_audit_%'
+        AND NOT t.tgisinternal
+    ) trg ON trg.tbl = e.tbl
   ) x
 ),
 
