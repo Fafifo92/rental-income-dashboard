@@ -247,22 +247,15 @@ CREATE POLICY "credit_pools_owner" ON public.credit_pools
 
 -- ──────────────────────────────────────────────────────────
 -- 18. credit_pool_consumptions
+-- NOTA: FK a credit_pools se llama pool_id (no credit_pool_id).
+--       Además la tabla tiene su propio owner_id, así que
+--       filtramos directo (más eficiente que el EXISTS join).
 -- ──────────────────────────────────────────────────────────
 DROP POLICY IF EXISTS "credit_pool_consumptions_owner" ON public.credit_pool_consumptions;
 CREATE POLICY "credit_pool_consumptions_owner" ON public.credit_pool_consumptions
   FOR ALL
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.credit_pools cp
-      WHERE cp.id = credit_pool_consumptions.credit_pool_id AND cp.owner_id = auth.uid()
-    )
-  )
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM public.credit_pools cp
-      WHERE cp.id = credit_pool_consumptions.credit_pool_id AND cp.owner_id = auth.uid()
-    )
-  );
+  USING      (owner_id = auth.uid())
+  WITH CHECK (owner_id = auth.uid());
 
 -- ──────────────────────────────────────────────────────────
 -- 19. property_groups

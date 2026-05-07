@@ -17,15 +17,19 @@
 -- BLOQUE A — bookings
 -- ============================================================
 
--- A1. Lista principal de reservas (orden por start_date DESC + filtros opcionales)
---     src/services/bookings.ts → listBookings() `.order('start_date',…)`
-create index if not exists idx_bookings_owner_start
-  on public.bookings(owner_id, start_date desc);
+-- NOTA: bookings NO tiene columna owner_id propia; el owner se resuelve
+-- vía listing_id → listings → properties.owner_id (RLS join).
+-- Los índices de bookings se construyen sobre listing_id + columna de filtro/orden.
 
--- A2. Queries del dashboard de ingresos (end_date range)
+-- A1. Lista principal de reservas (orden por start_date DESC por anuncio)
+--     src/services/bookings.ts → listBookings() `.order('start_date',…)`
+create index if not exists idx_bookings_listing_start
+  on public.bookings(listing_id, start_date desc);
+
+-- A2. Queries del dashboard de ingresos (end_date range por anuncio)
 --     bookings.ts → getBookingsForDashboard() `.gte('end_date',…)` `.lte('end_date',…)`
-create index if not exists idx_bookings_owner_end
-  on public.bookings(owner_id, end_date desc);
+create index if not exists idx_bookings_listing_end
+  on public.bookings(listing_id, end_date desc);
 
 -- A3. Solapamiento de calendario por anuncio (disponibilidad / overlap check)
 --     bookings.ts → getBookingsByListing(), getOverlappingBookings()
@@ -33,9 +37,9 @@ create index if not exists idx_bookings_owner_end
 create index if not exists idx_bookings_listing_dates
   on public.bookings(listing_id, start_date, end_date);
 
--- A4. Filtro por estado (ej: status = 'confirmed' para panel operativo)
-create index if not exists idx_bookings_owner_status
-  on public.bookings(owner_id, status);
+-- A4. Filtro por estado por anuncio (ej: status = 'confirmed' para panel operativo)
+create index if not exists idx_bookings_listing_status
+  on public.bookings(listing_id, status);
 
 -- ============================================================
 -- BLOQUE B — expenses
