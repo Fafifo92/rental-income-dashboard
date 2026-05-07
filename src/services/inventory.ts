@@ -112,8 +112,12 @@ export const listInventoryItems = async (
   if (filters.status) q = q.eq('status', filters.status);
   if (filters.is_consumable !== undefined && filters.is_consumable !== null) q = q.eq('is_consumable', filters.is_consumable);
   if (filters.search && filters.search.trim()) {
-    const s = filters.search.trim();
-    q = q.or(`name.ilike.%${s}%,description.ilike.%${s}%,location.ilike.%${s}%`);
+    // Escapar caracteres que rompen el filtro PostgREST (.or)
+    // Ref: https://postgrest.org/en/stable/api.html#operators
+    const s = filters.search.trim().replace(/[%,()]/g, ' ').replace(/\s+/g, ' ');
+    if (s) {
+      q = q.or(`name.ilike.%${s}%,description.ilike.%${s}%,location.ilike.%${s}%`);
+    }
   }
   const { data, error } = await q;
   if (error) return { data: null, error: error.message };
