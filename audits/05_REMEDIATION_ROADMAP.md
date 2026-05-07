@@ -89,14 +89,14 @@ Convención:
 
 ## 🗄️ BLOQUE 6 — Mejoras estructurales de DB (mediano plazo)
 
-| # | Acción | Origen | Riesgo | Esfuerzo |
-|---|--------|--------|:------:|:--------:|
-| 6.1 | Backfill `expenses.vendor_id` y deprecar columna `vendor` TEXT | D-001 | 🔴 | M |
-| 6.2 | Triggers `updated_at` consistentes en todas las tablas | D-024 | 🟢 | S |
-| 6.3 | Generar `schema_consolidated.sql` a partir de la DB actual (snapshot canónico) | D-008 | 🟢 | M |
-| 6.4 | Índices parciales útiles (e.g., `WHERE status = 'active'`, `WHERE expense_registered = false`) | D-012 | 🟢 | S |
-| 6.5 | Consolidar `property_recurring_expenses` (legacy) hacia `vendors` + recurrentes nuevos | D-002 | 🔴 | L |
-| 6.6 | Decidir naming consistente (snake_case, plural, prefijos por dominio) y aplicar via migration de rename | D-Bajo | 🟡 | M |
+| # | Acción | Origen | Riesgo | Esfuerzo | Estado |
+|---|--------|--------|:------:|:--------:|:------:|
+| 6.1 | Backfill `expenses.vendor_id` y deprecar columna `vendor` TEXT | D-001 | 🔴 | M | ⏳ |
+| 6.2 | Triggers `updated_at` consistentes en todas las tablas | D-024 | 🟢 | S | ✅ migration_035 |
+| 6.3 | Índices compuestos de performance (bookings, expenses, cleanings, adjustments, maintenance) | D-012 | 🟢 | S | ✅ migration_037 |
+| 6.4 | Generar `schema_consolidated.sql` a partir de la DB actual (snapshot canónico) | D-008 | 🟢 | M | ⏳ |
+| 6.5 | Consolidar `property_recurring_expenses` (legacy) hacia `vendors` + recurrentes nuevos | D-002 | 🔴 | L | ⏳ |
+| 6.6 | Decidir naming consistente (snake_case, plural, prefijos por dominio) y aplicar via migration de rename | D-Bajo | 🟡 | M | ⏳ |
 
 ---
 
