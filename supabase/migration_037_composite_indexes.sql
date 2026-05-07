@@ -105,10 +105,10 @@ create index if not exists idx_maint_owner_status_date
 -- BLOQUE F — recurring_expense_periods
 -- ============================================================
 
--- F1. Períodos recurrentes pendientes por propiedad
---     RecurringPendingPanel → query por property_id + status = 'pending'
+-- F1. Períodos recurrentes pendientes por recurrente
+--     RecurringPendingPanel → query por recurring_id + status
 create index if not exists idx_recurring_periods_prop_status
-  on public.recurring_expense_periods(property_recurring_expense_id, status);
+  on public.recurring_expense_periods(recurring_id, status);
 
 -- ============================================================
 -- VERIFICACIÓN
