@@ -5,6 +5,8 @@ import { getNotificationSettings } from '@/services/notificationSettings';
 import { isSupabaseConfigured } from '@/services/auth';
 import { formatCurrency } from '@/lib/utils';
 import { listBookingAlerts, type BookingAlert } from '@/services/bookings';
+import { getUpcomingAndOverdueSchedules } from '@/services/maintenanceSchedules';
+import type { MaintenanceScheduleRow } from '@/types/database';
 
 const ymLabel = (ym: string): string => {
   const [y, m] = ym.split('-');
@@ -27,6 +29,7 @@ export default function NotificationsBell() {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<PendingRecurring[]>([]);
   const [bookingAlerts, setBookingAlerts] = useState<BookingAlert[]>([]);
+  const [maintAlerts, setMaintAlerts] = useState<MaintenanceScheduleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [enabled, setEnabled] = useState(true);
 
@@ -41,23 +44,35 @@ export default function NotificationsBell() {
         setLoading(false);
         return;
       }
-      const [recurringRes, alertsRes] = await Promise.all([
+      const today = new Date().toISOString().slice(0, 10);
+      const [recurringRes, alertsRes, maintRes] = await Promise.all([
         listPendingRecurringForOwner(6),
         listBookingAlerts(45),
+        getUpcomingAndOverdueSchedules(),
       ]);
       if (cancelled) return;
       if (!recurringRes.error) setPending(recurringRes.data ?? []);
       if (!alertsRes.error) setBookingAlerts(alertsRes.data ?? []);
+      if (!maintRes.error) {
+        // Show overdue + schedules within notify_before_days window
+        const relevant = (maintRes.data ?? []).filter(s => {
+          const daysUntil = (new Date(s.scheduled_date).getTime() - new Date(today).getTime()) / 86_400_000;
+          return daysUntil <= (s.notify_before_days ?? 3);
+        });
+        setMaintAlerts(relevant);
+      }
       setLoading(false);
     };
     refresh();
     const onChange = () => refresh();
     const onFocus = () => refresh();
     window.addEventListener('recurring-period-changed', onChange);
+    window.addEventListener('maintenance-changed', onChange);
     window.addEventListener('focus', onFocus);
     return () => {
       cancelled = true;
       window.removeEventListener('recurring-period-changed', onChange);
+      window.removeEventListener('maintenance-changed', onChange);
       window.removeEventListener('focus', onFocus);
     };
   }, []);
@@ -67,6 +82,9 @@ export default function NotificationsBell() {
   const count = pending.length;
   const overdueCount = pending.filter(p => !p.isCurrentMonth).length;
   const alertCount = bookingAlerts.length;
+  const maintCount = maintAlerts.length;
+  const today = new Date().toISOString().slice(0, 10);
+  const maintOverdueCount = maintAlerts.filter(s => s.scheduled_date <= today).length;
 
   return (
     <div className="relative">
@@ -79,11 +97,11 @@ export default function NotificationsBell() {
         <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0a3 3 0 11-6 0" />
         </svg>
-        {!loading && (count + alertCount) > 0 && (
+        {!loading && (count + alertCount + maintCount) > 0 && (
           <span className={`absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-bold text-white rounded-full ${
-            overdueCount > 0 ? 'bg-rose-600' : 'bg-amber-500'
+            (overdueCount > 0 || maintOverdueCount > 0) ? 'bg-rose-600' : 'bg-amber-500'
           }`}>
-            {(count + alertCount) > 99 ? '99+' : (count + alertCount)}
+            {(count + alertCount + maintCount) > 99 ? '99+' : (count + alertCount + maintCount)}
           </span>
         )}
       </button>
@@ -103,11 +121,12 @@ export default function NotificationsBell() {
                 <div>
                   <p className="text-sm font-bold text-slate-800">Pendientes</p>
                   <p className="text-xs text-slate-500">
-                    {(count + alertCount) === 0
+                    {(count + alertCount + maintCount) === 0
                       ? 'Todo al día ✓'
                       : [
                           count > 0 && `${count} recurrente${count > 1 ? 's' : ''}${overdueCount > 0 ? ` (${overdueCount} atrasado${overdueCount > 1 ? 's' : ''})` : ''}`,
                           alertCount > 0 && `${alertCount} reserva${alertCount > 1 ? 's' : ''} por completar`,
+                          maintCount > 0 && `${maintCount} mantenimiento${maintCount > 1 ? 's' : ''} pendiente${maintCount > 1 ? 's' : ''}`,
                         ].filter(Boolean).join(' · ')}
                   </p>
                 </div>
@@ -119,7 +138,7 @@ export default function NotificationsBell() {
                   <div className="h-4 bg-slate-100 rounded animate-pulse mb-2" />
                   <div className="h-4 bg-slate-100 rounded animate-pulse w-3/4" />
                 </div>
-              ) : (count + alertCount) === 0 ? (
+              ) : (count + alertCount + maintCount) === 0 ? (
                 <div className="px-4 py-6 text-center text-sm text-slate-500">
                   Sin pendientes. ¡Todo al día! 🎉
                 </div>
@@ -158,6 +177,45 @@ export default function NotificationsBell() {
                         {alertCount > 8 && (
                           <li className="px-4 py-2 text-xs text-slate-400 text-center">
                             +{alertCount - 8} más… revisa en /reservas.
+                          </li>
+                        )}
+                      </ul>
+                    </>
+                  )}
+
+                  {/* ── Mantenimientos pendientes ── */}
+                  {maintCount > 0 && (
+                    <>
+                      <div className="px-4 pt-3 pb-1">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Mantenimientos de inventario</p>
+                      </div>
+                      <ul>
+                        {maintAlerts.slice(0, 8).map(s => {
+                          const isOverdue = s.scheduled_date <= today;
+                          return (
+                            <li key={s.id} className="border-b border-slate-50 last:border-0">
+                              <a href="/inventory" className="block px-4 py-2.5 hover:bg-slate-50">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-medium text-slate-800 truncate">🔧 {s.title}</div>
+                                    <div className="text-xs text-slate-500">
+                                      {isOverdue ? 'Vencido' : 'Vence'}: {fmtDate(s.scheduled_date)}
+                                      {s.is_recurring && <span className="ml-1 text-amber-600">· recurrente</span>}
+                                    </div>
+                                  </div>
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${
+                                    isOverdue ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                                  }`}>
+                                    {isOverdue ? 'vencido' : 'próximo'}
+                                  </span>
+                                </div>
+                              </a>
+                            </li>
+                          );
+                        })}
+                        {maintCount > 8 && (
+                          <li className="px-4 py-2 text-xs text-slate-400 text-center">
+                            +{maintCount - 8} más… revisa en inventario.
                           </li>
                         )}
                       </ul>

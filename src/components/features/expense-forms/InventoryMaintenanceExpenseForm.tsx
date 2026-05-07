@@ -174,10 +174,8 @@ export default function InventoryMaintenanceExpenseForm({
       description:      `[Inventario] ${itemName}${scheduleTitlePart}${notes ? ' — ' + notes.trim() : ''}`,
     };
 
-    const saved = await onSave(expenseData);
-    if (saved === false) { setSaving(false); return; }
-
-    // Mark schedule as done with expense_registered=true
+    // Mark schedule as done FIRST — so when onSave resolves and the parent calls
+    // loadMaintenancePanel(), the DB already reflects expense_registered=true.
     if (scheduleId) {
       await completeMaintenanceSchedule(scheduleId, { expenseRegistered: true });
     }
@@ -186,6 +184,9 @@ export default function InventoryMaintenanceExpenseForm({
     if (selectedItem && selectedItem.status !== 'good') {
       await updateInventoryItem(selectedItem.id, { status: 'good' });
     }
+
+    const saved = await onSave(expenseData);
+    if (saved === false) { setSaving(false); return; }
 
     setSaving(false);
   };
@@ -238,7 +239,7 @@ export default function InventoryMaintenanceExpenseForm({
             <select
               value={propertyId ?? ''}
               onChange={e => setPropertyId(e.target.value || null)}
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-amber-400 outline-none"
+              className="w-full px-3 py-2 text-sm text-slate-800 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-amber-400 outline-none"
             >
               <option value="">— Selecciona —</option>
               {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -448,7 +449,7 @@ export default function InventoryMaintenanceExpenseForm({
               <select
                 value={status}
                 onChange={e => setStatus(e.target.value as typeof status)}
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-amber-400 outline-none"
+                className="w-full px-3 py-2 text-sm text-slate-800 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-amber-400 outline-none"
               >
                 <option value="paid">Pagado</option>
                 <option value="pending">Pendiente</option>
@@ -464,7 +465,7 @@ export default function InventoryMaintenanceExpenseForm({
               <select
                 value={bankId ?? ''}
                 onChange={e => setBankId(e.target.value || null)}
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-amber-400 outline-none"
+                className="w-full px-3 py-2 text-sm text-slate-800 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-amber-400 outline-none"
               >
                 <option value="">Sin especificar</option>
                 {bankAccounts.map(b => (
