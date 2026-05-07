@@ -48,6 +48,9 @@ const dispatchRecurringChange = () => {
   }
 };
 
+const isFee  = (e: { id: string }) => e.id.startsWith('fee-');
+const isFine = (e: { id: string }) => e.id.startsWith('fine-');
+
 const DEMO_EXPENSES: Expense[] = [
   { id: '1', property_id: 'demo', category: 'Limpieza', type: 'variable', amount: 150000, date: '2024-03-01', description: 'Limpieza post-huésped', status: 'paid' },
   { id: '2', property_id: 'demo', category: 'Internet', type: 'fixed', amount: 89000, date: '2024-03-05', description: null, status: 'paid' },
@@ -167,6 +170,51 @@ export default function ExpensesClient() {
       .filter(c => !c.exp.id.startsWith('fee-') && c.section === tab && (subFilter ? c.subcategory === subFilter : true))
       .map(c => c.exp);
   }, [tab, subFilter, expenses, classified]);
+
+  const expenseStats = useMemo(() => {
+    const realExpenses    = expenses.filter(e => !isFee(e));
+    const totalFixed      = realExpenses.filter(e => e.type === 'fixed').reduce((s, e) => s + e.amount, 0);
+    const totalVariable   = realExpenses.filter(e => e.type === 'variable').reduce((s, e) => s + e.amount, 0);
+    const pendingExpenses = realExpenses.filter(e => e.status === 'pending' && !isFine(e));
+    const totalPending    = pendingExpenses.reduce((s, e) => s + e.amount, 0);
+    const totalChannelFees = expenses.filter(e => isFee(e)).reduce((s, e) => s + e.amount, 0);
+    const kpis: Array<{ label: string; value: string; color: string; bg: string; sub?: string }> = [
+      { label: 'Gastos Fijos',     value: formatCurrency(totalFixed),    color: 'text-blue-600',   bg: 'bg-blue-50' },
+      {
+        label: 'Gastos Variables',
+        value: formatCurrency(totalVariable),
+        color: 'text-orange-600',
+        bg: 'bg-orange-50',
+        sub: totalChannelFees > 0 ? `Fees de canal: ${formatCurrency(totalChannelFees)} (informativo)` : undefined,
+      },
+      { label: 'Pendiente de Pago', value: formatCurrency(totalPending), color: 'text-red-600', bg: 'bg-red-50' },
+    ];
+    return { pendingExpenses, totalPending, kpis };
+  }, [expenses]);
+
+  const maintenanceStats = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const overdueMaintenance = maintenanceSchedules.filter(s => s.scheduled_date <= today);
+    const upcomingMaintenance = maintenanceSchedules.filter(s => {
+      if (s.scheduled_date <= today) return false;
+      const notifyFrom = new Date(s.scheduled_date);
+      notifyFrom.setDate(notifyFrom.getDate() - s.notify_before_days);
+      return today >= notifyFrom.toISOString().slice(0, 10);
+    });
+    return { today, overdueMaintenance, upcomingMaintenance };
+  }, [maintenanceSchedules]);
+
+  const tabStats = useMemo(() => {
+    const tabCounts = {
+      all:      expenses.length,
+      property: classified.filter(c => !isFee(c.exp) && !isFine(c.exp) && c.section === 'property').length,
+      booking:  classified.filter(c => !isFee(c.exp) && c.section === 'booking').length,
+      others:   classified.filter(c => isFee(c.exp) || (!isFine(c.exp) && c.section === null)).length,
+    };
+    const visibleTotal = visibleExpenses.filter(e => !isFee(e)).reduce((s, e) => s + e.amount, 0);
+    const visibleFees  = visibleExpenses.filter(e =>  isFee(e)).reduce((s, e) => s + e.amount, 0);
+    return { tabCounts, visibleTotal, visibleFees };
+  }, [expenses, classified, visibleExpenses]);
 
   // Auth guard (after all hooks)
   if (authStatus === 'checking') {
@@ -326,39 +374,9 @@ export default function ExpensesClient() {
     toast.success('Gasto eliminado');
   };
 
-  // Fees de canal son informativos — NO cuentan en balance
-  // Fine- items (multas) SÍ son costos reales pero vienen de bookings (ya contados en financial.ts)
-  const realExpenses    = expenses.filter(e => !e.id.startsWith('fee-'));
-  const totalFixed      = realExpenses.filter(e => e.type === 'fixed').reduce((s, e) => s + e.amount, 0);
-  const totalVariable   = realExpenses.filter(e => e.type === 'variable').reduce((s, e) => s + e.amount, 0);
-  // Pending: only real editable expenses (not synthetic auto entries)
-  const pendingExpenses = realExpenses.filter(e => e.status === 'pending' && !e.id.startsWith('fine-'));
-  const totalPending    = pendingExpenses.reduce((s, e) => s + e.amount, 0);
-  const totalChannelFees = expenses.filter(e => e.id.startsWith('fee-')).reduce((s, e) => s + e.amount, 0);
-
-  // Maintenance schedules: overdue = scheduled_date <= today, upcoming = within notify_before_days
-  const today = new Date().toISOString().slice(0, 10);
-  const overdueMaintenance = maintenanceSchedules.filter(s => s.scheduled_date <= today);
-  const upcomingMaintenance = maintenanceSchedules.filter(s => {
-    if (s.scheduled_date <= today) return false;
-    const notifyFrom = new Date(s.scheduled_date);
-    notifyFrom.setDate(notifyFrom.getDate() - s.notify_before_days);
-    return today >= notifyFrom.toISOString().slice(0, 10);
-  });
-
-  // ── Clasificación Fase 16: sección + subcategoría ──
-  // (classified y visibleExpenses ya calculados arriba antes del auth guard)
-
-  // Detecta fees de canal (fee-) y multas (fine-). Fees → "Otros", fines → "Sobre reservas"
-  const isFee  = (e: Expense) => e.id.startsWith('fee-');
-  const isFine = (e: Expense) => e.id.startsWith('fine-');
-
-  const tabCounts = {
-    all:      expenses.length,
-    property: classified.filter(c => !isFee(c.exp) && !isFine(c.exp) && c.section === 'property').length,
-    booking:  classified.filter(c => !isFee(c.exp) && c.section === 'booking').length,
-    others:   classified.filter(c => isFee(c.exp) || (!isFine(c.exp) && c.section === null)).length,
-  };
+  const { pendingExpenses, totalPending, kpis } = expenseStats;
+  const { today, overdueMaintenance, upcomingMaintenance } = maintenanceStats;
+  const { tabCounts, visibleTotal, visibleFees } = tabStats;
 
   const subCountsBySection = (sec: ExpenseSection) => {
     const counts: Partial<Record<ExpenseSubcategory, number>> = {};
@@ -368,22 +386,6 @@ export default function ExpensesClient() {
     }
     return counts;
   };
-
-  // visibleTotal excluye fees (informativo). Fines sí son costos reales.
-  const visibleTotal = visibleExpenses.filter(e => !isFee(e)).reduce((s, e) => s + e.amount, 0);
-  const visibleFees  = visibleExpenses.filter(e =>  isFee(e)).reduce((s, e) => s + e.amount, 0);
-
-  const kpis: Array<{ label: string; value: string; color: string; bg: string; sub?: string }> = [
-    { label: 'Gastos Fijos',     value: formatCurrency(totalFixed),    color: 'text-blue-600',   bg: 'bg-blue-50' },
-    {
-      label: 'Gastos Variables',
-      value: formatCurrency(totalVariable),
-      color: 'text-orange-600',
-      bg: 'bg-orange-50',
-      sub: totalChannelFees > 0 ? `Fees de canal: ${formatCurrency(totalChannelFees)} (informativo)` : undefined,
-    },
-    { label: 'Pendiente de Pago', value: formatCurrency(totalPending), color: 'text-red-600',    bg: 'bg-red-50' },
-  ];
 
   return (
     <>

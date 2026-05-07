@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import DashboardSummary, { KPISkeleton } from './DashboardSummary';
 import RevenueChart from './RevenueChart';
@@ -124,12 +124,12 @@ export default function DashboardClient() {
     listBankAccounts().then(res => { if (!res.error) setAllBankAccounts((res.data ?? []).filter(a => a.is_active)); });
   }, [authStatus]);
 
-  const handleCalendarBookingClick = async (bookingId: string) => {
+  const handleCalendarBookingClick = useCallback(async (bookingId: string) => {
     setCalendarDetailLoading(true);
     const res = await getBooking(bookingId);
     setCalendarDetailLoading(false);
     if (!res.error && res.data) setCalendarDetailBooking(res.data);
-  };
+  }, []);
 
   useEffect(() => {
     if (authStatus === 'checking') return;
@@ -158,6 +158,11 @@ export default function DashboardClient() {
 
     return () => { cancelled = true; };
   }, [period, authStatus, propertyIds, customRange]);
+
+  const { from: chartFrom, to: chartTo } = useMemo(
+    () => resolvePeriodRange(period, customRange),
+    [period, customRange],
+  );
 
   if (authStatus === 'checking') {
     return (
@@ -233,12 +238,9 @@ export default function DashboardClient() {
                 </div>
               </div>
             )}
-            {(() => {
-              const { from, to } = resolvePeriodRange(period, customRange);
-              return (
-                <OccupancyGrid
-                  from={from}
-                  to={to}
+            <OccupancyGrid
+                  from={chartFrom}
+                  to={chartTo}
                   propertyIds={propertyIds}
                   totalNights={kpis?.totalNights ?? 0}
                   availableNights={kpis?.availableNights ?? 0}
@@ -246,8 +248,6 @@ export default function DashboardClient() {
                   breakEvenOccupancy={kpis?.breakEvenOccupancy ?? 0}
                   onBookingClick={handleCalendarBookingClick}
                 />
-              );
-            })()}
           </div>
         ) : (
           <>
@@ -299,18 +299,13 @@ export default function DashboardClient() {
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6 min-w-0">
             <RevenueChart data={monthlyPnL} />
-            {(() => {
-              const { from, to } = resolvePeriodRange(period, customRange);
-              return (
-                <OccupancyByProperty
+            <OccupancyByProperty
                   granularity={granularity}
-                  from={from}
-                  to={to}
+                  from={chartFrom}
+                  to={chartTo}
                   propertyIds={propertyIds}
                   breakEvenOccupancy={kpis?.breakEvenOccupancy ?? 0}
                 />
-              );
-            })()}
           </div>
 
           <motion.aside

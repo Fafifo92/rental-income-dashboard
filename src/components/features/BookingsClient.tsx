@@ -728,6 +728,43 @@ export default function BookingsClient() {
     });
   }, [bookings, statusFilter]);
 
+  const { kpis, incompleteCount } = useMemo(() => {
+    const completed = enrichedBookings.filter(b => !b.status.toLowerCase().includes('cancel'));
+    const totalRevenue = completed.reduce((s, b) => s + b.total_revenue, 0);
+    const totalNights  = completed.reduce((s, b) => s + b.num_nights, 0);
+    const payoutEligible = enrichedBookings.filter(b => {
+      const isCancelled = b.status.toLowerCase().includes('cancel');
+      return !isCancelled || b.total_revenue > 0;
+    });
+    const confirmed = payoutEligible.filter(b => b.payout_bank_account_id);
+    const receivedPayout = confirmed.reduce((s, b) => s + (b.net_payout ?? b.total_revenue), 0);
+    const expectedPayout = payoutEligible.filter(b => !b.payout_bank_account_id).reduce((s, b) => s + b.total_revenue, 0);
+    const cancelledFinesTotal = enrichedBookings
+      .filter(b => b.status.toLowerCase().includes('cancel') && b.total_revenue < 0)
+      .reduce((s, b) => s + Math.abs(b.total_revenue), 0);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const incompleteCount = completed.filter(
+      b => !b.payout_bank_account_id && b.end_date && new Date(b.end_date) < today,
+    ).length;
+    const kpis = [
+      { label: 'Total Reservas', value: enrichedBookings.length.toString(), color: 'text-blue-600', bg: 'bg-blue-50', sub: null },
+      {
+        label: 'Payout confirmado',
+        value: formatCurrency(receivedPayout),
+        color: 'text-green-700',
+        bg: 'bg-green-50',
+        sub: expectedPayout > 0
+          ? `Por cobrar: ${formatCurrency(expectedPayout)}`
+          : cancelledFinesTotal > 0
+            ? `Multas: −${formatCurrency(cancelledFinesTotal)}`
+            : null,
+      },
+      { label: 'Noches Totales', value: totalNights.toString(), color: 'text-purple-600', bg: 'bg-purple-50', sub: null },
+      { label: 'ADR (Tarifa Diaria)', value: totalNights > 0 ? formatCurrency(totalRevenue / totalNights) : '—', color: 'text-orange-600', bg: 'bg-orange-50', sub: null },
+    ];
+    return { kpis, incompleteCount };
+  }, [enrichedBookings]);
+
   // ── EARLY RETURNS (after all hooks) ──────────────────────────────────────
   if (authStatus === 'checking') {
     return (
@@ -737,45 +774,6 @@ export default function BookingsClient() {
       </div>
     );
   }
-
-  const completed    = enrichedBookings.filter(b => !b.status.toLowerCase().includes('cancel'));
-  const totalRevenue = completed.reduce((s, b) => s + b.total_revenue, 0);
-  const totalNights  = completed.reduce((s, b) => s + b.num_nights, 0);
-
-  // Payout eligible: reservas completadas + canceladas con ingreso positivo (tarifa de cancelación cobrada)
-  const payoutEligible = enrichedBookings.filter(b => {
-    const isCancelled = b.status.toLowerCase().includes('cancel');
-    return !isCancelled || b.total_revenue > 0;
-  });
-  // Ingresos confirmados: reservas con banco de payout asignado
-  const confirmed = payoutEligible.filter(b => b.payout_bank_account_id);
-  const receivedPayout = confirmed.reduce((s, b) => s + (b.net_payout ?? b.total_revenue), 0);
-  // Ingresos por cobrar: sin banco asignado aún
-  const expectedPayout = payoutEligible.filter(b => !b.payout_bank_account_id).reduce((s, b) => s + b.total_revenue, 0);
-  // Multas por cancelación (ingresos negativos en canceladas)
-  const cancelledFinesTotal = enrichedBookings
-    .filter(b => b.status.toLowerCase().includes('cancel') && b.total_revenue < 0)
-    .reduce((s, b) => s + Math.abs(b.total_revenue), 0);
-  // Reservas pasadas sin payout confirmado (datos incompletos)
-  const today = new Date(); today.setHours(0,0,0,0);
-  const incompleteCount = completed.filter(b => !b.payout_bank_account_id && b.end_date && new Date(b.end_date) < today).length;
-
-  const kpis = [
-    { label: 'Total Reservas', value: enrichedBookings.length.toString(), color: 'text-blue-600', bg: 'bg-blue-50', sub: null },
-    {
-      label: 'Payout confirmado',
-      value: formatCurrency(receivedPayout),
-      color: 'text-green-700',
-      bg: 'bg-green-50',
-      sub: expectedPayout > 0
-        ? `Por cobrar: ${formatCurrency(expectedPayout)}`
-        : cancelledFinesTotal > 0
-          ? `Multas: −${formatCurrency(cancelledFinesTotal)}`
-          : null,
-    },
-    { label: 'Noches Totales', value: totalNights.toString(), color: 'text-purple-600', bg: 'bg-purple-50', sub: null },
-    { label: 'ADR (Tarifa Diaria)', value: totalNights > 0 ? formatCurrency(totalRevenue / totalNights) : '—', color: 'text-orange-600', bg: 'bg-orange-50', sub: null },
-  ];
 
   // ── RENDER ────────────────────────────────────────────────────────────────
   return (
