@@ -55,6 +55,10 @@ export default function InventoryMaintenanceExpenseForm({
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [itemId, setItemId] = useState<string | null>(linkedSchedule?.item_id ?? null);
   const [scheduleId, setScheduleId] = useState<string | null>(linkedSchedule?.id ?? null);
+  // 'scheduled' = linked to a programmed maintenance, 'spontaneous' = preventive/unscheduled
+  const [maintType, setMaintType] = useState<'scheduled' | 'spontaneous'>(
+    linkedSchedule ? 'scheduled' : 'scheduled',
+  );
 
   // ── Data ────────────────────────────────────────────────────────────────────
   const [categories, setCategories] = useState<InventoryCategoryRow[]>([]);
@@ -104,12 +108,25 @@ export default function InventoryMaintenanceExpenseForm({
     }
   }, [linkedSchedule, allItems]);
 
-  // Auto-link schedule when item is selected
+  // Auto-link to CLOSEST (earliest date) schedule when item is selected and type is 'scheduled'
   useEffect(() => {
-    if (!itemId || linkedSchedule) return;
-    const sched = pendingSchedules.find(s => s.item_id === itemId);
-    setScheduleId(sched?.id ?? null);
-  }, [itemId, pendingSchedules, linkedSchedule]);
+    if (!itemId || linkedSchedule || maintType !== 'scheduled') return;
+    const closest = [...pendingSchedules]
+      .filter(s => s.item_id === itemId)
+      .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date))[0];
+    setScheduleId(closest?.id ?? null);
+  }, [itemId, pendingSchedules, linkedSchedule, maintType]);
+
+  // Clear schedule link when switching to spontaneous
+  useEffect(() => {
+    if (maintType === 'spontaneous') setScheduleId(null);
+    else if (itemId && !linkedSchedule) {
+      const closest = [...pendingSchedules]
+        .filter(s => s.item_id === itemId)
+        .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date))[0];
+      setScheduleId(closest?.id ?? null);
+    }
+  }, [maintType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived ─────────────────────────────────────────────────────────────────
 
@@ -138,8 +155,16 @@ export default function InventoryMaintenanceExpenseForm({
     [allItems, itemId],
   );
 
+  const closestScheduleForItem = useMemo(
+    () =>
+      [...pendingSchedules]
+        .filter(s => s.item_id === itemId)
+        .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date))[0] ?? null,
+    [pendingSchedules, itemId],
+  );
+
   const linkedScheduleData = useMemo(
-    () => linkedSchedule ?? pendingSchedules.find(s => s.id === scheduleId) ?? null,
+    () => linkedSchedule ?? (scheduleId ? pendingSchedules.find(s => s.id === scheduleId) ?? null : null),
     [linkedSchedule, pendingSchedules, scheduleId],
   );
 
@@ -155,8 +180,13 @@ export default function InventoryMaintenanceExpenseForm({
     setSaving(true);
     setErr(null);
 
+    // Resolve which schedule to mark as done
+    const resolvedScheduleId = linkedSchedule?.id ?? (maintType === 'scheduled' ? (scheduleId ?? closestScheduleForItem?.id ?? null) : null);
+    const resolvedScheduleData = linkedScheduleData ?? closestScheduleForItem;
+
     const itemName = selectedItem?.name ?? 'Item';
-    const scheduleTitlePart = linkedScheduleData ? ` — ${linkedScheduleData.title}` : '';
+    const typeLabel = maintType === 'spontaneous' ? ' [preventivo]' : '';
+    const scheduleTitlePart = resolvedScheduleData ? ` — ${resolvedScheduleData.title}` : '';
 
     const expenseData: FormData = {
       category:         SUBCATEGORY_TO_CATEGORY['maintenance'],
@@ -171,13 +201,13 @@ export default function InventoryMaintenanceExpenseForm({
       person_in_charge: null,
       booking_id:       null,
       adjustment_id:    null,
-      description:      `[Inventario] ${itemName}${scheduleTitlePart}${notes ? ' — ' + notes.trim() : ''}`,
+      description:      `[Inventario] ${itemName}${scheduleTitlePart}${typeLabel}${notes ? ' — ' + notes.trim() : ''}`,
     };
 
     // Mark schedule as done FIRST — so when onSave resolves and the parent calls
     // loadMaintenancePanel(), the DB already reflects expense_registered=true.
-    if (scheduleId) {
-      await completeMaintenanceSchedule(scheduleId, { expenseRegistered: true });
+    if (resolvedScheduleId) {
+      await completeMaintenanceSchedule(resolvedScheduleId, { expenseRegistered: true });
     }
 
     // Restore item status to 'good' if it's not already
@@ -371,6 +401,46 @@ export default function InventoryMaintenanceExpenseForm({
             )}
           </AnimatePresence>
 
+          {/* ── Tipo de mantenimiento ─────────────────────────────────────── */}
+          <AnimatePresence>
+            {itemId && !linkedSchedule && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                  Tipo de mantenimiento
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMaintType('scheduled')}
+                    className={`flex-1 text-xs px-3 py-2 rounded-lg border transition ${
+                      maintType === 'scheduled'
+                        ? 'bg-amber-500 text-white border-amber-500 font-semibold'
+                        : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    📅 Sobre uno programado
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMaintType('spontaneous')}
+                    className={`flex-1 text-xs px-3 py-2 rounded-lg border transition ${
+                      maintType === 'spontaneous'
+                        ? 'bg-slate-700 text-white border-slate-700 font-semibold'
+                        : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    ⚡ Espontáneo / preventivo
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* ── Schedule vinculado ────────────────────────────────────────── */}
           <AnimatePresence>
             {itemId && (
@@ -380,45 +450,54 @@ export default function InventoryMaintenanceExpenseForm({
                 exit={{ opacity: 0, height: 0 }}
                 className="overflow-hidden"
               >
-                {linkedScheduleData ? (
+                {linkedSchedule ? (
+                  // Pre-linked from outside (e.g., "done needs expense" panel)
                   <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 flex items-start gap-2">
                     <CheckCircle2 className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-amber-900">
-                        Mantenimiento vinculado: {linkedScheduleData.title}
+                        Mantenimiento vinculado: {linkedSchedule.title}
                       </p>
                       <p className="text-[11px] text-amber-700 mt-0.5">
-                        Fecha programada: {linkedScheduleData.scheduled_date}
-                        {linkedScheduleData.is_recurring && linkedScheduleData.recurrence_days && (
-                          <span className="ml-2 text-amber-600">
-                            · 🔁 Recurrente cada {linkedScheduleData.recurrence_days} días
-                          </span>
+                        Fecha programada: {linkedSchedule.scheduled_date}
+                        {linkedSchedule.is_recurring && linkedSchedule.recurrence_days && (
+                          <span className="ml-2">· 🔁 Recurrente cada {linkedSchedule.recurrence_days} días</span>
                         )}
                       </p>
                       <p className="text-[11px] text-amber-600 mt-0.5">
-                        Al guardar: se marcará como realizado{linkedScheduleData.is_recurring ? ' y se agendará el siguiente' : ''}.
+                        Al guardar se marcará como realizado{linkedSchedule.is_recurring ? ' y se agendará el siguiente' : ''}.
                       </p>
                     </div>
                   </div>
+                ) : maintType === 'scheduled' ? (
+                  // Show only the closest scheduled maintenance for this item
+                  closestScheduleForItem ? (
+                    <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 flex items-start gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold text-amber-900">
+                          Próximo mantenimiento: {closestScheduleForItem.title}
+                        </p>
+                        <p className="text-[11px] text-amber-700 mt-0.5">
+                          Fecha programada: {closestScheduleForItem.scheduled_date}
+                          {closestScheduleForItem.is_recurring && closestScheduleForItem.recurrence_days && (
+                            <span className="ml-2">· 🔁 Recurrente cada {closestScheduleForItem.recurrence_days} días</span>
+                          )}
+                        </p>
+                        <p className="text-[11px] text-amber-600 mt-0.5">
+                          Al guardar se marcará como realizado{closestScheduleForItem.is_recurring ? ' y se agendará el siguiente' : ''}.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                      No hay mantenimientos programados para este item. El gasto se registrará sin vincular.
+                    </p>
+                  )
                 ) : (
-                  <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 flex items-center gap-2">
-                    <span className="text-slate-400 text-xs">
-                      No hay mantenimiento programado para este item. Se registrará el gasto sin vincular.
-                    </span>
-                    {pendingSchedules.length > 0 && (
-                      <select
-                        value={scheduleId ?? ''}
-                        onChange={e => setScheduleId(e.target.value || null)}
-                        className="flex-1 px-2 py-1 text-xs border border-slate-200 rounded bg-white"
-                      >
-                        <option value="">Sin vincular</option>
-                        {pendingSchedules
-                          .filter(s => s.item_id === itemId)
-                          .map(s => (
-                            <option key={s.id} value={s.id}>{s.title} · {s.scheduled_date}</option>
-                          ))}
-                      </select>
-                    )}
+                  // Spontaneous / preventive
+                  <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-xs text-slate-600">
+                    ⚡ <span className="font-semibold">Mantenimiento espontáneo / preventivo</span> — se registrará el gasto sin vincular a un agendamiento programado.
                   </div>
                 )}
               </motion.div>

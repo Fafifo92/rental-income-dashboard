@@ -129,10 +129,16 @@ export default function InventoryClient(): JSX.Element {
   // item_id → count of pending maintenance schedules
   const pendingMaintMap = useMemo(() => {
     const m = new Map<string, MaintenanceScheduleRow[]>();
+    const now = new Date();
     for (const s of schedules) {
       if (s.status === 'pending') {
-        if (!m.has(s.item_id)) m.set(s.item_id, []);
-        m.get(s.item_id)!.push(s);
+        // Only show badge for overdue or within the notify_before_days window
+        const schedDate = new Date(s.scheduled_date + 'T12:00:00');
+        const daysUntil = (schedDate.getTime() - now.getTime()) / 86_400_000;
+        if (daysUntil <= (s.notify_before_days ?? 3)) {
+          if (!m.has(s.item_id)) m.set(s.item_id, []);
+          m.get(s.item_id)!.push(s);
+        }
       }
     }
     return m;
