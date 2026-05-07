@@ -81,7 +81,7 @@ Convención:
 | 5.1 | Extraer hooks de data-fetching de `*Client.tsx` hacia `src/lib/hooks/` (`useBookingsList`, `useExpensesList`, `useDashboardData`, `useReferenceData`) | A-Crítico | 🟢 | L | ✅ |
 | 5.2 | Romper `InventoryClient.tsx` (90 KB) en sub-componentes + hooks | A-Crítico | 🔴 | L | ✅ (checkpoint 003) |
 | 5.3 | Romper `BookingDetailModal.tsx` (75 KB) en steps/secciones independientes | A-Crítico | 🔴 | L | ✅ (1551→929 + 7 sub-archivos) |
-| 5.4 | Romper `BookingsClient.tsx`, `AseoClient.tsx`, `ExpensesClient.tsx`, `PropertiesClient.tsx`, `VendorsClient.tsx` (uno por sprint) | A-Crítico | 🔴 | XL | 🟡 BookingsClient ✅ · ExpensesClient ✅ (993→530) · faltan AseoClient (1197), PropertiesClient (1113), VendorsClient (869) |
+| 5.4 | Romper `BookingsClient.tsx`, `AseoClient.tsx`, `ExpensesClient.tsx`, `PropertiesClient.tsx`, `VendorsClient.tsx` (uno por sprint) | A-Crítico | 🔴 | XL | ✅ BookingsClient · ExpensesClient (993→530) · AseoClient (1197→481) · PropertiesClient (1113→296) · VendorsClient (869→409) |
 | 5.5 | Mover acceso directo a `supabase.from(...)` desde componentes a la capa `services/` (DIP) | A-Crítico | 🟡 | L | ✅ |
 | 5.6 | Aplicar Strategy Pattern a clasificación de gastos / tipos de booking (eliminar switch gigantes) | A-Alto | 🟡 | M | ✅ `expenseClassifyRules.ts` + refactor de `expenseClassify.ts` |
 
@@ -94,7 +94,7 @@ Convención:
 | 6.1 | Backfill `expenses.vendor_id` y deprecar columna `vendor` TEXT | D-001 | 🔴 | M | ⏳ |
 | 6.2 | Triggers `updated_at` consistentes en todas las tablas | D-024 | 🟢 | S | ✅ migration_035 |
 | 6.3 | Índices compuestos de performance (bookings, expenses, cleanings, adjustments, maintenance) | D-012 | 🟢 | S | ✅ migration_037 |
-| 6.4 | Generar `schema_consolidated.sql` a partir de la DB actual (snapshot canónico) | D-008 | 🟢 | M | ⏳ |
+| 6.4 | Generar `schema_consolidated.sql` a partir de la DB actual (snapshot canónico) | D-008 | 🟢 | M | ✅ `supabase/schema_consolidated.sql` — 26 tablas, 100% RLS |
 | 6.5 | Consolidar `property_recurring_expenses` (legacy) hacia `vendors` + recurrentes nuevos | D-002 | 🔴 | L | ⏳ |
 | 6.6 | Decidir naming consistente (snake_case, plural, prefijos por dominio) y aplicar via migration de rename | D-Bajo | 🟡 | M | ⏳ |
 
@@ -106,7 +106,7 @@ Convención:
 |---|--------|--------|:------:|:--------:|:------:|
 | 7.1 | Auditoría exhaustiva RLS + funciones `SECURITY DEFINER` filtran por owner | S-Medio | 🟡 | M | ✅ `audits/06_RLS_AUDIT.md` + `migration_038_rls_hardening.sql` |
 | 7.2 | Auditar Edge Functions (CORS, auth, rate limit) | S-Medio | 🟡 | M | 🟢 N/A — no hay Edge Functions custom en `supabase/functions/`. Re-evaluar si se introducen |
-| 7.3 | Implementar logging de auditoría centralizado (tabla `audit_log`) | S-Bajo | 🟡 | L | ⏳ |
+| 7.3 | Implementar logging de auditoría centralizado (tabla `audit_log`) | S-Bajo | 🟡 | L | ✅ `migration_039_audit_log.sql` — trigger genérico en 5 tablas críticas |
 | 7.4 | Política de rotación de claves Supabase y secretos | S-Info | 🟢 | S | ⏳ |
 
 ---
