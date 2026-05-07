@@ -177,8 +177,8 @@ audit_triggers_check AS (
     END AS detail
   FROM (
     SELECT
-      COUNT(*) FILTER (WHERE trg.trigger_name IS NULL) AS missing,
-      string_agg(e.tbl, ', ') FILTER (WHERE trg.trigger_name IS NULL) AS missing_names
+      COUNT(*) FILTER (WHERE trg.tbl IS NULL) AS missing,
+      string_agg(e.tbl, ', ') FILTER (WHERE trg.tbl IS NULL) AS missing_names
     FROM unnest(ARRAY[
       'properties','expenses','bookings','vendors','inventory_items'
     ]) AS e(tbl)
