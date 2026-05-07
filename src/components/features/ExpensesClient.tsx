@@ -1,10 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ExpensesList from './ExpensesList';
-import ExpenseModal from './ExpenseModal';
 import DamageExpenseEditModal from './DamageExpenseEditModal';
 import ExpenseDetailModal from './ExpenseDetailModal';
-import BookingDetailModal from './BookingDetailModal';
 import FilterBar from './FilterBar';
 import ExpenseTypeChooser, { type ExpenseTypeChoice } from './ExpenseTypeChooser';
 import DamageFromExpensesFlow from './DamageFromExpensesFlow';
@@ -13,6 +11,9 @@ import CleaningSuppliesForm from './expense-forms/CleaningSuppliesForm';
 import VendorExpenseForm from './expense-forms/VendorExpenseForm';
 import InventoryMaintenanceExpenseForm from './expense-forms/InventoryMaintenanceExpenseForm';
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
+
+const ExpenseModal = lazy(() => import('./ExpenseModal'));
+const BookingDetailModal = lazy(() => import('./BookingDetailModal'));
 import RecurringPendingPanel from './RecurringPendingPanel';
 import SharedBillsPendingPanel from './SharedBillsPendingPanel';
 import { toast } from '@/lib/toast';
@@ -873,7 +874,8 @@ export default function ExpensesClient() {
             onDiscard={editing.adjustment_id ? () => handleDiscardWithAdjustment(editing) : undefined}
           />
         ) : showModal && (
-          <ExpenseModal
+          <Suspense fallback={null}>
+            <ExpenseModal
             properties={properties}
             bankAccounts={bankAccounts}
             initial={editing ? {
@@ -917,6 +919,7 @@ export default function ExpensesClient() {
             onDiscardLinked={editing?.adjustment_id ? () => handleDiscardWithAdjustment(editing) : undefined}
             maintenancePrefillInfo={!editing ? maintPrefillInfo : null}
           />
+          </Suspense>
         )}
 
         {viewing && (
@@ -931,7 +934,8 @@ export default function ExpensesClient() {
         )}
 
         {viewingBooking && (
-          <BookingDetailModal
+          <Suspense fallback={null}>
+            <BookingDetailModal
             booking={{
               id: viewingBooking.id,
               confirmation_code: viewingBooking.confirmation_code,
@@ -957,6 +961,7 @@ export default function ExpensesClient() {
               return listings.find(l => l.id === lid)?.property_id ?? null;
             }}
           />
+          </Suspense>
         )}
 
         {deleteTarget && (

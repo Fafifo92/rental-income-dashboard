@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table';
 import {
@@ -19,7 +19,6 @@ import DataTable from './DataTable';
 import CSVUploader from './CSVUploader';
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
 import BookingPayoutModal from './BookingPayoutModal';
-import BookingDetailModal from './BookingDetailModal';
 import ConfirmDeleteChallenge from './ConfirmDeleteChallenge';
 import MoneyInput from '@/components/MoneyInput';
 import { parseMoney } from '@/lib/money';
@@ -27,6 +26,8 @@ import { getBookingStatus, statusUI, inferOperationalFlags, type DerivedBookingS
 import { todayISO as todayISOFromUtils } from '@/lib/dateUtils';
 import { toast } from '@/lib/toast';
 import { CalendarCheck, Pencil, HandCoins, Trash2 } from 'lucide-react';
+
+const BookingDetailModal = lazy(() => import('./BookingDetailModal'));
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1175,20 +1176,22 @@ export default function BookingsClient() {
       </AnimatePresence>
 
       {/* ── Detail Modal ─────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {detailTarget && (
-          <BookingDetailModal
-            booking={detailTarget}
-            properties={properties}
-            bankAccounts={bankAccounts}
-            onClose={() => setDetailTarget(null)}
-            resolvePropertyId={(lid) => {
-              if (!lid) return null;
-              return listings.find(l => l.id === lid)?.property_id ?? null;
-            }}
-          />
-        )}
-      </AnimatePresence>
+      <Suspense fallback={null}>
+        <AnimatePresence>
+          {detailTarget && (
+            <BookingDetailModal
+              booking={detailTarget}
+              properties={properties}
+              bankAccounts={bankAccounts}
+              onClose={() => setDetailTarget(null)}
+              resolvePropertyId={(lid) => {
+                if (!lid) return null;
+                return listings.find(l => l.id === lid)?.property_id ?? null;
+              }}
+            />
+          )}
+        </AnimatePresence>
+      </Suspense>
 
       {/* ── Delete confirmation (reto BORRAR) ──────────────────────────── */}
       <AnimatePresence>

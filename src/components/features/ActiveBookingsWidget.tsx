@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { Eye } from 'lucide-react';
 import { listBookings, type BookingWithListingRow } from '@/services/bookings';
@@ -6,8 +6,9 @@ import { listProperties } from '@/services/properties';
 import { listBankAccounts } from '@/services/bankAccounts';
 import { getBookingStatus, statusUI } from '@/lib/bookingStatus';
 import { formatCurrency } from '@/lib/utils';
-import BookingDetailModal from './BookingDetailModal';
 import type { PropertyRow, BankAccountRow } from '@/types/database';
+
+const BookingDetailModal = lazy(() => import('./BookingDetailModal'));
 
 interface ActiveBooking {
   id: string;
@@ -229,12 +230,14 @@ export default function ActiveBookingsWidget({ propertyIds }: Props) {
         </div>
       </div>
       {detailTarget && (
-        <BookingDetailModal
-          booking={detailTarget}
-          properties={properties}
-          bankAccounts={bankAccounts}
-          onClose={() => setDetailTarget(null)}
-        />
+        <Suspense fallback={null}>
+          <BookingDetailModal
+            booking={detailTarget}
+            properties={properties}
+            bankAccounts={bankAccounts}
+            onClose={() => setDetailTarget(null)}
+          />
+        </Suspense>
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import DashboardSummary, { KPISkeleton } from './DashboardSummary';
 import RevenueChart from './RevenueChart';
@@ -10,7 +10,7 @@ import ExportMenu from './ExportMenu';
 import AlertsPanel from './AlertsPanel';
 import IncomeExpenseTab from './IncomeExpenseTab';
 import ActiveBookingsWidget from './ActiveBookingsWidget';
-import BookingDetailModal from './BookingDetailModal';
+const BookingDetailModal = lazy(() => import('./BookingDetailModal'));
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
 import { computeFinancials, resolvePeriodRange, type Period, type FinancialKPIs, type MonthlyPnL, type PayoutBreakdown } from '@/services/financial';
 import { listTransactions, type FinancialTransaction } from '@/services/transactions';
@@ -457,16 +457,18 @@ export default function DashboardClient() {
       </AnimatePresence>
 
       {calendarDetailBooking && (
-        <BookingDetailModal
-          booking={{
-            ...calendarDetailBooking,
-            listing_id: calendarDetailBooking.listing_id,
-            property_id: calendarDetailBooking.listings?.property_id ?? null,
-          }}
-          properties={allProperties}
-          bankAccounts={allBankAccounts}
-          onClose={() => setCalendarDetailBooking(null)}
-        />
+        <Suspense fallback={null}>
+          <BookingDetailModal
+            booking={{
+              ...calendarDetailBooking,
+              listing_id: calendarDetailBooking.listing_id,
+              property_id: calendarDetailBooking.listings?.property_id ?? null,
+            }}
+            properties={allProperties}
+            bankAccounts={allBankAccounts}
+            onClose={() => setCalendarDetailBooking(null)}
+          />
+        </Suspense>
       )}
     </>
   );
