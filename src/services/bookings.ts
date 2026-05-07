@@ -23,6 +23,10 @@ export interface BookingFilters {
   dateFrom?: string;
   dateTo?: string;
   search?: string;
+  /** 1-indexed page number for server-side pagination. Requires `pageSize`. */
+  page?: number;
+  /** Rows per page for server-side pagination. Requires `page`. */
+  pageSize?: number;
 }
 
 export interface BookingKPIs {
@@ -206,18 +210,24 @@ export const listBookings = async (
   if (filters?.dateFrom) query = query.gte('start_date', filters.dateFrom);
   if (filters?.dateTo) query = query.lte('start_date', filters.dateTo);
 
+  // Search: server-side ilike (avoids fetching all rows for JS filter)
+  if (filters?.search) {
+    const q = `%${filters.search}%`;
+    query = query.or(`guest_name.ilike.${q},confirmation_code.ilike.${q}`);
+  }
+
+  // Pagination: use range when requested, otherwise safety cap at 1 000 rows
+  if (filters?.page && filters?.pageSize) {
+    const from = (filters.page - 1) * filters.pageSize;
+    query = query.range(from, from + filters.pageSize - 1);
+  } else {
+    query = query.limit(1000);
+  }
+
   const { data, error } = await query;
   if (error) return { data: null, error: error.message };
 
-  let rows = (data ?? []) as unknown as BookingWithListingRow[];
-  if (filters?.search) {
-    const q = filters.search.toLowerCase();
-    rows = rows.filter(
-      b =>
-        b.guest_name?.toLowerCase().includes(q) ||
-        b.confirmation_code.toLowerCase().includes(q),
-    );
-  }
+  const rows = (data ?? []) as unknown as BookingWithListingRow[];
 
   return { data: rows, error: null };
 };
