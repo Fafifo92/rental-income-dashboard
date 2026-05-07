@@ -9,6 +9,7 @@ import { formatCurrency } from '@/lib/utils';
 import type { PropertyRow, BankAccountRow } from '@/types/database';
 
 const BookingDetailModal = lazy(() => import('./BookingDetailModal'));
+const BookingPayoutModal = lazy(() => import('./BookingPayoutModal'));
 
 interface ActiveBooking {
   id: string;
@@ -80,6 +81,7 @@ export default function ActiveBookingsWidget({ propertyIds }: Props) {
   const [bookings, setBookings] = useState<ActiveBooking[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailTarget, setDetailTarget] = useState<ActiveBooking | null>(null);
+  const [payoutTarget, setPayoutTarget] = useState<ActiveBooking | null>(null);
   const [properties, setProperties] = useState<PropertyRow[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccountRow[]>([]);
 
@@ -236,6 +238,26 @@ export default function ActiveBookingsWidget({ propertyIds }: Props) {
             properties={properties}
             bankAccounts={bankAccounts}
             onClose={() => setDetailTarget(null)}
+            onPayout={() => {
+              const target = detailTarget;
+              setDetailTarget(null);
+              setPayoutTarget(target);
+            }}
+          />
+        </Suspense>
+      )}
+      {payoutTarget && (
+        <Suspense fallback={null}>
+          <BookingPayoutModal
+            booking={{
+              ...payoutTarget,
+              channel: payoutTarget.channel ?? null,
+              start_date: payoutTarget.start_date ?? null,
+              checkin_done: payoutTarget.checkin_done ?? false,
+            }}
+            bankAccounts={bankAccounts}
+            onClose={() => setPayoutTarget(null)}
+            onSaved={() => setPayoutTarget(null)}
           />
         </Suspense>
       )}

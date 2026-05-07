@@ -11,6 +11,7 @@ import AlertsPanel from './AlertsPanel';
 import IncomeExpenseTab from './IncomeExpenseTab';
 import ActiveBookingsWidget from './ActiveBookingsWidget';
 const BookingDetailModal = lazy(() => import('./BookingDetailModal'));
+const BookingPayoutModal = lazy(() => import('./BookingPayoutModal'));
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
 import { resolvePeriodRange, type Period, type FinancialKPIs } from '@/services/financial';
 import type { ParsedBooking } from '@/services/etl';
@@ -106,6 +107,7 @@ export default function DashboardClient() {
   const [importedBookings, setImportedBookings] = useState<ParsedBooking[]>([]);
   const [calendarDetailBooking, setCalendarDetailBooking] = useState<BookingWithListingRow | null>(null);
   const [calendarDetailLoading, setCalendarDetailLoading] = useState(false);
+  const [calendarPayoutBooking, setCalendarPayoutBooking] = useState<BookingWithListingRow | null>(null);
 
   const { properties: allProperties, bankAccounts: allBankAccounts } = useReferenceData({
     authStatus, withProperties: true, withBankAccounts: true,
@@ -424,6 +426,25 @@ export default function DashboardClient() {
             properties={allProperties}
             bankAccounts={allBankAccounts}
             onClose={() => setCalendarDetailBooking(null)}
+            onPayout={() => {
+              const target = calendarDetailBooking;
+              setCalendarDetailBooking(null);
+              setCalendarPayoutBooking(target);
+            }}
+          />
+        </Suspense>
+      )}
+
+      {calendarPayoutBooking && (
+        <Suspense fallback={null}>
+          <BookingPayoutModal
+            booking={{
+              ...calendarPayoutBooking,
+              guest_name: calendarPayoutBooking.guest_name ?? '—',
+            }}
+            bankAccounts={allBankAccounts}
+            onClose={() => setCalendarPayoutBooking(null)}
+            onSaved={() => setCalendarPayoutBooking(null)}
           />
         </Suspense>
       )}
