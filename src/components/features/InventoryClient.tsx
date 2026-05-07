@@ -40,9 +40,12 @@ import MoneyInput from '@/components/MoneyInput';
 import { useBackdropClose, makeBackdropHandlers } from '@/lib/useBackdropClose';
 import InventoryExportModal from '@/components/features/InventoryExportModal';
 import ScheduleMaintenanceModal from '@/components/features/ScheduleMaintenanceModal';
+import { toast } from '@/lib/toast';
 import {
   listMaintenanceSchedules,
   getUpcomingAndOverdueSchedules,
+  deleteMaintenanceSchedule,
+  updateMaintenanceSchedule,
 } from '@/services/maintenanceSchedules';
 import { todayISO } from '@/lib/dateUtils';
 
@@ -325,6 +328,19 @@ export default function InventoryClient(): JSX.Element {
           properties={properties}
           propMap={propMap}
           onSetMaintTarget={(item, sched) => setMaintenanceTarget({ item, schedule: sched })}
+          onDeleteSchedule={async (id) => {
+            if (!confirm('¿Eliminar este registro de mantenimiento?')) return;
+            const { error } = await deleteMaintenanceSchedule(id);
+            if (error) { toast.error('Error al eliminar: ' + error); return; }
+            setAllSchedules(prev => prev.filter(s => s.id !== id));
+            toast.success('Registro eliminado');
+          }}
+          onResetExpense={async (id) => {
+            const { error } = await updateMaintenanceSchedule(id, { expense_registered: false });
+            if (error) { toast.error('Error al actualizar: ' + error); return; }
+            setAllSchedules(prev => prev.map(s => s.id === id ? { ...s, expense_registered: false } : s));
+            toast.success('Gasto desmarcado');
+          }}
         />
       )}
 
@@ -1814,12 +1830,16 @@ function MaintenanceHistoryView({
   properties,
   propMap,
   onSetMaintTarget,
+  onDeleteSchedule,
+  onResetExpense,
 }: {
   schedules: MaintenanceScheduleRow[];
   items: InventoryItemRow[];
   properties: PropertyRow[];
   propMap: Map<string, PropertyRow>;
   onSetMaintTarget: (item: InventoryItemRow, sched: MaintenanceScheduleRow | null) => void;
+  onDeleteSchedule: (id: string) => Promise<void>;
+  onResetExpense: (id: string) => Promise<void>;
 }) {
   const [propFilter, setPropFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -1945,15 +1965,35 @@ function MaintenanceHistoryView({
                         )}
                       </td>
                       <td className="px-4 py-2.5">
-                        {item && s.status === 'pending' && (
+                        <div className="flex items-center gap-1">
+                          {item && s.status === 'pending' && (
+                            <button
+                              type="button"
+                              onClick={() => onSetMaintTarget(item, s)}
+                              className="text-[10px] font-semibold text-amber-700 hover:bg-amber-50 px-2 py-0.5 rounded border border-amber-200"
+                            >
+                              Editar
+                            </button>
+                          )}
+                          {s.status === 'done' && s.expense_registered && (
+                            <button
+                              type="button"
+                              title="Quitar marca de gasto registrado"
+                              onClick={() => onResetExpense(s.id)}
+                              className="text-[10px] font-semibold text-blue-600 hover:bg-blue-50 px-2 py-0.5 rounded border border-blue-200"
+                            >
+                              ↩ Quitar gasto
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => onSetMaintTarget(item, s)}
-                            className="text-[10px] font-semibold text-amber-700 hover:bg-amber-50 px-2 py-0.5 rounded border border-amber-200"
+                            title="Eliminar registro"
+                            onClick={() => onDeleteSchedule(s.id)}
+                            className="text-[10px] font-semibold text-red-600 hover:bg-red-50 px-1.5 py-0.5 rounded border border-red-200"
                           >
-                            Editar
+                            🗑
                           </button>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   );
