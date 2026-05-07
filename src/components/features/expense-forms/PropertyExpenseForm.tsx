@@ -16,8 +16,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { Expense } from '@/types';
-import type { PropertyRow, BankAccountRow, ExpenseSubcategory } from '@/types/database';
-import { SUBCATEGORY_TO_CATEGORY } from '@/types/database';
+import { type PropertyRow, type BankAccountRow, type ExpenseSubcategory, SUBCATEGORY_TO_CATEGORY } from '@/types/database';
 import { addMoney, splitMoney } from '@/lib/money';
 import MoneyInput from '@/components/MoneyInput';
 import {

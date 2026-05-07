@@ -1,8 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { VendorKind, PropertyRow, VendorPropertyRow, BankAccountRow, SharedBillRow, ExpenseCategory, CreditPoolRow, CreditPoolConsumptionRule } from '@/types/database';
-import { EXPENSE_CATEGORIES } from '@/types/database';
+import { type VendorKind, type PropertyRow, type VendorPropertyRow, type BankAccountRow, type SharedBillRow, type ExpenseCategory, type CreditPoolRow, type CreditPoolConsumptionRule, EXPENSE_CATEGORIES } from '@/types/database';
 import { listVendors, createVendor, updateVendor, deleteVendor, type Vendor } from '@/services/vendors';
 import { listCreditPools, createCreditPool, updateCreditPool, type CreateCreditPoolInput } from '@/services/creditPools';
 import { listVendorProperties, setVendorProperties, listAllVendorProperties } from '@/services/vendorProperties';
@@ -306,7 +305,7 @@ export default function VendorsClient(): JSX.Element {
         total_price: Number(form.defaultAmount) || 0,
         consumption_rule: form.poolConsumptionRule,
         credits_per_unit: Number(form.poolCreditsPerUnit) || 1,
-        child_weight: Number(form.poolChildWeight) ?? 1,
+        child_weight: Number(form.poolChildWeight) || 1,
         activated_at: form.poolActivatedAt,
         expires_at: form.poolExpiresAt || null,
         notes: null,

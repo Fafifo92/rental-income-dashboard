@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import type { BankAccountRow, VendorRow, VendorPropertyRow, PropertyRow } from '@/types/database';
-import { EXPENSE_CATEGORIES } from '@/types/database';
+import { type BankAccountRow, type VendorRow, type VendorPropertyRow, type PropertyRow, EXPENSE_CATEGORIES } from '@/types/database';
 import { listVendorProperties, computeShares } from '@/services/vendorProperties';
 import { listProperties } from '@/services/properties';
 import { createSharedBill } from '@/services/sharedBills';

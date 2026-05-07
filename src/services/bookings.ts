@@ -1,8 +1,7 @@
 import { supabase } from '@/lib/supabase/client';
 import type { ServiceResult } from './expenses';
 import type { BookingRow } from '@/types/database';
-import { datesOverlap } from './etl';
-import type { ParsedBooking, ConflictEntry } from './etl';
+import { datesOverlap, type ParsedBooking, type ConflictEntry } from './etl';
 import { findOrCreateListing } from './listings';
 import { inferOperationalFlags, isCancelled } from '@/lib/bookingStatus';
 import { todayISO } from '@/lib/dateUtils';

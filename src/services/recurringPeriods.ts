@@ -5,8 +5,7 @@ import type {
   PropertyRecurringExpenseRow,
   ExpenseRow,
 } from '@/types/database';
-import type { ServiceResult } from './expenses';
-import { createExpense } from './expenses';
+import { createExpense, type ServiceResult } from './expenses';
 import { listActiveRecurringExpensesForOwner } from './recurringExpenses';
 import { listProperties } from './properties';
 

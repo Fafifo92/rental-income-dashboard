@@ -19,13 +19,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import { Wrench, CheckCircle2, X, Search } from 'lucide-react';
 import type { Expense } from '@/types';
-import type {
-  PropertyRow, BankAccountRow, InventoryCategoryRow, InventoryItemRow,
-  MaintenanceScheduleRow,
+import {
+  type PropertyRow, type BankAccountRow, type InventoryCategoryRow, type InventoryItemRow,
+  type MaintenanceScheduleRow, SUBCATEGORY_TO_CATEGORY,
 } from '@/types/database';
 import { listInventoryCategories, listInventoryItems, updateInventoryItem } from '@/services/inventory';
 import { listMaintenanceSchedules, completeMaintenanceSchedule } from '@/services/maintenanceSchedules';
-import { SUBCATEGORY_TO_CATEGORY } from '@/types/database';
 import MoneyInput from '@/components/MoneyInput';
 import { todayISO } from '@/lib/dateUtils';
 

@@ -1,6 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { computeFinancials, resolvePeriodRange } from '@/services/financial';
-import type { FinancialKPIs, MonthlyPnL, PayoutBreakdown, Period } from '@/services/financial';
+import { computeFinancials, resolvePeriodRange, type FinancialKPIs, type MonthlyPnL, type PayoutBreakdown, type Period } from '@/services/financial';
 import { listProperties } from '@/services/properties';
 import type { PropertyRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';

@@ -18,8 +18,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { reportDamage } from '@/services/inventory';
-import { listInventoryItems } from '@/services/inventory';
+import { reportDamage, listInventoryItems } from '@/services/inventory';
 import type { BookingRow, InventoryItemRow } from '@/types/database';
 import { useBackdropClose } from '@/lib/useBackdropClose';
 import MoneyInput from '@/components/MoneyInput';
