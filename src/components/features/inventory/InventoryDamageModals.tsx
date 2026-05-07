@@ -21,8 +21,8 @@ import { todayISO } from '@/lib/dateUtils';
 import MoneyInput from '@/components/MoneyInput';
 // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // DamageReportModal
-// Reporta da├▒o + (opcional) atribuir a reserva + (opcional) cobrar al hu├®sped.
-// Crea autom├íticamente: gasto pendiente (Reparaci├│n inventario), ajuste de
+// Reporta daño + (opcional) atribuir a reserva + (opcional) cobrar al huésped.
+// Crea automáticamente: gasto pendiente (Reparación inventario), ajuste de
 // reserva damage_charge (si aplica) y movimiento de inventario, todo enlazado.
 // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 export function DamageReportModal({
@@ -77,8 +77,8 @@ export function DamageReportModal({
   );
   const selectedSource = selectedBooking ? listingSourceById.get(selectedBooking.listing_id) : null;
   const chargeTargetLabel =
-    !selectedSource ? 'hu├®sped'
-    : /direct|directo/i.test(selectedSource) ? 'hu├®sped (reserva directa)'
+    !selectedSource ? 'huésped'
+    : /direct|directo/i.test(selectedSource) ? 'huésped (reserva directa)'
     : `la plataforma (${selectedSource})`;
 
   const submit = async (e: React.FormEvent) => {
@@ -114,9 +114,9 @@ export function DamageReportModal({
         className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <div className="px-6 py-4 border-b border-slate-100">
-          <h3 className="text-lg font-bold text-slate-800">ÔÜá Reportar da├▒o</h3>
+          <h3 className="text-lg font-bold text-slate-800">ÔÜá Reportar daño</h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            <strong>{item.name}</strong> ┬À {propertyName}{item.location ? ` ┬À ${item.location}` : ''}
+            <strong>{item.name}</strong> · {propertyName}{item.location ? ` · ${item.location}` : ''}
           </p>
         </div>
 
@@ -124,17 +124,17 @@ export function DamageReportModal({
           {err && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">{err}</p>}
 
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-[11px] text-blue-800 space-y-1">
-            <p className="font-semibold">Al guardar se har├í autom├íticamente:</p>
+            <p className="font-semibold">Al guardar se hará automáticamente:</p>
             <ul className="list-disc ml-4 space-y-0.5">
-              <li>El item queda marcado como <strong>Da├▒ado</strong>.</li>
-              <li>Se crea un <strong>gasto pendiente</strong> "Reparaci├│n inventario" con el costo estimado.</li>
+              <li>El item queda marcado como <strong>Dañado</strong>.</li>
+              <li>Se crea un <strong>gasto pendiente</strong> "Reparación inventario" con el costo estimado.</li>
               <li>Si lo atribuyes a una reserva, queda <strong>vinculado</strong> a esa reserva.</li>
-              <li>Si activas el cobro al hu├®sped, se crea un <strong>cobro por da├▒o</strong> en la reserva.</li>
+              <li>Si activas el cobro al huésped, se crea un <strong>cobro por daño</strong> en la reserva.</li>
             </ul>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">┬┐Durante qu├® reserva ocurri├│? *</label>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">¿Durante qué reserva ocurrió? *</label>
             <select
               required
               value={bookingId}
@@ -144,18 +144,18 @@ export function DamageReportModal({
               <option value="">ÔÇö Selecciona la reserva ÔÇö</option>
               {bookings.map(b => (
                 <option key={b.id} value={b.id}>
-                  {b.confirmation_code} ┬À {b.guest_name ?? 'Hu├®sped'} ┬À {b.start_date} ÔåÆ {b.end_date}
+                  {b.confirmation_code} · {b.guest_name ?? 'Huésped'} · {b.start_date} ÔåÆ {b.end_date}
                 </option>
               ))}
             </select>
             <p className="text-[10px] text-slate-400 mt-1">
-              Todo da├▒o debe estar asociado a una reserva (activas primero, luego m├ís recientes).
-              Si la reserva no est├í aqu├¡, cr├®ala antes de registrar el da├▒o.
+              Todo daño debe estar asociado a una reserva (activas primero, luego más recientes).
+              Si la reserva no está aquí, créala antes de registrar el daño.
             </p>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Costo estimado de reparaci├│n / reposici├│n *</label>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Costo estimado de reparación / reposición *</label>
             <MoneyInput value={repairCost} onChange={setRepairCost} required placeholder="0" />
             <p className="text-[10px] text-slate-400 mt-1">
               Pre-cargado con el precio de compra si existe. Usa coma para centavos.
@@ -172,24 +172,24 @@ export function DamageReportModal({
                   className="w-4 h-4"
                 />
                 <span className="font-semibold text-slate-700">
-                  Cobrar este da├▒o a {chargeTargetLabel}
+                  Cobrar este daño a {chargeTargetLabel}
                 </span>
               </label>
               <p className="text-[10px] text-slate-500">
-                Se registra un <strong>cobro por da├▒o</strong> en la reserva. Si la reserva es de plataforma,
-                lo cobra la plataforma; si es directa, lo cobras directo al hu├®sped.
+                Se registra un <strong>cobro por daño</strong> en la reserva. Si la reserva es de plataforma,
+                lo cobra la plataforma; si es directa, lo cobras directo al huésped.
               </p>
               {chargeBack && (
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    Monto a cobrar (vac├¡o = igual al costo de reparaci├│n)
+                    Monto a cobrar (vacío = igual al costo de reparación)
                   </label>
                   <MoneyInput value={chargeAmount} onChange={setChargeAmount} placeholder="0" />
                   {repairCost !== null && chargeAmount !== null && chargeAmount !== repairCost && (
                     <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
-                      ÔÜá Diferencia detectada: cobras {formatCurrency(chargeAmount)} pero el da├▒o cuesta {formatCurrency(repairCost)}.
+                      ÔÜá Diferencia detectada: cobras {formatCurrency(chargeAmount)} pero el daño cuesta {formatCurrency(repairCost)}.
                       {chargeAmount < repairCost
-                        ? ` Faltar├¡an ${formatCurrency(repairCost - chargeAmount)} por cubrir (queda como ajuste pendiente).`
+                        ? ` Faltarían ${formatCurrency(repairCost - chargeAmount)} por cubrir (queda como ajuste pendiente).`
                         : ` Sobran ${formatCurrency(chargeAmount - repairCost)} (excedente a tu favor).`}
                     </p>
                   )}
@@ -199,7 +199,7 @@ export function DamageReportModal({
           )}
 
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Descripci├│n del da├▒o</label>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Descripción del daño</label>
             <textarea
               value={description} onChange={e => setDescription(e.target.value)} rows={2}
               placeholder="Ej: Pata partida tras checkout, taza fracturada, control remoto perdidoÔÇª"
@@ -212,7 +212,7 @@ export function DamageReportModal({
               Cancelar
             </button>
             <button type="submit" disabled={saving} className="px-4 py-2 bg-rose-600 text-white rounded-lg text-sm font-semibold hover:bg-rose-700 disabled:opacity-50">
-              {saving ? 'GuardandoÔÇª' : 'Reportar da├▒o'}
+              {saving ? 'GuardandoÔÇª' : 'Reportar daño'}
             </button>
           </div>
         </form>
@@ -223,7 +223,7 @@ export function DamageReportModal({
 
 
 
-// ---------- Secci├│n 14B: Reconciliaci├│n de da├▒os ----------
+// ---------- Sección 14B: Reconciliación de daños ----------
 export function DamageReconciliationSection(): JSX.Element | null {
   const [rows, setRows] = useState<DamageReconciliation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -265,10 +265,10 @@ export function DamageReconciliationSection(): JSX.Element | null {
       <header className="flex items-start justify-between gap-3 mb-3">
         <div>
           <h2 className="text-lg font-bold text-amber-800 flex items-center gap-2">
-            ÔÜá´©Å Da├▒os sin reconciliar ({open.length})
+            ÔÜá´©Å Daños sin reconciliar ({open.length})
           </h2>
           <p className="text-xs text-amber-700/80 mt-0.5">
-            Diferencias entre lo que cobraste al hu├®sped/plataforma y lo que cost├│ realmente reparar.
+            Diferencias entre lo que cobraste al huésped/plataforma y lo que costó realmente reparar.
           </p>
         </div>
         <button
@@ -285,17 +285,17 @@ export function DamageReconciliationSection(): JSX.Element | null {
             <div className="bg-rose-50 border border-rose-100 rounded-lg p-3">
               <div className="text-[10px] uppercase font-semibold text-rose-700">Falta recuperar</div>
               <div className="text-lg font-bold text-rose-800">{formatCurrency(totalPendingRecovery)}</div>
-              <div className="text-[11px] text-rose-700/80">Cobraste menos de lo que cost├│</div>
+              <div className="text-[11px] text-rose-700/80">Cobraste menos de lo que costó</div>
             </div>
             <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3">
               <div className="text-[10px] uppercase font-semibold text-emerald-700">Sobrante</div>
               <div className="text-lg font-bold text-emerald-800">{formatCurrency(totalOverpaid)}</div>
-              <div className="text-[11px] text-emerald-700/80">Plataforma pag├│ de m├ís</div>
+              <div className="text-[11px] text-emerald-700/80">Plataforma pagó de más</div>
             </div>
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
               <div className="text-[10px] uppercase font-semibold text-slate-600">Asumido por el negocio</div>
               <div className="text-lg font-bold text-slate-800">{formatCurrency(totalNoCharge)}</div>
-              <div className="text-[11px] text-slate-500">Sin cobro al hu├®sped</div>
+              <div className="text-[11px] text-slate-500">Sin cobro al huésped</div>
             </div>
           </div>
 
@@ -309,7 +309,7 @@ export function DamageReconciliationSection(): JSX.Element | null {
                   <th className="text-right py-2 px-2">Cobrado</th>
                   <th className="text-right py-2 px-2">Diferencia</th>
                   <th className="text-left py-2 px-2">Estado</th>
-                  <th className="text-right py-2 px-2">Acci├│n</th>
+                  <th className="text-right py-2 px-2">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -370,7 +370,7 @@ export function DamageReconciliationSection(): JSX.Element | null {
                         </span>
                       )}
                       {!r.is_repaired && r.expense_status === 'paid' && (
-                        <div className="text-[10px] text-slate-400 mt-0.5">Item a├║n da├▒ado</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">Item aún dañado</div>
                       )}
                     </td>
                     <td className="py-2 px-2 text-right">
@@ -379,7 +379,7 @@ export function DamageReconciliationSection(): JSX.Element | null {
                           onClick={() => setRecovering(r)}
                           className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
                         >
-                          ­ƒÆ░ Registrar recuperaci├│n
+                          ­ƒÆ░ Registrar recuperación
                         </button>
                       ) : (
                         <span className="text-[10px] text-slate-300">ÔÇö</span>
@@ -392,12 +392,12 @@ export function DamageReconciliationSection(): JSX.Element | null {
           </div>
           <div className="text-[11px] text-slate-500 mt-3 space-y-1">
             <p>
-              ­ƒÆí <strong>┬┐C├│mo cierro una diferencia?</strong>
+              ­ƒÆí <strong>¿Cómo cierro una diferencia?</strong>
             </p>
             <ul className="list-disc pl-5 space-y-0.5">
-              <li><strong>Falta recuperar:</strong> usa "­ƒÆ░ Registrar recuperaci├│n" para indicar cu├ínto te dio la plataforma/hu├®sped y a qu├® cuenta cay├│.</li>
-              <li><strong>Sobrante:</strong> recibiste m├ís de lo que cost├│ ÔÇö la diferencia queda como ingreso adicional para el negocio.</li>
-              <li><strong>Sin cobro:</strong> registra una recuperaci├│n cuando recibas la plata, o asume el costo como gasto del negocio.</li>
+              <li><strong>Falta recuperar:</strong> usa "­ƒÆ░ Registrar recuperación" para indicar cuánto te dio la plataforma/huésped y a qué cuenta cayó.</li>
+              <li><strong>Sobrante:</strong> recibiste más de lo que costó ÔÇö la diferencia queda como ingreso adicional para el negocio.</li>
+              <li><strong>Sin cobro:</strong> registra una recuperación cuando recibas la plata, o asume el costo como gasto del negocio.</li>
             </ul>
           </div>
         </>
@@ -445,8 +445,8 @@ export function RecoverDamageModal({
 
   const handleSave = async () => {
     if (!amount || amount <= 0) { setError('Indica el monto recuperado.'); return; }
-    if (!bankId) { setError('Selecciona la cuenta donde cay├│ el dinero.'); return; }
-    if (!row.expense_id || !row.booking_id) { setError('Da├▒o sin reserva o gasto asociado.'); return; }
+    if (!bankId) { setError('Selecciona la cuenta donde cayó el dinero.'); return; }
+    if (!row.expense_id || !row.booking_id) { setError('Daño sin reserva o gasto asociado.'); return; }
     setSaving(true);
     setError(null);
     const res = await recoverDamageAmount({
@@ -473,14 +473,14 @@ export function RecoverDamageModal({
         className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
-        <h3 className="text-lg font-bold text-slate-800">­ƒÆ░ Registrar recuperaci├│n de da├▒o</h3>
+        <h3 className="text-lg font-bold text-slate-800">­ƒÆ░ Registrar recuperación de daño</h3>
         <p className="text-xs text-slate-500 mt-1">
-          {row.item_name} ┬À {row.property_name ?? 'Sin propiedad'}
+          {row.item_name} · {row.property_name ?? 'Sin propiedad'}
         </p>
 
         <div className="grid grid-cols-3 gap-2 mt-4 text-center text-xs">
           <div className="bg-slate-50 rounded-lg p-2">
-            <div className="text-slate-500">Cost├│ reparar</div>
+            <div className="text-slate-500">Costó reparar</div>
             <div className="font-bold text-slate-800">{formatCurrency(row.repair_cost)}</div>
           </div>
           <div className="bg-slate-50 rounded-lg p-2">
@@ -499,7 +499,7 @@ export function RecoverDamageModal({
             <MoneyInput value={amount} onChange={setAmount} />
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-700">┬┐A qu├® cuenta cay├│? *</label>
+            <label className="text-xs font-semibold text-slate-700">¿A qué cuenta cayó? *</label>
             <select
               value={bankId}
               onChange={e => setBankId(e.target.value)}
@@ -528,7 +528,7 @@ export function RecoverDamageModal({
               value={notes}
               onChange={e => setNotes(e.target.value)}
               rows={2}
-              placeholder="Ej: Airbnb resoluci├│n #12345"
+              placeholder="Ej: Airbnb resolución #12345"
               className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
             />
           </div>
@@ -539,9 +539,9 @@ export function RecoverDamageModal({
               profit < 0 ? 'bg-amber-50 text-amber-800 border border-amber-200' :
               'bg-slate-50 text-slate-700 border border-slate-200'
             }`}>
-              {profit > 0 && <>Ô£¿ <strong>Ganancia:</strong> +{formatCurrency(profit)} (recibiste m├ís de lo que cost├│)</>}
-              {profit < 0 && <>ÔÜá´©Å A├║n faltan {formatCurrency(Math.abs(profit))} por recuperar.</>}
-              {profit === 0 && <>Ô£à Quedar├í balanceado exactamente.</>}
+              {profit > 0 && <>Ô£¿ <strong>Ganancia:</strong> +{formatCurrency(profit)} (recibiste más de lo que costó)</>}
+              {profit < 0 && <>ÔÜá´©Å Aún faltan {formatCurrency(Math.abs(profit))} por recuperar.</>}
+              {profit === 0 && <>Ô£à Quedará balanceado exactamente.</>}
             </div>
           )}
 
@@ -559,7 +559,7 @@ export function RecoverDamageModal({
             disabled={saving}
             className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
           >
-            {saving ? 'GuardandoÔÇª' : 'Registrar recuperaci├│n'}
+            {saving ? 'GuardandoÔÇª' : 'Registrar recuperación'}
           </button>
         </div>
       </motion.div>

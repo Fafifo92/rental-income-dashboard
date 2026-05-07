@@ -173,7 +173,7 @@ export default function InventoryClient(): JSX.Element {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('┬┐Eliminar item del inventario? Esta acci├│n no se puede deshacer.')) return;
+    if (!confirm('¿Eliminar item del inventario? Esta acción no se puede deshacer.')) return;
     await deleteInventoryItem(id);
     await load();
   };
@@ -202,7 +202,7 @@ export default function InventoryClient(): JSX.Element {
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h1 className="text-3xl font-bold text-slate-800">­ƒôª Inventario</h1>
-          <p className="text-sm text-slate-500">Muebles, electrodom├®sticos, lencer├¡a e insumos por propiedad.</p>
+          <p className="text-sm text-slate-500">Muebles, electrodomésticos, lencería e insumos por propiedad.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -223,7 +223,7 @@ export default function InventoryClient(): JSX.Element {
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-6">
         <KPI label="Items" value={kpis.totalItems.toString()} tone="slate" />
-        <KPI label="Da├▒ados" value={kpis.damaged.toString()} tone="red" highlight={kpis.damaged > 0} />
+        <KPI label="Dañados" value={kpis.damaged.toString()} tone="red" highlight={kpis.damaged > 0} />
         <KPI label="Mantenimiento" value={kpis.needsMaintenance.toString()} tone="amber" highlight={kpis.needsMaintenance > 0} />
         <KPI label="Stock bajo" value={kpis.lowStock.toString()} tone="orange" highlight={kpis.lowStock > 0} />
         <KPI label="Agotados" value={kpis.depleted.toString()} tone="rose" highlight={kpis.depleted > 0} />
@@ -232,7 +232,7 @@ export default function InventoryClient(): JSX.Element {
 
       <DamageReconciliationSection />
 
-      {/* Mantenimientos vencidos o pr├│ximos */}
+      {/* Mantenimientos vencidos o próximos */}
       {(overdueSchedules.length > 0 || upcomingSchedules.length > 0) && (
         <div className="mb-4 space-y-2">
           {overdueSchedules.length > 0 && (
@@ -246,7 +246,7 @@ export default function InventoryClient(): JSX.Element {
                   return (
                     <li key={s.id} className="flex items-center justify-between gap-2">
                       <span className="text-xs text-red-700">
-                        <span className="font-medium">{it?.name ?? 'ÔÇö'}</span> ┬À {s.title} ┬À <span className="font-mono">{s.scheduled_date}</span>
+                        <span className="font-medium">{it?.name ?? 'ÔÇö'}</span> · {s.title} · <span className="font-mono">{s.scheduled_date}</span>
                       </span>
                       <button
                         onClick={() => it && setMaintenanceTarget({ item: it, schedule: s })}
@@ -263,7 +263,7 @@ export default function InventoryClient(): JSX.Element {
           {upcomingSchedules.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
               <p className="text-xs font-bold text-amber-700 mb-2">
-                ­ƒƒí {upcomingSchedules.length} mantenimiento{upcomingSchedules.length > 1 ? 's' : ''} pr├│ximo{upcomingSchedules.length > 1 ? 's' : ''}
+                ­ƒƒí {upcomingSchedules.length} mantenimiento{upcomingSchedules.length > 1 ? 's' : ''} próximo{upcomingSchedules.length > 1 ? 's' : ''}
               </p>
               <ul className="space-y-1">
                 {upcomingSchedules.map(s => {
@@ -271,7 +271,7 @@ export default function InventoryClient(): JSX.Element {
                   return (
                     <li key={s.id} className="flex items-center justify-between gap-2">
                       <span className="text-xs text-amber-700">
-                        <span className="font-medium">{it?.name ?? 'ÔÇö'}</span> ┬À {s.title} ┬À <span className="font-mono">{s.scheduled_date}</span>
+                        <span className="font-medium">{it?.name ?? 'ÔÇö'}</span> · {s.title} · <span className="font-mono">{s.scheduled_date}</span>
                       </span>
                       <button
                         onClick={() => it && setMaintenanceTarget({ item: it, schedule: s })}
@@ -326,7 +326,7 @@ export default function InventoryClient(): JSX.Element {
           propMap={propMap}
           onSetMaintTarget={(item, sched) => setMaintenanceTarget({ item, schedule: sched })}
           onDeleteSchedule={async (id) => {
-            if (!confirm('┬┐Eliminar este registro de mantenimiento?')) return;
+            if (!confirm('¿Eliminar este registro de mantenimiento?')) return;
             const { error } = await deleteMaintenanceSchedule(id);
             if (error) { toast.error('Error al eliminar: ' + error); return; }
             setAllSchedules(prev => prev.filter(s => s.id !== id));
@@ -359,7 +359,7 @@ export default function InventoryClient(): JSX.Element {
           onChange={e => setCategoryFilter(e.target.value)}
           className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
         >
-          <option value="all">Todas las categor├¡as</option>
+          <option value="all">Todas las categorías</option>
           {categories.map(c => <option key={c.id} value={c.id}>{c.icon ?? ''} {c.name}</option>)}
         </select>
         <select
@@ -370,7 +370,7 @@ export default function InventoryClient(): JSX.Element {
           <option value="all">Todos los estados</option>
           <option value="good">Bueno</option>
           <option value="needs_maintenance">Mantenimiento</option>
-          <option value="damaged">Da├▒ado</option>
+          <option value="damaged">Dañado</option>
           <option value="lost">Perdido</option>
           <option value="depleted">Agotado</option>
           <option value="low_stock">ÔÜá Stock bajo</option>
@@ -379,7 +379,7 @@ export default function InventoryClient(): JSX.Element {
           type="search"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Buscar por nombre, descripci├│n o ubicaci├│nÔÇª"
+          placeholder="Buscar por nombre, descripción o ubicaciónÔÇª"
           className="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
         />
       </div>
@@ -390,10 +390,10 @@ export default function InventoryClient(): JSX.Element {
         <div className="bg-white rounded-xl border-2 border-dashed border-slate-200 p-12 text-center">
           <div className="text-4xl mb-3">­ƒôª</div>
           <p className="text-slate-600 font-medium mb-1">
-            {items.length === 0 ? 'A├║n no has registrado items' : 'Sin resultados con los filtros actuales'}
+            {items.length === 0 ? 'Aún no has registrado items' : 'Sin resultados con los filtros actuales'}
           </p>
           <p className="text-xs text-slate-500 mb-4">
-            Registra muebles, electrodom├®sticos e insumos de cada propiedad para llevar control de da├▒os y reposiciones.
+            Registra muebles, electrodomésticos e insumos de cada propiedad para llevar control de daños y reposiciones.
           </p>
           <button onClick={() => setCreating(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700">
             Agregar primer item

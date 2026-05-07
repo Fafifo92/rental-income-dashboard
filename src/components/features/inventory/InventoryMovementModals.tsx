@@ -31,11 +31,11 @@ export function QuickMovementModal({
 
   const labelByType: Record<InventoryMovementType, { title: string; help: string; sign: number; defaultStatus: InventoryItemStatus | null }> = {
     added:         { title: 'Agregar al inventario',     help: 'Suma cantidad al item.',                                              sign:  1, defaultStatus: null },
-    used:          { title: 'Registrar consumo',         help: 'Resta cantidad. Si llega a 0 se marca como "Agotado" autom├íticamente.', sign: -1, defaultStatus: null },
-    damaged:       { title: 'Reportar da├▒o',             help: 'Marca el item como da├▒ado. La cantidad no cambia (usa "Descartar" si lo botas).', sign: 0, defaultStatus: 'damaged' },
+    used:          { title: 'Registrar consumo',         help: 'Resta cantidad. Si llega a 0 se marca como "Agotado" automáticamente.', sign: -1, defaultStatus: null },
+    damaged:       { title: 'Reportar daño',             help: 'Marca el item como dañado. La cantidad no cambia (usa "Descartar" si lo botas).', sign: 0, defaultStatus: 'damaged' },
     repaired:      { title: 'Marcar como reparado',      help: 'Vuelve el estado a "Bueno".',                                          sign:  0, defaultStatus: 'good' },
-    restocked:     { title: 'Reponer stock',             help: 'Suma cantidad. ├Ütil tras compra de insumos.',                          sign:  1, defaultStatus: 'good' },
-    discarded:     { title: 'Descartar (botar)',         help: 'Resta cantidad y marca da├▒ado/perdido si aplica.',                     sign: -1, defaultStatus: null },
+    restocked:     { title: 'Reponer stock',             help: 'Suma cantidad. Útil tras compra de insumos.',                          sign:  1, defaultStatus: 'good' },
+    discarded:     { title: 'Descartar (botar)',         help: 'Resta cantidad y marca dañado/perdido si aplica.',                     sign: -1, defaultStatus: null },
     lost:          { title: 'Marcar como perdido',       help: 'Marca el item como perdido.',                                          sign:  0, defaultStatus: 'lost' },
     status_change: { title: 'Cambiar estado',            help: 'Cambia el estado sin afectar cantidad.',                               sign:  0, defaultStatus: null },
   };
@@ -64,7 +64,7 @@ export function QuickMovementModal({
         className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6"
       >
         <h3 className="text-lg font-bold text-slate-800 mb-1">{cfg.title}</h3>
-        <p className="text-xs text-slate-500 mb-1">{item.name} ┬À stock actual: <strong>{Number(item.quantity)} {item.unit ?? ''}</strong></p>
+        <p className="text-xs text-slate-500 mb-1">{item.name} · stock actual: <strong>{Number(item.quantity)} {item.unit ?? ''}</strong></p>
         <p className="text-xs text-slate-500 mb-4 italic">{cfg.help}</p>
 
         <form onSubmit={submit} className="space-y-3">
@@ -127,7 +127,7 @@ export function MovementsModal({ item, onClose }: { item: InventoryItemRow; onCl
       >
         <div className="px-6 py-4 border-b border-slate-100">
           <h3 className="text-lg font-bold text-slate-800">­ƒô£ Historial de "{item.name}"</h3>
-          <p className="text-xs text-slate-500">Bit├ícora completa de movimientos.</p>
+          <p className="text-xs text-slate-500">Bitácora completa de movimientos.</p>
         </div>
         <div className="p-6">
           {loading ? (

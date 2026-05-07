@@ -64,7 +64,7 @@ export function ItemFormModal({
     e.preventDefault();
     if (!name.trim()) { setErr('Nombre requerido'); return; }
     if (!propertyId) { setErr('Selecciona una propiedad'); return; }
-    if (quantity === null || quantity < 0) { setErr('Cantidad inv├ílida'); return; }
+    if (quantity === null || quantity < 0) { setErr('Cantidad inválida'); return; }
     setSaving(true);
     setErr(null);
     const payload: CreateInventoryItemInput = {
@@ -127,7 +127,7 @@ export function ItemFormModal({
               <label className="block text-xs font-semibold text-slate-600 mb-1">Nombre *</label>
               <input
                 type="text" value={name} onChange={e => setName(e.target.value)} autoFocus
-                placeholder="Ej: Sof├í, Cafetera Oster, Detergente, Toallas blancas"
+                placeholder="Ej: Sofá, Cafetera Oster, Detergente, Toallas blancas"
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
@@ -146,18 +146,18 @@ export function ItemFormModal({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Categor├¡a</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Categoría</label>
               <select
                 value={categoryId ?? ''} onChange={e => setCategoryId(e.target.value || null)}
                 className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
               >
-                <option value="">Sin categor├¡a</option>
+                <option value="">Sin categoría</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.icon ?? ''} {c.name}</option>)}
               </select>
               <div className="flex gap-1 mt-1">
                 <input
                   type="text" value={newCatName} onChange={e => setNewCatName(e.target.value)}
-                  placeholder="+ Crear categor├¡a"
+                  placeholder="+ Crear categoría"
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCategory(); } }}
                   className="flex-1 px-2 py-1 text-xs border rounded focus:ring-2 focus:ring-blue-500 outline-none"
                 />
@@ -171,14 +171,14 @@ export function ItemFormModal({
             </div>
 
             <div className="relative">
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Ubicaci├│n</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Ubicación</label>
               <input
                 type="text"
                 value={location}
                 onChange={e => { setLocation(e.target.value); setLocationOpen(true); }}
                 onFocus={() => setLocationOpen(true)}
                 onBlur={() => setTimeout(() => setLocationOpen(false), 150)}
-                placeholder="Ej: Cocina, Habitaci├│n principal, Ba├▒o 1"
+                placeholder="Ej: Cocina, Habitación principal, Baño 1"
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               />
               <AnimatePresence>
@@ -214,14 +214,14 @@ export function ItemFormModal({
               >
                 <option value="good">Bueno</option>
                 <option value="needs_maintenance">Mantenimiento</option>
-                <option value="damaged">Da├▒ado</option>
+                <option value="damaged">Dañado</option>
                 <option value="lost">Perdido</option>
                 <option value="depleted">Agotado</option>
               </select>
             </div>
 
             <div className="sm:col-span-2">
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Descripci├│n</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Descripción</label>
               <textarea
                 value={description} onChange={e => setDescription(e.target.value)} rows={2}
                 placeholder="Marca, modelo, color, detalles relevantesÔÇª"
@@ -236,7 +236,7 @@ export function ItemFormModal({
                 className="mt-0.5 w-4 h-4 rounded border-sky-300 text-sky-600 focus:ring-sky-500"
               />
               <label htmlFor="is_consumable" className="text-xs text-sky-900 cursor-pointer flex-1">
-                <span className="font-semibold">Es un insumo consumible</span> (jab├│n, detergente, papel higi├®nicoÔÇª). Se podr├í registrar consumo y alertar cuando llegue al stock m├¡nimo.
+                <span className="font-semibold">Es un insumo consumible</span> (jabón, detergente, papel higiénicoÔÇª). Se podrá registrar consumo y alertar cuando llegue al stock mínimo.
               </label>
             </div>
 
@@ -260,7 +260,7 @@ export function ItemFormModal({
 
             {isConsumable && (
               <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Stock m├¡nimo (alerta)</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Stock mínimo (alerta)</label>
                 <input
                   type="number" step="0.01" min="0" value={minStock ?? ''}
                   onChange={e => setMinStock(e.target.value === '' ? null : Number(e.target.value))}
@@ -284,7 +284,7 @@ export function ItemFormModal({
             </div>
 
             <div className="sm:col-span-2">
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Vida ├║til esperada (meses)</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Vida útil esperada (meses)</label>
               <input
                 type="number" min="0" value={lifetime ?? ''}
                 onChange={e => setLifetime(e.target.value === '' ? null : Number(e.target.value))}

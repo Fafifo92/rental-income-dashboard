@@ -15,7 +15,7 @@ import type {
 } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// Vista categorizada: Propiedad ÔåÆ Categor├¡a ÔåÆ items en filas compactas
+// Vista categorizada: Propiedad ÔåÆ Categoría ÔåÆ items en filas compactas
 // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 export function CategorizedInventoryView({
   items, properties, categories, propMap, catMap,
@@ -51,7 +51,7 @@ export function CategorizedInventoryView({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const toggle = (key: string) => setCollapsed(c => ({ ...c, [key]: c[key] === false }));
 
-  // Orden estable: por nombre de propiedad / categor├¡a
+  // Orden estable: por nombre de propiedad / categoría
   const sortedProps = useMemo(() => {
     return Array.from(groups.keys()).sort((a, b) => {
       const an = propMap.get(a)?.name ?? '';
@@ -87,7 +87,7 @@ export function CategorizedInventoryView({
               <div className="flex items-center gap-2 text-left">
                 <span className="text-base">­ƒÅá</span>
                 <span className="font-bold text-slate-800">{prop?.name ?? 'Sin propiedad'}</span>
-                <span className="text-xs text-slate-500">┬À {totalItems} {totalItems === 1 ? 'item' : 'items'}</span>
+                <span className="text-xs text-slate-500">· {totalItems} {totalItems === 1 ? 'item' : 'items'}</span>
               </div>
               <motion.span
                 animate={{ rotate: propCollapsed ? -90 : 0 }}
@@ -119,7 +119,7 @@ export function CategorizedInventoryView({
                           >
                             <div className="flex items-center gap-2">
                               <span className="text-base">{cat?.icon ?? '­ƒôª'}</span>
-                              <span className="font-semibold text-slate-700 text-sm">{cat?.name ?? 'Sin categor├¡a'}</span>
+                              <span className="font-semibold text-slate-700 text-sm">{cat?.name ?? 'Sin categoría'}</span>
                               <span className="text-[11px] text-slate-400">({arr.length})</span>
                             </div>
                             <motion.span
@@ -203,13 +203,13 @@ export function ItemRow({
               }`}
               title={`${pendingSchedules.length} mantenimiento(s) programado(s)`}
             >
-              {hasOverdueMaint ? '­ƒö┤ Mantenimiento vencido' : '­ƒƒí Mantenimiento pr├│ximo'}
+              {hasOverdueMaint ? '­ƒö┤ Mantenimiento vencido' : '­ƒƒí Mantenimiento próximo'}
             </button>
           )}
         </div>
         <p className="text-[11px] text-slate-500 truncate">
           {item.location ?? 'ÔÇö'}
-          {item.description ? ` ┬À ${item.description}` : ''}
+          {item.description ? ` · ${item.description}` : ''}
         </p>
       </div>
       <div className="text-right whitespace-nowrap text-xs text-slate-600">
@@ -243,9 +243,9 @@ export function ItemRow({
           <button
             onClick={() => onQuick(item, 'damaged')}
             className="px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50 rounded"
-            title="Reportar da├▒o"
+            title="Reportar daño"
           >
-            ÔÜá Da├▒o
+            ÔÜá Daño
           </button>
         )}
         <button
