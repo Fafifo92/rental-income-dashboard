@@ -5,7 +5,7 @@ import type { ServiceResult } from './expenses';
 export const listPropertyGroups = async (): Promise<ServiceResult<PropertyGroupRow[]>> => {
   const { data, error } = await supabase
     .from('property_groups')
-    .select('*')
+    .select('id, owner_id, name, color, sort_order, created_at')
     .order('sort_order')
     .order('name');
   if (error) return { data: null, error: error.message };

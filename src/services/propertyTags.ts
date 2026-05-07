@@ -5,7 +5,7 @@ import type { ServiceResult } from './expenses';
 export const listPropertyTags = async (): Promise<ServiceResult<PropertyTagRow[]>> => {
   const { data, error } = await supabase
     .from('property_tags')
-    .select('*')
+    .select('id, owner_id, name, color, created_at')
     .order('name');
   if (error) return { data: null, error: error.message };
   return { data: data ?? [], error: null };
@@ -52,7 +52,7 @@ export const deletePropertyTag = async (id: string): Promise<ServiceResult<true>
 export const listAllTagAssignments = async (): Promise<ServiceResult<PropertyTagAssignmentRow[]>> => {
   const { data, error } = await supabase
     .from('property_tag_assignments')
-    .select('*');
+    .select('property_id, tag_id, owner_id, created_at');
   if (error) return { data: null, error: error.message };
   return { data: data ?? [], error: null };
 };

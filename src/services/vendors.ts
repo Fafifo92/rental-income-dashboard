@@ -41,7 +41,7 @@ const toVendor = (row: VendorRow): Vendor => ({
 export const listVendors = async (
   kind?: VendorKind,
 ): Promise<ServiceResult<Vendor[]>> => {
-  let q = supabase.from('vendors').select('*').order('name', { ascending: true });
+  let q = supabase.from('vendors').select('id, owner_id, name, kind, contact, notes, active, created_at, category, default_amount, day_of_month, is_variable, start_year_month').order('name', { ascending: true });
   if (kind) q = q.eq('kind', kind);
   const { data, error } = await q;
   if (error) return { data: null, error: error.message };
@@ -58,7 +58,7 @@ export const createVendor = async (
   const { data, error } = await supabase
     .from('vendors')
     .insert({ ...input, owner_id })
-    .select('*')
+    .select('id, owner_id, name, kind, contact, notes, active, created_at, category, default_amount, day_of_month, is_variable, start_year_month')
     .single();
   if (error) return { data: null, error: error.message };
   return { data: toVendor(data as VendorRow), error: null };
@@ -72,7 +72,7 @@ export const updateVendor = async (
     .from('vendors')
     .update(patch)
     .eq('id', id)
-    .select('*')
+    .select('id, owner_id, name, kind, contact, notes, active, created_at, category, default_amount, day_of_month, is_variable, start_year_month')
     .single();
   if (error) return { data: null, error: error.message };
   return { data: toVendor(data as VendorRow), error: null };

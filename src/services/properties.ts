@@ -5,7 +5,7 @@ import type { PropertyRow } from '@/types/database';
 export const listProperties = async (): Promise<ServiceResult<PropertyRow[]>> => {
   const { data, error } = await supabase
     .from('properties')
-    .select('*')
+    .select('id, owner_id, name, address, base_currency, estrato, bedrooms, max_guests, notes, created_at, default_cleaning_fee, rnt, group_id')
     .order('name');
   if (error) return { data: null, error: error.message };
   return { data, error: null };
@@ -14,7 +14,7 @@ export const listProperties = async (): Promise<ServiceResult<PropertyRow[]>> =>
 export const getProperty = async (id: string): Promise<ServiceResult<PropertyRow>> => {
   const { data, error } = await supabase
     .from('properties')
-    .select('*')
+    .select('id, owner_id, name, address, base_currency, estrato, bedrooms, max_guests, notes, created_at, default_cleaning_fee, rnt, group_id')
     .eq('id', id)
     .single();
   if (error) return { data: null, error: error.message };

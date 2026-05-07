@@ -12,7 +12,7 @@ export interface BankAccountBalance {
 export const listBankAccounts = async (): Promise<ServiceResult<BankAccountRow[]>> => {
   const { data, error } = await supabase
     .from('bank_accounts')
-    .select('*')
+    .select('id, owner_id, name, bank, account_type, account_number_mask, currency, opening_balance, is_active, notes, created_at, is_credit, credit_limit, is_cash')
     .order('is_cash', { ascending: false })   // cash account first
     .order('is_active', { ascending: false })
     .order('name');
@@ -92,7 +92,7 @@ export const listBookingPayments = async (
 ): Promise<ServiceResult<BookingPaymentRow[]>> => {
   const { data, error } = await supabase
     .from('booking_payments')
-    .select('*')
+    .select('id, owner_id, booking_id, amount, bank_account_id, payment_date, notes, created_at')
     .eq('booking_id', bookingId)
     .order('payment_date', { ascending: true })
     .order('created_at', { ascending: true });
@@ -295,7 +295,7 @@ export const validateAccountSpend = async (
 ): Promise<ServiceResult<{ ok: boolean; account: BankAccountRow; currentBalance: number; after: number }>> => {
   const { data: account, error: accErr } = await supabase
     .from('bank_accounts')
-    .select('*')
+    .select('id, owner_id, name, bank, account_type, account_number_mask, currency, opening_balance, is_active, notes, created_at, is_credit, credit_limit, is_cash')
     .eq('id', accountId)
     .single();
   if (accErr || !account) return { data: null, error: accErr?.message ?? 'Cuenta no encontrada' };
