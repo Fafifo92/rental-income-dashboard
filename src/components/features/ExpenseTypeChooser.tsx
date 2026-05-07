@@ -13,7 +13,7 @@
 import { motion } from 'framer-motion';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import {
-  Home, Sparkles, Wallet, AlertTriangle, Handshake, ChevronRight,
+  Home, Sparkles, Wallet, AlertTriangle, Handshake, Wrench, ChevronRight,
 } from 'lucide-react';
 
 export type ExpenseTypeChoice =
@@ -21,7 +21,8 @@ export type ExpenseTypeChoice =
   | 'cleaning_supplies'
   | 'cleaning_payout'
   | 'damage'
-  | 'vendor';
+  | 'vendor'
+  | 'inventory_maintenance';
 
 interface Props {
   onChoose: (choice: ExpenseTypeChoice) => void;
@@ -69,6 +70,13 @@ const OPTIONS: {
     title: 'Pago a proveedor',
     description: 'Carpintero, jardinero, contador, etc. Vinculado al proveedor y a la propiedad.',
     accent: 'text-violet-700 bg-violet-50 border-violet-200',
+  },
+  {
+    id: 'inventory_maintenance',
+    icon: Wrench,
+    title: 'Mantenimiento de inventario',
+    description: 'Registra el costo del mantenimiento de un item del inventario y cierra el agendamiento.',
+    accent: 'text-amber-700 bg-amber-50 border-amber-200',
   },
 ];
 

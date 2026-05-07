@@ -189,16 +189,38 @@ export const INVENTORY_COLUMN_GROUPS: {
       { key: 'updated_at', label: 'Última actualización', group: 'meta' },
     ],
   },
+  {
+    id: 'maintenance',
+    label: 'Mantenimiento',
+    columns: [
+      { key: 'maint_status',     label: 'Estado mantenimiento',       group: 'maintenance' },
+      { key: 'maint_last_date',  label: 'Último mantenimiento (fecha)', group: 'maintenance' },
+      { key: 'maint_last_title', label: 'Último mantenimiento (título)', group: 'maintenance' },
+      { key: 'maint_next_date',  label: 'Próximo mantenimiento (fecha)', group: 'maintenance' },
+      { key: 'maint_next_title', label: 'Próximo mantenimiento (título)', group: 'maintenance' },
+      { key: 'maint_recurring',  label: '¿Recurrente?',               group: 'maintenance' },
+    ],
+  },
 ];
 
 export const DEFAULT_INVENTORY_COLUMNS = new Set([
   'name', 'property', 'category', 'description', 'location', 'status', 'quantity', 'unit',
 ]);
 
+export type InventoryMaintInfo = {
+  lastDate:  string;
+  lastTitle: string;
+  nextDate:  string;
+  nextTitle: string;
+  isRecurring: boolean;
+  statusLabel: string;
+};
+
 type InventoryResolvers = {
   getPropertyName: (id: string) => string;
   getCategoryName: (id: string) => string;
   getStatusLabel:  (status: string) => string;
+  getMaintInfo?:   (itemId: string) => InventoryMaintInfo;
 };
 
 function resolveInventoryCell(
@@ -224,6 +246,13 @@ function resolveInventoryCell(
     case 'notes':        return item.notes ?? '';
     case 'created_at':   return item.created_at ? item.created_at.slice(0, 10) : '';
     case 'updated_at':   return item.updated_at ? item.updated_at.slice(0, 10) : '';
+    // ── Maintenance columns ────────────────────────────────────────────────
+    case 'maint_status':     return r.getMaintInfo ? r.getMaintInfo(item.id).statusLabel : '';
+    case 'maint_last_date':  return r.getMaintInfo ? r.getMaintInfo(item.id).lastDate : '';
+    case 'maint_last_title': return r.getMaintInfo ? r.getMaintInfo(item.id).lastTitle : '';
+    case 'maint_next_date':  return r.getMaintInfo ? r.getMaintInfo(item.id).nextDate : '';
+    case 'maint_next_title': return r.getMaintInfo ? r.getMaintInfo(item.id).nextTitle : '';
+    case 'maint_recurring':  return r.getMaintInfo ? (r.getMaintInfo(item.id).isRecurring ? 'Sí' : 'No') : '';
     default:             return '';
   }
 }

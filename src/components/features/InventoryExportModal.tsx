@@ -10,8 +10,9 @@ import {
   exportInventoryToCsv,
   exportInventoryToExcel,
   type InventoryExportColumn,
+  type InventoryMaintInfo,
 } from '@/services/export';
-import type { InventoryCategoryRow, InventoryItemRow, PropertyRow } from '@/types/database';
+import type { InventoryCategoryRow, InventoryItemRow, MaintenanceScheduleRow, PropertyRow } from '@/types/database';
 
 type Format = 'csv' | 'excel';
 
@@ -19,6 +20,7 @@ interface Props {
   items:      InventoryItemRow[];
   properties: PropertyRow[];
   categories: InventoryCategoryRow[];
+  schedules?: MaintenanceScheduleRow[];
   onClose:    () => void;
 }
 
@@ -56,7 +58,7 @@ function TriCheckbox({
 }
 
 // ── Main Modal ────────────────────────────────────────────────────────────────
-export default function InventoryExportModal({ items, properties, categories, onClose }: Props) {
+export default function InventoryExportModal({ items, properties, categories, schedules = [], onClose }: Props) {
   // ── state ──────────────────────────────────────────────────────────────────
   const [selectedProps, setSelectedProps] = useState<Set<string>>(
     () => new Set(properties.map(p => p.id)),
@@ -80,11 +82,50 @@ export default function InventoryExportModal({ items, properties, categories, on
     return m;
   }, [categories]);
 
-  const resolvers = useMemo(() => ({
-    getPropertyName: (id: string) => propNameMap.get(id) ?? id,
-    getCategoryName: (id: string) => catNameMap.get(id) ?? id,
-    getStatusLabel:  (s: string)  => (STATUS_LABEL as Record<string, string>)[s] ?? s,
-  }), [propNameMap, catNameMap]);
+  const resolvers = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Build per-item schedule maps
+    const doneByItem = new Map<string, MaintenanceScheduleRow[]>();
+    const pendingByItem = new Map<string, MaintenanceScheduleRow[]>();
+    for (const s of schedules) {
+      if (s.status === 'done') {
+        if (!doneByItem.has(s.item_id)) doneByItem.set(s.item_id, []);
+        doneByItem.get(s.item_id)!.push(s);
+      } else if (s.status === 'pending') {
+        if (!pendingByItem.has(s.item_id)) pendingByItem.set(s.item_id, []);
+        pendingByItem.get(s.item_id)!.push(s);
+      }
+    }
+
+    const getMaintInfo = (itemId: string): InventoryMaintInfo => {
+      const done = (doneByItem.get(itemId) ?? []).sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date));
+      const pending = (pendingByItem.get(itemId) ?? []).sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
+      const last = done[0] ?? null;
+      const next = pending[0] ?? null;
+      let statusLabel = 'Sin mantenimiento';
+      if (next) {
+        statusLabel = next.scheduled_date <= today ? 'Vencido' : 'Próximo programado';
+      } else if (last) {
+        statusLabel = 'Al día';
+      }
+      return {
+        lastDate:    last?.scheduled_date ?? '',
+        lastTitle:   last?.title ?? '',
+        nextDate:    next?.scheduled_date ?? '',
+        nextTitle:   next?.title ?? '',
+        isRecurring: next?.is_recurring ?? last?.is_recurring ?? false,
+        statusLabel,
+      };
+    };
+
+    return {
+      getPropertyName: (id: string) => propNameMap.get(id) ?? id,
+      getCategoryName: (id: string) => catNameMap.get(id) ?? id,
+      getStatusLabel:  (s: string)  => (STATUS_LABEL as Record<string, string>)[s] ?? s,
+      getMaintInfo,
+    };
+  }, [propNameMap, catNameMap, schedules]);
 
   // ── derived ────────────────────────────────────────────────────────────────
   const filteredItems = useMemo(

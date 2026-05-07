@@ -371,7 +371,8 @@ export type ExpenseSubcategory =
   // Sección 2: sobre reservas
   | 'cleaning'          // 2.1 Aseo y lavandería del turn
   | 'damage'            // 2.2 Daños del huésped
-  | 'guest_amenities';  // 2.3 Atenciones al huésped (welcome kit, regalos)
+  | 'guest_amenities'   // 2.3 Atenciones al huésped (welcome kit, regalos)
+  | 'penalty';          // 2.4 Multas por cancelación
 
 export const EXPENSE_SUBCATEGORY_META: Record<ExpenseSubcategory, {
   section: ExpenseSection; label: string; icon: string; description: string;
@@ -383,9 +384,9 @@ export const EXPENSE_SUBCATEGORY_META: Record<ExpenseSubcategory, {
   cleaning:        { section: 'booking',  label: 'Aseo y lavandería',       icon: '🧹', description: 'Pago al cleaner del turn + insumos usados' },
   damage:          { section: 'booking',  label: 'Daños del huésped',       icon: '⚠️', description: 'Daños causados durante la reserva' },
   guest_amenities: { section: 'booking',  label: 'Atenciones al huésped',   icon: '🎁', description: 'Welcome kit, regalos, snacks específicos' },
+  penalty:         { section: 'booking',  label: 'Multas por cancelación',  icon: '🚫', description: 'Penalizaciones y multas por cancelación de reservas' },
 };
 
-// Categorías legacy (display) — se mantienen para no romper datos históricos
 export type ExpenseCategory =
   | 'Servicios públicos'
   | 'Administración'
@@ -394,6 +395,7 @@ export type ExpenseCategory =
   | 'Aseo y lavandería'
   | 'Daños del huésped'
   | 'Atenciones al huésped'
+  | 'Multas por cancelación'
   | 'Otros';
 
 export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
@@ -404,6 +406,7 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
   'Aseo y lavandería',
   'Daños del huésped',
   'Atenciones al huésped',
+  'Multas por cancelación',
   'Otros',
 ];
 
@@ -416,6 +419,7 @@ export const SUBCATEGORY_TO_CATEGORY: Record<ExpenseSubcategory, ExpenseCategory
   cleaning:        'Aseo y lavandería',
   damage:          'Daños del huésped',
   guest_amenities: 'Atenciones al huésped',
+  penalty:         'Multas por cancelación',
 };
 
 export type VendorRow = {
@@ -625,6 +629,9 @@ export type MaintenanceScheduleRow = {
   status: MaintenanceScheduleStatus;
   notify_before_days: number;
   email_notify: boolean;
+  is_recurring: boolean;
+  recurrence_days: number | null;
+  expense_registered: boolean;
   created_at: string;
   updated_at: string;
 };

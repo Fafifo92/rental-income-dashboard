@@ -429,9 +429,9 @@ export default function OccupancyGrid({
                         position: 'absolute',
                         left: i * CELL_W,
                         top: 0,
-                        width: CELL_W,
+                        width: CELL_W - 1,
                         height: ROW_H,
-                        borderRight: '1px solid #f1f5f9',
+                        borderRight: '1px solid #cbd5e1',
                         backgroundColor: day.isToday
                           ? 'rgba(219,234,254,0.35)'
                           : day.isWeekend
@@ -474,11 +474,11 @@ export default function OccupancyGrid({
                         style={{
                           position: 'absolute',
                           left: startOffset * CELL_W + 2,
-                          top: 5,
-                          width: nightCount * CELL_W - 4,
-                          height: ROW_H - 10,
+                          top: cancelled ? ROW_H - 13 : 4,
+                          width: nightCount * CELL_W - 5,
+                          height: cancelled ? 9 : ROW_H - 18,
                           backgroundColor: color,
-                          borderRadius: 4,
+                          borderRadius: cancelled ? 2 : 4,
                           overflow: 'hidden',
                           display: 'flex',
                           alignItems: 'center',
@@ -505,7 +505,7 @@ export default function OccupancyGrid({
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
-                            ...(cancelled ? { textDecoration: 'line-through' } : {}),
+                            ...(cancelled ? { display: 'none' } : {}),
                           }}
                         >
                           {bk.guest_name ?? bk.confirmation_code}
@@ -520,42 +520,48 @@ export default function OccupancyGrid({
         </div>
       </div>
 
-      {/* Tooltip */}
-      {tooltip && (
-        <div
-          style={{
-            position: 'fixed',
-            left: tooltip.x + 14,
-            top: tooltip.y - 8,
-            zIndex: 9999,
-            backgroundColor: 'white',
-            border: '1px solid #e2e8f0',
-            borderRadius: 8,
-            boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
-            padding: '8px 12px',
-            fontSize: 12,
-            minWidth: 190,
-            pointerEvents: 'none',
-          }}
-        >
-          <p style={{ fontWeight: 700, color: '#1e293b', marginBottom: 4, whiteSpace: 'nowrap' }}>
-            {tooltip.booking.guest_name ?? '—'}
-          </p>
-          <div style={{ color: '#64748b', lineHeight: 1.7 }}>
-            <div style={{ fontFamily: 'monospace', fontSize: 11 }}>{tooltip.booking.confirmation_code}</div>
-            <div>{formatIso(tooltip.booking.start_date)} &rarr; {formatIso(tooltip.booking.end_date)}</div>
-            <div>{tooltip.booking.channel ?? 'Canal desconocido'}</div>
-            <div
-              style={{
-                color: isCancelled(tooltip.booking.status) ? '#ef4444' : '#22c55e',
-                fontWeight: 600,
-              }}
-            >
-              {tooltip.booking.status ?? '—'}
+      {/* Tooltip — flips up when near bottom of viewport */}
+      {tooltip && (() => {
+        const TOOLTIP_H = 130;
+        const TOOLTIP_W = 210;
+        const topPos  = tooltip.y + TOOLTIP_H > window.innerHeight  ? tooltip.y - TOOLTIP_H - 8 : tooltip.y - 8;
+        const leftPos = tooltip.x + TOOLTIP_W > window.innerWidth   ? tooltip.x - TOOLTIP_W - 8 : tooltip.x + 14;
+        return (
+          <div
+            style={{
+              position: 'fixed',
+              left: leftPos,
+              top:  topPos,
+              zIndex: 9999,
+              backgroundColor: 'white',
+              border: '1px solid #e2e8f0',
+              borderRadius: 8,
+              boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
+              padding: '8px 12px',
+              fontSize: 12,
+              minWidth: 190,
+              pointerEvents: 'none',
+            }}
+          >
+            <p style={{ fontWeight: 700, color: '#1e293b', marginBottom: 4, whiteSpace: 'nowrap' }}>
+              {tooltip.booking.guest_name ?? '—'}
+            </p>
+            <div style={{ color: '#64748b', lineHeight: 1.7 }}>
+              <div style={{ fontFamily: 'monospace', fontSize: 11 }}>{tooltip.booking.confirmation_code}</div>
+              <div>{formatIso(tooltip.booking.start_date)} &rarr; {formatIso(tooltip.booking.end_date)}</div>
+              <div>{tooltip.booking.channel ?? 'Canal desconocido'}</div>
+              <div
+                style={{
+                  color: isCancelled(tooltip.booking.status) ? '#ef4444' : '#22c55e',
+                  fontWeight: 600,
+                }}
+              >
+                {tooltip.booking.status ?? '—'}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

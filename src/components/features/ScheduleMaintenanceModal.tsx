@@ -46,6 +46,8 @@ export default function ScheduleMaintenanceModal({
   const [desc, setDesc]         = useState(schedule?.description ?? '');
   const [date, setDate]         = useState(schedule ? parseDateLocal(schedule.scheduled_date) : todayIso());
   const [notifyDays, setNotifyDays] = useState(schedule?.notify_before_days ?? 3);
+  const [isRecurring, setIsRecurring] = useState(schedule?.is_recurring ?? false);
+  const [recurrenceDays, setRecurrenceDays] = useState<number>(schedule?.recurrence_days ?? 30);
 
   const [saving,    setSaving]    = useState(false);
   const [deleting,  setDeleting]  = useState(false);
@@ -58,6 +60,8 @@ export default function ScheduleMaintenanceModal({
     setDesc(schedule?.description ?? '');
     setDate(schedule ? parseDateLocal(schedule.scheduled_date) : todayIso());
     setNotifyDays(schedule?.notify_before_days ?? 3);
+    setIsRecurring(schedule?.is_recurring ?? false);
+    setRecurrenceDays(schedule?.recurrence_days ?? 30);
     setErr(null);
   }, [schedule]);
 
@@ -78,6 +82,8 @@ export default function ScheduleMaintenanceModal({
         description:        desc.trim() || null,
         scheduled_date:     date,
         notify_before_days: notifyDays,
+        is_recurring:       isRecurring,
+        recurrence_days:    isRecurring ? recurrenceDays : null,
       });
       error = res.error;
     } else {
@@ -88,6 +94,8 @@ export default function ScheduleMaintenanceModal({
         description:        desc.trim() || null,
         scheduled_date:     date,
         notify_before_days: notifyDays,
+        is_recurring:       isRecurring,
+        recurrence_days:    isRecurring ? recurrenceDays : null,
       });
       error = res.error;
     }
@@ -110,7 +118,7 @@ export default function ScheduleMaintenanceModal({
   const handleComplete = async () => {
     if (!schedule) return;
     setCompleting(true);
-    const { error } = await completeMaintenanceSchedule(schedule.id);
+    const { error } = await completeMaintenanceSchedule(schedule.id, { expenseRegistered: false });
     setCompleting(false);
     if (error) { setErr(error); return; }
     onSaved();
@@ -209,6 +217,45 @@ export default function ScheduleMaintenanceModal({
               />
               <span className="text-xs text-slate-500">días antes</span>
             </div>
+          </div>
+
+          {/* Recurrencia */}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-slate-700">🔁 Mantenimiento recurrente</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Al completarlo, se agenda automáticamente el siguiente.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsRecurring(v => !v)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  isRecurring ? 'bg-amber-500' : 'bg-slate-300'
+                }`}
+              >
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                  isRecurring ? 'translate-x-4' : 'translate-x-0.5'
+                }`} />
+              </button>
+            </div>
+            {isRecurring && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">Repetir cada</span>
+                <input
+                  type="number"
+                  value={recurrenceDays}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v >= 1) setRecurrenceDays(v);
+                    else if (e.target.value === '') setRecurrenceDays(1);
+                  }}
+                  className="w-20 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-400 outline-none"
+                />
+                <span className="text-xs text-slate-500">días (mín. 1)</span>
+              </div>
+            )}
           </div>
 
           {/* Email notify — disabled / coming soon */}

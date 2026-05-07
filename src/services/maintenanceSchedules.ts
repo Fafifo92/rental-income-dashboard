@@ -11,6 +11,8 @@ export interface CreateMaintenanceScheduleInput {
   scheduled_date: string; // 'YYYY-MM-DD'
   notify_before_days?: number;
   email_notify?: boolean;
+  is_recurring?: boolean;
+  recurrence_days?: number | null;
 }
 
 export interface UpdateMaintenanceScheduleInput {
@@ -20,6 +22,9 @@ export interface UpdateMaintenanceScheduleInput {
   status?: MaintenanceScheduleStatus;
   notify_before_days?: number;
   email_notify?: boolean;
+  is_recurring?: boolean;
+  recurrence_days?: number | null;
+  expense_registered?: boolean;
 }
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
@@ -45,9 +50,13 @@ export async function listMaintenanceSchedules(filters?: {
 export async function createMaintenanceSchedule(
   input: CreateMaintenanceScheduleInput,
 ): Promise<{ data: MaintenanceScheduleRow | null; error: string | null }> {
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !user) return { data: null, error: 'No autenticado' };
+
   const { data, error } = await supabase
     .from('inventory_maintenance_schedules')
     .insert({
+      owner_id:           user.id,
       item_id:            input.item_id,
       property_id:        input.property_id,
       title:              input.title,
@@ -55,6 +64,8 @@ export async function createMaintenanceSchedule(
       scheduled_date:     input.scheduled_date,
       notify_before_days: input.notify_before_days ?? 3,
       email_notify:       input.email_notify ?? false,
+      is_recurring:       input.is_recurring ?? false,
+      recurrence_days:    input.recurrence_days ?? null,
     })
     .select()
     .single();
@@ -87,15 +98,55 @@ export async function deleteMaintenanceSchedule(
   return { error: error?.message ?? null };
 }
 
+/**
+ * Marks a schedule as done.
+ * - expenseRegistered: true when called from expense registration flow, false when
+ *   manually marked done from inventory (expense still needs to be logged).
+ * - If the schedule is recurring, automatically creates the next occurrence.
+ */
 export async function completeMaintenanceSchedule(
   id: string,
+  options: { expenseRegistered?: boolean } = {},
 ): Promise<{ data: MaintenanceScheduleRow | null; error: string | null }> {
-  return updateMaintenanceSchedule(id, { status: 'done' });
+  // Fetch current to check recurrence
+  const { data: current, error: fetchErr } = await supabase
+    .from('inventory_maintenance_schedules')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (fetchErr || !current) return { data: null, error: fetchErr?.message ?? 'No encontrado' };
+
+  const result = await updateMaintenanceSchedule(id, {
+    status: 'done',
+    expense_registered: options.expenseRegistered ?? false,
+  });
+  if (result.error) return result;
+
+  // Auto-create next occurrence if recurring
+  if (current.is_recurring && current.recurrence_days && current.recurrence_days > 0) {
+    const nextDate = new Date();
+    nextDate.setDate(nextDate.getDate() + current.recurrence_days);
+    const nextDateStr = nextDate.toISOString().slice(0, 10);
+
+    await createMaintenanceSchedule({
+      item_id:            current.item_id,
+      property_id:        current.property_id,
+      title:              current.title,
+      description:        current.description,
+      scheduled_date:     nextDateStr,
+      notify_before_days: current.notify_before_days,
+      is_recurring:       true,
+      recurrence_days:    current.recurrence_days,
+    });
+  }
+
+  return result;
 }
 
 // ─── Helpers for alerts ───────────────────────────────────────────────────────
 
-/** Returns all pending schedules, including overdue ones. */
+/** Returns all pending schedules (overdue or upcoming). */
 export async function getUpcomingAndOverdueSchedules(): Promise<{
   data: MaintenanceScheduleRow[];
   error: string | null;
@@ -105,6 +156,21 @@ export async function getUpcomingAndOverdueSchedules(): Promise<{
     .select('*')
     .eq('status', 'pending')
     .order('scheduled_date', { ascending: true });
+
+  return { data: data ?? [], error: error?.message ?? null };
+}
+
+/** Returns schedules marked done but with no expense registered yet. */
+export async function getSchedulesDoneNeedingExpense(): Promise<{
+  data: MaintenanceScheduleRow[];
+  error: string | null;
+}> {
+  const { data, error } = await supabase
+    .from('inventory_maintenance_schedules')
+    .select('*')
+    .eq('status', 'done')
+    .eq('expense_registered', false)
+    .order('updated_at', { ascending: false });
 
   return { data: data ?? [], error: error?.message ?? null };
 }

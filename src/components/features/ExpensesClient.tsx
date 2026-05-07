@@ -11,6 +11,7 @@ import DamageFromExpensesFlow from './DamageFromExpensesFlow';
 import PropertyExpenseForm from './expense-forms/PropertyExpenseForm';
 import CleaningSuppliesForm from './expense-forms/CleaningSuppliesForm';
 import VendorExpenseForm from './expense-forms/VendorExpenseForm';
+import InventoryMaintenanceExpenseForm from './expense-forms/InventoryMaintenanceExpenseForm';
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
 import RecurringPendingPanel from './RecurringPendingPanel';
 import SharedBillsPendingPanel from './SharedBillsPendingPanel';
@@ -27,11 +28,13 @@ import {
 import { listBankAccounts } from '@/services/bankAccounts';
 import { listListings } from '@/services/listings';
 import { deleteBookingAdjustment } from '@/services/bookingAdjustments';
+import { getUpcomingAndOverdueSchedules, getSchedulesDoneNeedingExpense, completeMaintenanceSchedule } from '@/services/maintenanceSchedules';
+import { listInventoryItems } from '@/services/inventory';
 import { supabase } from '@/lib/supabase/client';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import { cleanDamageDescription } from '@/lib/damageDescription';
 import type { Expense } from '@/types';
-import type { BankAccountRow, BookingRow, ListingRow, ExpenseSection, ExpenseSubcategory } from '@/types/database';
+import type { BankAccountRow, BookingRow, ListingRow, ExpenseSection, ExpenseSubcategory, MaintenanceScheduleRow, InventoryItemRow } from '@/types/database';
 import { EXPENSE_SUBCATEGORY_META } from '@/types/database';
 import { classifyExpense } from '@/lib/expenseClassify';
 import { formatCurrency } from '@/lib/utils';
@@ -68,6 +71,8 @@ export default function ExpensesClient() {
   const [showPropertyForm, setShowPropertyForm] = useState(false);
   const [showSuppliesForm, setShowSuppliesForm] = useState(false);
   const [showVendorForm, setShowVendorForm] = useState(false);
+  const [showInventoryMaintenanceForm, setShowInventoryMaintenanceForm] = useState(false);
+  const [invMaintPrefillSchedule, setInvMaintPrefillSchedule] = useState<MaintenanceScheduleRow | null>(null);
   // Prefill que arrastra el chooser al ExpenseModal según el tipo elegido.
   const [chooserPrefill, setChooserPrefill] = useState<Partial<Expense> | null>(null);
   const [editing, setEditing] = useState<Expense | null>(null);
@@ -80,6 +85,26 @@ export default function ExpensesClient() {
   const [viewingBooking, setViewingBooking] = useState<BookingRow | null>(null);
   const [tab, setTab] = useState<'all' | ExpenseSection | 'others'>('all');
   const [subFilter, setSubFilter] = useState<ExpenseSubcategory | null>(null);
+
+  // Maintenance due panel
+  const [maintenanceSchedules, setMaintenanceSchedules] = useState<MaintenanceScheduleRow[]>([]);
+  const [doneNeedingExpense, setDoneNeedingExpense] = useState<MaintenanceScheduleRow[]>([]);
+  const [inventoryItemsMap, setInventoryItemsMap] = useState<Map<string, InventoryItemRow>>(new Map());
+  const [linkedMaintScheduleId, setLinkedMaintScheduleId] = useState<string | null>(null);
+  const [maintPrefillInfo, setMaintPrefillInfo] = useState<{ itemName: string; scheduleTitle: string } | null>(null);
+
+  const loadMaintenancePanel = useCallback(async () => {
+    const [schedRes, doneRes, itemsRes] = await Promise.all([
+      getUpcomingAndOverdueSchedules(),
+      getSchedulesDoneNeedingExpense(),
+      listInventoryItems(),
+    ]);
+    if (!schedRes.error) setMaintenanceSchedules(schedRes.data);
+    if (!doneRes.error) setDoneNeedingExpense(doneRes.data);
+    if (!itemsRes.error && itemsRes.data) {
+      setInventoryItemsMap(new Map(itemsRes.data.map(it => [it.id, it])));
+    }
+  }, []);
 
   const loadExpenses = useCallback(async (f: ExpenseFilters, propIds?: string[]) => {
     setLoading(true);
@@ -112,8 +137,9 @@ export default function ExpensesClient() {
         if (!res.error) setBankAccounts((res.data ?? []).filter(a => a.is_active));
       });
       listListings().then(res => { if (!res.error) setListings(res.data ?? []); });
+      loadMaintenancePanel();
     }
-  }, [authStatus]);
+  }, [authStatus, loadMaintenancePanel]);
 
   const handleViewBooking = useCallback(async (bookingId: string) => {
     const { data, error } = await supabase.from('bookings').select('*').eq('id', bookingId).single();
@@ -175,6 +201,13 @@ export default function ExpensesClient() {
       setExpenses(prev => [result.data!, ...prev]);
     } else {
       setExpenses(prev => [{ ...data, id: crypto.randomUUID() }, ...prev]);
+    }
+    // Complete linked maintenance schedule if applicable
+    if (linkedMaintScheduleId) {
+      await completeMaintenanceSchedule(linkedMaintScheduleId, { expenseRegistered: true });
+      setLinkedMaintScheduleId(null);
+      setMaintPrefillInfo(null);
+      loadMaintenancePanel();
     }
     setShowModal(false);
     dispatchRecurringChange();
@@ -272,6 +305,11 @@ export default function ExpensesClient() {
       setShowVendorForm(true);
       return;
     }
+    if (choice === 'inventory_maintenance') {
+      setInvMaintPrefillSchedule(null);
+      setShowInventoryMaintenanceForm(true);
+      return;
+    }
     // 'property' → formulario dedicado de gasto sobre propiedad.
     setShowPropertyForm(true);
   };
@@ -297,6 +335,16 @@ export default function ExpensesClient() {
   const pendingExpenses = realExpenses.filter(e => e.status === 'pending' && !e.id.startsWith('fine-'));
   const totalPending    = pendingExpenses.reduce((s, e) => s + e.amount, 0);
   const totalChannelFees = expenses.filter(e => e.id.startsWith('fee-')).reduce((s, e) => s + e.amount, 0);
+
+  // Maintenance schedules: overdue = scheduled_date <= today, upcoming = within notify_before_days
+  const today = new Date().toISOString().slice(0, 10);
+  const overdueMaintenance = maintenanceSchedules.filter(s => s.scheduled_date <= today);
+  const upcomingMaintenance = maintenanceSchedules.filter(s => {
+    if (s.scheduled_date <= today) return false;
+    const notifyFrom = new Date(s.scheduled_date);
+    notifyFrom.setDate(notifyFrom.getDate() - s.notify_before_days);
+    return today >= notifyFrom.toISOString().slice(0, 10);
+  });
 
   // ── Clasificación Fase 16: sección + subcategoría ──
   // (classified y visibleExpenses ya calculados arriba antes del auth guard)
@@ -406,6 +454,149 @@ export default function ExpensesClient() {
             }
           }}
         />
+
+        {/* Mantenimientos por ejecutar */}
+        <AnimatePresence>
+          {(overdueMaintenance.length > 0 || upcomingMaintenance.length > 0) && (
+            <motion.section
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="border border-orange-200 bg-orange-50 rounded-xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold text-orange-900 flex items-center gap-2">
+                    <span className="inline-block w-2 h-2 rounded-full bg-orange-500"></span>
+                    🔧 Mantenimientos del inventario
+                    {overdueMaintenance.length > 0 && (
+                      <span className="text-xs font-semibold px-2 py-0.5 bg-red-200 text-red-800 rounded-full">
+                        {overdueMaintenance.length} vencido{overdueMaintenance.length > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {upcomingMaintenance.length > 0 && (
+                      <span className="text-xs font-semibold px-2 py-0.5 bg-orange-200 text-orange-800 rounded-full">
+                        {upcomingMaintenance.length} próximo{upcomingMaintenance.length > 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </h3>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {[...overdueMaintenance, ...upcomingMaintenance].map((s, i) => {
+                    const item = inventoryItemsMap.get(s.item_id);
+                    const isOverdue = s.scheduled_date <= today;
+                    const prop = properties.find(p => p.id === s.property_id);
+                    return (
+                      <motion.div
+                        key={s.id}
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: i * 0.05 }}
+                        className={`bg-white rounded-lg p-4 border shadow-sm ${isOverdue ? 'border-red-200' : 'border-orange-100'}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <p className="font-semibold text-slate-800 text-sm truncate">
+                                {item?.name ?? 'Item eliminado'}
+                              </p>
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border whitespace-nowrap ${
+                                isOverdue
+                                  ? 'bg-red-50 text-red-700 border-red-200'
+                                  : 'bg-orange-50 text-orange-700 border-orange-200'
+                              }`}>
+                                {isOverdue ? '🔴 VENCIDO' : '🟡 PRÓXIMO'}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-600 mt-0.5 truncate">{s.title}</p>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              {prop?.name ?? ''} · Fecha: {s.scheduled_date}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInvMaintPrefillSchedule(s);
+                            setShowInventoryMaintenanceForm(true);
+                          }}
+                          className="mt-3 w-full text-xs font-semibold px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                        >
+                          + Registrar gasto de mantenimiento
+                        </button>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </div>
+            </motion.section>
+          )}
+        </AnimatePresence>
+
+        {/* Mantenimientos realizados sin gasto registrado */}
+        <AnimatePresence>
+          {doneNeedingExpense.length > 0 && (
+            <motion.section
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="border border-blue-200 bg-blue-50 rounded-xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold text-blue-900 flex items-center gap-2">
+                    <span className="inline-block w-2 h-2 rounded-full bg-blue-500"></span>
+                    📋 Mantenimientos realizados sin gasto
+                    <span className="text-xs font-semibold px-2 py-0.5 bg-blue-200 text-blue-800 rounded-full">
+                      {doneNeedingExpense.length}
+                    </span>
+                  </h3>
+                  <span className="text-xs text-blue-700">Registra el costo real del mantenimiento</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {doneNeedingExpense.map((s, i) => {
+                    const item = inventoryItemsMap.get(s.item_id);
+                    const prop = properties.find(p => p.id === s.property_id);
+                    return (
+                      <motion.div
+                        key={s.id}
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: i * 0.05 }}
+                        className="bg-white rounded-lg p-4 border border-blue-100 shadow-sm"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="font-semibold text-slate-800 text-sm truncate">
+                              {item?.name ?? 'Item eliminado'}
+                            </p>
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-blue-50 text-blue-700 border-blue-200 whitespace-nowrap">
+                              ✅ REALIZADO
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 mt-0.5 truncate">{s.title}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            {prop?.name ?? ''} · Completado: {s.scheduled_date}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInvMaintPrefillSchedule(s);
+                            setShowInventoryMaintenanceForm(true);
+                          }}
+                          className="mt-3 w-full text-xs font-semibold px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                        >
+                          💰 Registrar el gasto
+                        </button>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </div>
+            </motion.section>
+          )}
+        </AnimatePresence>
 
         {/* Cuentas por Pagar */}
         <AnimatePresence>
@@ -642,6 +833,26 @@ export default function ExpensesClient() {
           />
         )}
 
+        {showInventoryMaintenanceForm && (
+          <InventoryMaintenanceExpenseForm
+            properties={properties}
+            bankAccounts={bankAccounts}
+            linkedSchedule={invMaintPrefillSchedule}
+            defaultPropertyId={propertyIds.length === 1 ? propertyIds[0] : invMaintPrefillSchedule?.property_id ?? null}
+            error={saveError || undefined}
+            onClose={() => { setShowInventoryMaintenanceForm(false); setInvMaintPrefillSchedule(null); setSaveError(''); }}
+            onSave={async (data) => {
+              const ok = await handleSave(data);
+              if (ok) {
+                setShowInventoryMaintenanceForm(false);
+                setInvMaintPrefillSchedule(null);
+                loadMaintenancePanel();
+              }
+              return ok;
+            }}
+          />
+        )}
+
         {showModal && editing && (editing.subcategory ?? '').toLowerCase() === 'damage' ? (
           <DamageExpenseEditModal
             expense={editing}
@@ -686,6 +897,8 @@ export default function ExpensesClient() {
               setEditing(null);
               setChooserPrefill(null);
               setSaveError('');
+              setLinkedMaintScheduleId(null);
+              setMaintPrefillInfo(null);
             }}
             onSave={handleSave}
             onSaveShared={handleSaveShared}
@@ -703,6 +916,7 @@ export default function ExpensesClient() {
               : 0}
             error={saveError}
             onDiscardLinked={editing?.adjustment_id ? () => handleDiscardWithAdjustment(editing) : undefined}
+            maintenancePrefillInfo={!editing ? maintPrefillInfo : null}
           />
         )}
 

@@ -34,6 +34,8 @@ interface Props {
   /** Si el gasto está vinculado a un ajuste de reserva (cobro por daño),
    *  pasar este handler activa el botón "Descartar gasto + ajuste". */
   onDiscardLinked?: () => void;
+  /** Si se provee, muestra banner informativo de mantenimiento vinculado. */
+  maintenancePrefillInfo?: { itemName: string; scheduleTitle: string } | null;
 }
 
 const INITIAL: FormData = {
@@ -63,6 +65,7 @@ const SUBTYPE_OPTIONS: Record<ExpenseSubcategory, string[]> = {
   cleaning:        ['Aseo (turn)', 'Insumos de limpieza', 'Lavandería externa', 'Otro'],
   damage:          ['Mancha / lavado', 'Rotura', 'Electrodoméstico', 'Mobiliario', 'Limpieza profunda', 'Otro'],
   guest_amenities: ['Welcome kit', 'Snack / bebida', 'Regalo', 'Detalle especial', 'Otro'],
+  penalty:         ['Cancelación huésped', 'Cancelación plataforma', 'No-show', 'Otro'],
 };
 
 // Parsea "[Subtipo] resto" → { subtype, rest }. También extrae el tag de daño
@@ -86,7 +89,7 @@ const composeDescription = (subtype: string, rest: string, tag = ''): string | n
   return body ? `${body} ${tag}` : tag;
 };
 
-export default function ExpenseModal({ properties = [], bankAccounts = [], onClose, onSave, onSaveShared, onSaveGroup, editingGroupId, editingGroupSize, error, initial, prefill, onDiscardLinked }: Props) {
+export default function ExpenseModal({ properties = [], bankAccounts = [], onClose, onSave, onSaveShared, onSaveGroup, editingGroupId, editingGroupSize, error, initial, prefill, onDiscardLinked, maintenancePrefillInfo }: Props) {
   const initialForm = initial ?? { ...INITIAL, date: todayISO(), ...(prefill ?? {}) };
   const initialParsed = parseDescription(initialForm.description ?? null);
   const [form, setForm] = useState<FormData>({ ...initialForm, description: initialParsed.rest || null });
@@ -263,6 +266,23 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
                   </p>
                   <p className="text-xs text-amber-700 mt-1.5">
                     ¿No vas a reparar? Usa <b>"Descartar"</b> abajo — eliminará también el ajuste de la reserva.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Banner contextual: gasto de mantenimiento de inventario */}
+          {maintenancePrefillInfo && (
+            <div className="mx-6 mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <span className="text-lg leading-none">🔧</span>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-blue-900">
+                    Gasto de mantenimiento — {maintenancePrefillInfo.itemName}
+                  </p>
+                  <p className="text-xs text-blue-800 mt-1">
+                    {maintenancePrefillInfo.scheduleTitle} · Al guardar, el mantenimiento quedará marcado como <b>completado</b>.
                   </p>
                 </div>
               </div>

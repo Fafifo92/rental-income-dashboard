@@ -70,6 +70,8 @@ export default function InventoryClient(): JSX.Element {
 
   // mantenimiento
   const [schedules, setSchedules] = useState<MaintenanceScheduleRow[]>([]);
+  const [allSchedules, setAllSchedules] = useState<MaintenanceScheduleRow[]>([]);
+  const [activeTab, setActiveTab] = useState<'items' | 'history'>('items');
   const [maintenanceTarget, setMaintenanceTarget] = useState<{
     item: InventoryItemRow;
     schedule: MaintenanceScheduleRow | null;
@@ -77,16 +79,18 @@ export default function InventoryClient(): JSX.Element {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [pRes, cRes, iRes, sRes] = await Promise.all([
+    const [pRes, cRes, iRes, sRes, allSRes] = await Promise.all([
       listProperties(),
       ensureDefaultCategories(),
       listInventoryItems(),
       getUpcomingAndOverdueSchedules(),
+      listMaintenanceSchedules(),
     ]);
     if (pRes.data) setProperties(pRes.data);
     if (cRes.data) setCategories(cRes.data);
     if (iRes.data) setItems(iRes.data);
     if (sRes.data) setSchedules(sRes.data);
+    if (!allSRes.error) setAllSchedules(allSRes.data);
     setLoading(false);
   }, []);
 
@@ -278,6 +282,49 @@ export default function InventoryClient(): JSX.Element {
         </div>
       )}
 
+      {/* Tabs: Items / Historial de mantenimiento */}
+      <div className="flex items-center gap-1 border-b border-slate-200 mb-4">
+        <button
+          onClick={() => setActiveTab('items')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+            activeTab === 'items'
+              ? 'text-blue-700 border-blue-600'
+              : 'text-slate-500 border-transparent hover:text-slate-700'
+          }`}
+        >
+          📦 Inventario
+        </button>
+        <button
+          onClick={() => setActiveTab('history')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+            activeTab === 'history'
+              ? 'text-amber-700 border-amber-600'
+              : 'text-slate-500 border-transparent hover:text-slate-700'
+          }`}
+        >
+          🔧 Historial de mantenimiento
+          {allSchedules.filter(s => s.status === 'done').length > 0 && (
+            <span className="ml-1.5 text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full">
+              {allSchedules.filter(s => s.status === 'done').length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* ── History Tab ─────────────────────────────────────────────────── */}
+      {activeTab === 'history' && (
+        <MaintenanceHistoryView
+          schedules={allSchedules}
+          items={items}
+          properties={properties}
+          propMap={propMap}
+          onSetMaintTarget={(item, sched) => setMaintenanceTarget({ item, schedule: sched })}
+        />
+      )}
+
+      {/* ── Items Tab ───────────────────────────────────────────────────── */}
+      {activeTab === 'items' && (
+        <>
       {/* Filtros */}
       <div className="bg-white rounded-xl border border-slate-200 p-3 mb-4 grid grid-cols-1 md:grid-cols-4 gap-2">
         <select
@@ -351,6 +398,8 @@ export default function InventoryClient(): JSX.Element {
           onScheduleMaintenance={(it, s) => setMaintenanceTarget({ item: it, schedule: s ?? null })}
         />
       )}
+        </>
+      )}
 
       <AnimatePresence>
         {(creating || editTarget) && (
@@ -414,6 +463,7 @@ export default function InventoryClient(): JSX.Element {
             items={items}
             properties={properties}
             categories={categories}
+            schedules={allSchedules}
             onClose={() => setShowExport(false)}
           />
         )}
@@ -602,6 +652,8 @@ function ItemRow({
   const lowStock =
     item.is_consumable && item.min_stock !== null && Number(item.quantity) <= Number(item.min_stock) && Number(item.quantity) > 0;
   const hasPendingMaint = pendingSchedules.length > 0;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const hasOverdueMaint = pendingSchedules.some(s => s.scheduled_date <= todayStr);
   return (
     <li className="px-5 py-2.5 flex items-center justify-between gap-3 hover:bg-slate-50/60">
       <div className="min-w-0 flex-1">
@@ -614,10 +666,14 @@ function ItemRow({
           {hasPendingMaint && (
             <button
               onClick={() => onScheduleMaintenance(item, pendingSchedules[0])}
-              className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 hover:bg-amber-200"
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                hasOverdueMaint
+                  ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                  : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+              }`}
               title={`${pendingSchedules.length} mantenimiento(s) programado(s)`}
             >
-              🔧 {pendingSchedules.length}
+              {hasOverdueMaint ? '🔴 Mantenimiento vencido' : '🟡 Mantenimiento próximo'}
             </button>
           )}
         </div>
@@ -1734,5 +1790,176 @@ function RecoverDamageModal({
         </div>
       </motion.div>
     </motion.div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Historial de mantenimiento (tab)
+// ──────────────────────────────────────────────────────────────────────────
+const MAINT_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  pending:   { label: 'Pendiente',  cls: 'bg-amber-100 text-amber-700' },
+  done:      { label: 'Realizado',  cls: 'bg-emerald-100 text-emerald-700' },
+  cancelled: { label: 'Cancelado',  cls: 'bg-slate-100 text-slate-500' },
+};
+
+function MaintenanceHistoryView({
+  schedules,
+  items,
+  properties,
+  propMap,
+  onSetMaintTarget,
+}: {
+  schedules: MaintenanceScheduleRow[];
+  items: InventoryItemRow[];
+  properties: PropertyRow[];
+  propMap: Map<string, PropertyRow>;
+  onSetMaintTarget: (item: InventoryItemRow, sched: MaintenanceScheduleRow | null) => void;
+}) {
+  const [propFilter, setPropFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [search, setSearch] = useState('');
+
+  const itemMap = useMemo(() => {
+    const m = new Map<string, InventoryItemRow>();
+    for (const it of items) m.set(it.id, it);
+    return m;
+  }, [items]);
+
+  const filtered = useMemo(() => {
+    return [...schedules]
+      .sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date))
+      .filter(s => {
+        if (propFilter !== 'all' && s.property_id !== propFilter) return false;
+        if (statusFilter !== 'all' && s.status !== statusFilter) return false;
+        if (search.trim()) {
+          const q = search.toLowerCase();
+          const item = itemMap.get(s.item_id);
+          if (
+            !s.title.toLowerCase().includes(q) &&
+            !(item?.name ?? '').toLowerCase().includes(q)
+          ) return false;
+        }
+        return true;
+      });
+  }, [schedules, propFilter, statusFilter, search, itemMap]);
+
+  if (schedules.length === 0) {
+    return (
+      <div className="text-center py-16 text-slate-400">
+        <div className="text-4xl mb-3">🔧</div>
+        <p className="font-medium text-slate-600">Sin historial de mantenimiento</p>
+        <p className="text-sm mt-1">Los mantenimientos agendados y realizados apareceran aqui.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        <select
+          value={propFilter}
+          onChange={e => setPropFilter(e.target.value)}
+          className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-amber-400 outline-none"
+        >
+          <option value="all">Todas las propiedades</option>
+          {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-amber-400 outline-none"
+        >
+          <option value="all">Todos los estados</option>
+          <option value="pending">Pendiente</option>
+          <option value="done">Realizado</option>
+          <option value="cancelled">Cancelado</option>
+        </select>
+        <input
+          type="search"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Buscar por item o titulo..."
+          className="flex-1 min-w-[180px] px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-400 outline-none"
+        />
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="text-sm text-slate-400 text-center py-8">Sin resultados con los filtros actuales.</p>
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-600">Fecha</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-600">Propiedad</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-600">Item</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-600">Titulo</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-600">Estado</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-600">Gasto</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-600"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filtered.map(s => {
+                  const item = itemMap.get(s.item_id);
+                  const prop = propMap.get(s.property_id);
+                  const badge = MAINT_STATUS_BADGE[s.status] ?? MAINT_STATUS_BADGE.pending;
+                  return (
+                    <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-2.5 text-slate-700 font-mono text-xs whitespace-nowrap">
+                        {s.scheduled_date}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-600 text-xs">
+                        {prop?.name ?? '\u2014'}
+                      </td>
+                      <td className="px-4 py-2.5 font-medium text-slate-800 text-xs">
+                        {item?.name ?? 'Item eliminado'}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-600 text-xs">
+                        <span>{s.title}</span>
+                        {s.is_recurring && (
+                          <span className="ml-1.5 text-[10px] text-amber-600">{'\u{1F501}'} cada {s.recurrence_days}d</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${badge.cls}`}>
+                          {badge.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {s.status === 'done' && (
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                            s.expense_registered
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : 'bg-blue-50 text-blue-600'
+                          }`}>
+                            {s.expense_registered ? '\u2705 Registrado' : '\u23F3 Sin gasto'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {item && s.status === 'pending' && (
+                          <button
+                            type="button"
+                            onClick={() => onSetMaintTarget(item, s)}
+                            className="text-[10px] font-semibold text-amber-700 hover:bg-amber-50 px-2 py-0.5 rounded border border-amber-200"
+                          >
+                            Editar
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="px-4 py-2 border-t border-slate-100 text-xs text-slate-400">
+            {filtered.length} registro{filtered.length !== 1 ? 's' : ''}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
