@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { type VendorKind, type PropertyRow, type VendorPropertyRow, type BankAccountRow, type SharedBillRow, type ExpenseCategory, type CreditPoolRow, type CreditPoolConsumptionRule, EXPENSE_CATEGORIES } from '@/types/database';
+import { AnimatePresence } from 'framer-motion';
+import { type VendorKind, type PropertyRow, type VendorPropertyRow, type BankAccountRow, type SharedBillRow, type CreditPoolRow, type ExpenseCategory, EXPENSE_CATEGORIES } from '@/types/database';
 import { listVendors, createVendor, updateVendor, deleteVendor, type Vendor } from '@/services/vendors';
 import { listCreditPools, createCreditPool, updateCreditPool, type CreateCreditPoolInput } from '@/services/creditPools';
 import { listVendorProperties, setVendorProperties, listAllVendorProperties } from '@/services/vendorProperties';
@@ -9,89 +9,17 @@ import { listProperties } from '@/services/properties';
 import { listBankAccounts } from '@/services/bankAccounts';
 import { listSharedBills, deleteSharedBill } from '@/services/sharedBills';
 import { currentYearMonth, yearMonthRange } from '@/services/recurringPeriods';
-import { formatCurrency } from '@/lib/utils';
-import { makeBackdropHandlers } from '@/lib/useBackdropClose';
-import SharedBillPayModal from './SharedBillPayModal';
-import MoneyInput from '@/components/MoneyInput';
-import { parseMoney } from '@/lib/money';
-import { toast } from '@/lib/toast';
 import { todayISO } from '@/lib/dateUtils';
-
-const KINDS: { value: VendorKind; label: string; icon: string; description: string; group: 'utilities' | 'business' }[] = [
-  { value: 'utility',          label: 'Servicio público',     icon: '💡', description: 'Luz, agua, gas, internet — gastos de operación de cada propiedad.', group: 'utilities' },
-  { value: 'business_service', label: 'Plataforma / SaaS',    icon: '🧰', description: 'Suscripciones de plataformas de administración (Hospitable, Hostfully, esta app), marketing, hosting.', group: 'business' },
-  { value: 'admin',            label: 'Administración',       icon: '🏢', description: 'Contador, asesor legal, persona que administra la operación.', group: 'business' },
-  { value: 'tax',              label: 'Predial / Impuestos',  icon: '🧾', description: 'Predial, impuestos del rubro, retenciones, cámara de comercio.', group: 'business' },
-  { value: 'maintenance',      label: 'Mantenimiento',        icon: '🔧', description: 'Plomero, electricista, carpintería, jardinería.', group: 'business' },
-  { value: 'insurance',        label: 'Seguros',              icon: '🛡️', description: 'Pólizas de la propiedad o del negocio.', group: 'business' },
-  { value: 'other',            label: 'Otro',                 icon: '📌', description: 'Cualquier otro proveedor recurrente.', group: 'business' },
-];
-
-// Tipos visibles al CREAR/EDITAR un proveedor desde esta página.
-// Excluye 'utility' (los servicios públicos van como recurrentes por propiedad)
-// y 'cleaner' (el aseo va por su propio módulo).
-const KINDS_FORM = KINDS.filter(k => k.group === 'business');
-
-
-const kindLabel = (k: VendorKind) => KINDS.find(x => x.value === k)?.label ?? (k === 'cleaner' ? 'Aseo (legacy)' : k);
-const kindIcon  = (k: VendorKind) => KINDS.find(x => x.value === k)?.icon  ?? '📌';
-const kindDescription = (k: VendorKind) => KINDS.find(x => x.value === k)?.description ?? '';
-
-const ymLabel = (ym: string): string => {
-  const [y, m] = ym.split('-');
-  const names = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-  return `${names[Number(m) - 1]} ${y.slice(2)}`;
-};
-
-const defaultCategoryFor = (k: VendorKind): ExpenseCategory => {
-  if (k === 'utility') return 'Servicios públicos'; // legacy display only
-  if (k === 'admin') return 'Administración';
-  if (k === 'business_service') return 'Administración';
-  if (k === 'tax') return 'Administración';
-  if (k === 'maintenance') return 'Mantenimiento';
-  if (k === 'insurance') return 'Administración';
-  return 'Otros';
-};
-
-type PropShare = {
-  propertyId: string;
-  sharePercent: number | null;
-  fixedAmount: number | null;
-};
-
-interface Form {
-  name: string;
-  kind: VendorKind;
-  category: ExpenseCategory;
-  defaultAmount: string;       // string para el input
-  dayOfMonth: string;
-  startYearMonth: string;      // 'YYYY-MM' (opcional)
-  isVariable: boolean;
-  contact: string;
-  notes: string;
-  active: boolean;
-  props: PropShare[];
-  poolEnabled: boolean;
-  poolCreditsTotal: string;
-  poolConsumptionRule: CreditPoolConsumptionRule;
-  poolCreditsPerUnit: string;
-  poolChildWeight: string;
-  poolActivatedAt: string;
-  poolExpiresAt: string;
-}
-
-const EMPTY: Form = {
-  name: '', kind: 'business_service', category: 'Administración',
-  defaultAmount: '', dayOfMonth: '', startYearMonth: '', isVariable: false,
-  contact: '', notes: '', active: true, props: [],
-  poolEnabled: false,
-  poolCreditsTotal: '',
-  poolConsumptionRule: 'per_person_per_night',
-  poolCreditsPerUnit: '1',
-  poolChildWeight: '1',
-  poolActivatedAt: todayISO(),
-  poolExpiresAt: '',
-};
+import { formatCurrency } from '@/lib/utils';
+import SharedBillPayModal from './SharedBillPayModal';
+import { toast } from '@/lib/toast';
+import {
+  KINDS_FORM, kindLabel, kindIcon, defaultCategoryFor, ymLabel,
+  type VendorForm, type PropShare, EMPTY_VENDOR_FORM,
+} from './vendors/vendorTypes';
+import VendorFormModal from './vendors/VendorFormModal';
+import VendorConfirmDeleteModal from './vendors/VendorConfirmDeleteModal';
+import VendorPaymentsMatrix from './vendors/VendorPaymentsMatrix';
 
 export default function VendorsClient(): JSX.Element {
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -103,7 +31,7 @@ export default function VendorsClient(): JSX.Element {
   const [filter, setFilter] = useState<VendorKind | 'all'>('all');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Vendor | null>(null);
-  const [form, setForm] = useState<Form>(EMPTY);
+  const [form, setForm] = useState<VendorForm>(EMPTY_VENDOR_FORM);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Vendor | null>(null);
@@ -136,7 +64,7 @@ export default function VendorsClient(): JSX.Element {
     const url = new URL(window.location.href);
     if (url.searchParams.get('new') === '1') {
       setEditing(null);
-      setForm(EMPTY);
+      setForm(EMPTY_VENDOR_FORM);
       setErr(null);
       setModalOpen(true);
       // limpiar la query para que no se reabra al refrescar
@@ -187,7 +115,7 @@ export default function VendorsClient(): JSX.Element {
     await load();
   };
 
-  const openNew = () => { setEditing(null); setForm(EMPTY); setErr(null); setEditingPool(null); setModalOpen(true); };
+  const openNew = () => { setEditing(null); setForm(EMPTY_VENDOR_FORM); setErr(null); setEditingPool(null); setModalOpen(true); };
   const openEdit = async (v: Vendor) => {
     setEditing(v);
     const vpRes = await listVendorProperties(v.id);
@@ -335,7 +263,10 @@ export default function VendorsClient(): JSX.Element {
       <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
         <div className="flex-1 min-w-0">
           <h1 className="text-3xl font-bold text-slate-800">Proveedores y gastos del negocio</h1>
-          <p className="text-sm text-slate-500 mt-1">Aquí van los <strong>gastos del rubro</strong>: suscripciones SaaS, persona que administra, contador, predial, impuestos, mantenimiento o seguros. Los <strong>servicios públicos</strong> (luz, agua, gas, internet) se configuran como gasto recurrente dentro de cada propiedad. El aseo va por su propio módulo.</p>
+          <p className="text-sm text-slate-500 mt-1">
+            Aquí van los <strong>gastos del rubro</strong>: suscripciones SaaS, persona que administra, contador, predial, impuestos, mantenimiento o seguros.{' '}
+            Los <strong>servicios públicos</strong> (luz, agua, gas, internet) se configuran como gasto recurrente dentro de cada propiedad. El aseo va por su propio módulo.
+          </p>
         </div>
         <button
           onClick={openNew}
@@ -345,7 +276,7 @@ export default function VendorsClient(): JSX.Element {
         </button>
       </header>
 
-      {/* Filtros — sólo kinds aplicables (excluye legacy 'utility'/'cleaner') */}
+      {/* Filtros */}
       <div className="flex flex-wrap gap-2 mb-6">
         <button
           onClick={() => setFilter('all')}
@@ -419,77 +350,15 @@ export default function VendorsClient(): JSX.Element {
         </div>
       )}
 
-      {/* Matriz mensual de pagos */}
       {!loading && filtered.length > 0 && (
-        <section className="mt-6 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <header className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-slate-800">Matriz de pagos mensuales</h2>
-              <p className="text-[11px] text-slate-500">Click en una celda para registrar o ver el pago. Verde = pagado, ámbar = pendiente.</p>
-            </div>
-          </header>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-600 text-xs uppercase">
-                <tr>
-                  <th className="text-left px-4 py-2 sticky left-0 bg-slate-50">Servicio</th>
-                  {months.map(ym => (
-                    <th key={ym} className="text-center px-3 py-2 whitespace-nowrap">{ymLabel(ym)}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filtered.map(v => {
-                  const props = propsCountByVendor.get(v.id) ?? 0;
-                  return (
-                    <tr key={v.id} className="hover:bg-slate-50/50">
-                      <td className="px-4 py-2 sticky left-0 bg-white">
-                        <div className="font-medium text-slate-800 text-sm truncate max-w-[200px]" title={v.name}>{v.name}</div>
-                        <div className="text-[10px] text-slate-500">{props} prop · {v.default_amount != null ? formatCurrency(Number(v.default_amount)) : '—'}</div>
-                      </td>
-                      {months.map(ym => {
-                        const bill = billByVendorMonth.get(`${v.id}::${ym}`);
-                        if (bill) {
-                          return (
-                            <td key={ym} className="px-2 py-1.5 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteBill(bill)}
-                                title={`Pagado el ${bill.paid_date} · ${formatCurrency(Number(bill.total_amount))}\nClick para anular`}
-                                className="w-full px-2 py-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200 text-[11px] font-semibold"
-                              >
-                                ✓ {formatCurrency(Number(bill.total_amount))}
-                              </button>
-                            </td>
-                          );
-                        }
-                        if (v.start_year_month && ym < v.start_year_month) {
-                          return <td key={ym} className="px-2 py-1.5 text-center text-slate-300" title="Anterior a la fecha de inicio del proveedor">·</td>;
-                        }
-                        if (props === 0) {
-                          return <td key={ym} className="px-2 py-1.5 text-center text-slate-300">—</td>;
-                        }
-                        const estimated = Number(v.default_amount ?? 0);
-                        return (
-                          <td key={ym} className="px-2 py-1.5 text-center">
-                            <button
-                              type="button"
-                              onClick={() => setPaying({ vendor: v, ym, estimated })}
-                              title={`Pendiente · estimado ${formatCurrency(estimated)}`}
-                              className="w-full px-2 py-1 rounded border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 text-[11px] font-semibold"
-                            >
-                              ⏳ Pagar
-                            </button>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <VendorPaymentsMatrix
+          vendors={filtered}
+          months={months}
+          propsCountByVendor={propsCountByVendor}
+          billByVendorMonth={billByVendorMonth}
+          onDeleteBill={handleDeleteBill}
+          onPay={(v, ym, estimated) => setPaying({ vendor: v, ym, estimated })}
+        />
       )}
 
       <AnimatePresence>
@@ -505,365 +374,36 @@ export default function VendorsClient(): JSX.Element {
         )}
       </AnimatePresence>
 
-      {/* Modal crear/editar */}
       <AnimatePresence>
         {modalOpen && (
-          <motion.div
-            className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            {...makeBackdropHandlers(() => setModalOpen(false))}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              onClick={e => e.stopPropagation()}
-              onMouseDown={e => e.stopPropagation()}
-              onMouseUp={e => e.stopPropagation()}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto"
-            >
-              <h3 className="text-xl font-bold text-slate-800 mb-4">
-                {editing ? 'Editar proveedor' : 'Nuevo proveedor'}
-              </h3>
-
-              {editing && (
-                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
-                  ℹ️ Al editar este proveedor <b>no se modifican los gastos ya registrados</b>.
-                  El nuevo precio o datos solo aplicarán a futuros pagos.
-                </p>
-              )}
-
-              {err && <p className="text-xs text-red-600 mb-3">{err}</p>}
-
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Nombre *</label>
-                  <input
-                    type="text"
-                    value={form.name}
-                    onChange={e => setForm({ ...form, name: e.target.value })}
-                    placeholder="Ej: Hospitable, Contador Pérez, Predial 2025"
-                    className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Tipo *</label>
-                  <select
-                    value={form.kind}
-                    onChange={e => {
-                      const newKind = e.target.value as VendorKind;
-                      setForm(f => ({ ...f, kind: newKind, category: defaultCategoryFor(newKind) }));
-                    }}
-                    className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
-                  >
-                    {KINDS_FORM.map(k => <option key={k.value} value={k.value}>{k.icon} {k.label}</option>)}
-                    {/* Soporte legacy: si el vendor existente es utility/cleaner, lo dejamos visible al editar para no perder el valor */}
-                    {!KINDS_FORM.some(k => k.value === form.kind) && (
-                      <option value={form.kind}>
-                        {(KINDS.find(k => k.value === form.kind)?.icon ?? '🗂') + ' '}
-                        {KINDS.find(k => k.value === form.kind)?.label ?? form.kind} (legacy)
-                      </option>
-                    )}
-                  </select>
-                  <p className="text-[11px] text-slate-500 mt-1 italic">{kindDescription(form.kind)}</p>
-                </div>
-
-                <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                  💼 Los gastos de este proveedor se registrarán en la categoría <b>{defaultCategoryFor(form.kind)}</b>.
-                </p>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">
-                      {form.kind === 'insurance' ? 'Precio de la bolsa (COP)' : 'Monto mensual estimado'}
-                    </label>
-                    <MoneyInput
-                      value={parseMoney(form.defaultAmount)}
-                      onChange={(v) => setForm({ ...form, defaultAmount: v == null ? '' : String(v) })}
-                      placeholder="0"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Día del mes</label>
-                    <input
-                      type="number"
-                      min={1} max={31}
-                      value={form.dayOfMonth}
-                      onChange={e => setForm({ ...form, dayOfMonth: e.target.value })}
-                      placeholder="ej. 15"
-                      className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                  </div>
-                </div>
-
-                {form.kind === 'insurance' && (
-                  <div className="border border-amber-200 rounded-xl bg-amber-50 p-4 space-y-3">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={form.poolEnabled}
-                        onChange={e => setForm(f => ({ ...f, poolEnabled: e.target.checked }))}
-                        className="w-4 h-4 accent-amber-600"
-                      />
-                      <span className="text-sm font-semibold text-amber-900">Configurar como bolsa de créditos</span>
-                    </label>
-                    <p className="text-[11px] text-amber-700">
-                      Activa esto si este seguro funciona por créditos prepagados que se descuentan al hacer check-in de cada reserva.
-                    </p>
-                    {form.poolEnabled && (
-                      <div className="space-y-3 pt-1">
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-1">Total de créditos *</label>
-                            <input
-                              type="number" min={1}
-                              value={form.poolCreditsTotal}
-                              onChange={e => setForm(f => ({ ...f, poolCreditsTotal: e.target.value }))}
-                              placeholder="Ej: 1000"
-                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-1">Créditos por unidad</label>
-                            <input
-                              type="number" min={0.01} step={0.01}
-                              value={form.poolCreditsPerUnit}
-                              onChange={e => setForm(f => ({ ...f, poolCreditsPerUnit: e.target.value }))}
-                              placeholder="1"
-                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-semibold text-slate-600 mb-1">Regla de consumo</label>
-                          <select
-                            value={form.poolConsumptionRule}
-                            onChange={e => setForm(f => ({ ...f, poolConsumptionRule: e.target.value as CreditPoolConsumptionRule }))}
-                            className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none bg-white"
-                          >
-                            <option value="per_person_per_night">Por persona y noche</option>
-                            <option value="per_person_per_booking">Por persona (toda la reserva)</option>
-                            <option value="per_booking">Por reserva (fijo)</option>
-                          </select>
-                        </div>
-                        {form.poolConsumptionRule !== 'per_booking' && (
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-1">Peso de niños (0–1)</label>
-                            <input
-                              type="number" min={0} max={1} step={0.1}
-                              value={form.poolChildWeight}
-                              onChange={e => setForm(f => ({ ...f, poolChildWeight: e.target.value }))}
-                              placeholder="1"
-                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
-                            />
-                            <p className="text-[10px] text-slate-500 mt-0.5">1 = niños cuentan igual que adultos, 0.5 = mitad de créditos</p>
-                          </div>
-                        )}
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-1">Activar desde *</label>
-                            <input
-                              type="date"
-                              value={form.poolActivatedAt}
-                              onChange={e => setForm(f => ({ ...f, poolActivatedAt: e.target.value }))}
-                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-1">Vence (opcional)</label>
-                            <input
-                              type="date"
-                              value={form.poolExpiresAt}
-                              onChange={e => setForm(f => ({ ...f, poolExpiresAt: e.target.value }))}
-                              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
-                            />
-                          </div>
-                        </div>
-                        <p className="text-[10px] text-amber-700">
-                          💡 El precio de la bolsa se toma del campo "Monto mensual estimado" de arriba.
-                        </p>
-                        {editingPool && (
-                          <div className="text-[11px] text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2">
-                            Bolsa activa: <b>{editingPool.credits_used}</b> / {editingPool.credits_total} créditos usados
-                            {editingPool.status === 'depleted' && <span className="ml-2 text-red-600 font-semibold">· AGOTADA</span>}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Vigente desde (mes)</label>
-                  <input
-                    type="month"
-                    value={form.startYearMonth}
-                    onChange={e => setForm({ ...form, startYearMonth: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
-                  <p className="text-[11px] text-slate-500 mt-1">Si lo dejas en blanco se generan periodos pendientes desde hace varios meses. Defínelo para que no aparezcan meses anteriores que no debes pagar.</p>
-                </div>
-
-                <label className="flex items-start gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-100">
-                  <input
-                    type="checkbox"
-                    checked={form.isVariable}
-                    onChange={e => setForm({ ...form, isVariable: e.target.checked })}
-                    className="mt-0.5"
-                  />
-                  <div>
-                    <div className="text-xs font-semibold text-slate-700">El monto cambia mes a mes</div>
-                    <div className="text-[11px] text-slate-500">Marca esto si el total varía (ej. luz, gas, agua). Al pagar, el sistema te pedirá el total real y el monto exacto que paga cada apartamento.</div>
-                  </div>
-                </label>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Contacto</label>
-                  <input
-                    type="text"
-                    value={form.contact}
-                    onChange={e => setForm({ ...form, contact: e.target.value })}
-                    placeholder="Teléfono, email o ambos"
-                    className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Notas</label>
-                  <textarea
-                    value={form.notes}
-                    onChange={e => setForm({ ...form, notes: e.target.value })}
-                    rows={3}
-                    className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                  />
-                </div>
-
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={form.active}
-                    onChange={e => setForm({ ...form, active: e.target.checked })}
-                    className="w-4 h-4"
-                  />
-                  Activo
-                </label>
-
-                <div className="pt-3 border-t border-slate-100">
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">
-                    Propiedades cubiertas
-                  </label>
-                  <p className="text-[11px] text-slate-500 mb-2">
-                    Marca las propiedades que paga este servicio. Reglas de reparto al pagar la factura mensual:<br/>
-                    <span className="font-semibold">monto fijo</span> tiene prioridad; si no, se usa el <span className="font-semibold">%</span>;
-                    si no hay nada, se reparte por partes iguales.
-                  </p>
-                  {properties.length === 0 ? (
-                    <p className="text-xs text-slate-400">No tienes propiedades creadas aún.</p>
-                  ) : (
-                    <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
-                      {properties.map(p => {
-                        const sel = form.props.find(fp => fp.propertyId === p.id);
-                        return (
-                          <div key={p.id} className="px-3 py-2 hover:bg-slate-50">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={!!sel}
-                                onChange={() => toggleProp(p.id)}
-                                className="w-4 h-4"
-                              />
-                              <span className="flex-1 text-sm text-slate-700 truncate">{p.name}</span>
-                            </label>
-                            {sel && (
-                              <div className="grid grid-cols-2 gap-2 mt-2 ml-6">
-                                <div>
-                                  <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Monto fijo</label>
-                                  <MoneyInput
-                                    value={sel.fixedAmount ?? null}
-                                    onChange={(v) => setPropFixed(p.id, v == null ? '' : String(v))}
-                                    placeholder="—"
-                                    prefix={null}
-                                    inputClassName="text-xs text-right"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">o % del total</label>
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={100}
-                                    step={0.1}
-                                    value={sel.sharePercent ?? ''}
-                                    onChange={e => setPropShare(p.id, e.target.value)}
-                                    placeholder="auto"
-                                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded focus:ring-1 focus:ring-blue-400 outline-none text-right"
-                                  />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  {form.props.length > 0 && (() => {
-                    const fixed = form.props.filter(p => p.fixedAmount != null);
-                    const pct   = form.props.filter(p => p.fixedAmount == null && p.sharePercent != null);
-                    const eq    = form.props.filter(p => p.fixedAmount == null && p.sharePercent == null);
-                    const fixedSum = fixed.reduce((s, p) => s + (p.fixedAmount ?? 0), 0);
-                    const pctSum   = pct.reduce((s, p) => s + (p.sharePercent ?? 0), 0);
-                    return (
-                      <p className="text-[11px] text-slate-600 mt-1">
-                        {fixed.length > 0 && <>Fijos: {formatCurrency(fixedSum)} · </>}
-                        {pct.length > 0 && <>%: {pctSum.toFixed(1)}% · </>}
-                        {eq.length > 0 && <>{eq.length} con reparto igual del resto</>}
-                      </p>
-                    );
-                  })()}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
-                <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {saving ? 'Guardando…' : editing ? 'Guardar' : 'Crear'}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
+          <VendorFormModal
+            editing={editing}
+            form={form}
+            setForm={setForm}
+            err={err}
+            saving={saving}
+            editingPool={editingPool}
+            properties={properties}
+            toggleProp={toggleProp}
+            setPropShare={setPropShare}
+            setPropFixed={setPropFixed}
+            onSave={handleSave}
+            onClose={() => setModalOpen(false)}
+          />
         )}
       </AnimatePresence>
 
-      {/* Confirm delete */}
       <AnimatePresence>
         {confirmDelete && (
-          <motion.div
-            className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            {...makeBackdropHandlers(() => setConfirmDelete(null))}
-          >
-            <motion.div
-              initial={{ scale: 0.95 }} animate={{ scale: 1 }}
-              onClick={e => e.stopPropagation()}
-              onMouseDown={e => e.stopPropagation()}
-              onMouseUp={e => e.stopPropagation()}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6"
-            >
-              <h3 className="text-lg font-bold text-slate-800 mb-2">Eliminar proveedor</h3>
-              <p className="text-sm text-slate-600 mb-5">
-                ¿Seguro que deseas eliminar <b>{confirmDelete.name}</b>? Los gastos o aseos que lo referenciaban quedarán sin proveedor pero no se eliminarán.
-              </p>
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setConfirmDelete(null)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
-                <button onClick={() => handleDelete(confirmDelete)} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700">Eliminar</button>
-              </div>
-            </motion.div>
-          </motion.div>
+          <VendorConfirmDeleteModal
+            vendor={confirmDelete}
+            onConfirm={() => handleDelete(confirmDelete)}
+            onClose={() => setConfirmDelete(null)}
+          />
         )}
       </AnimatePresence>
     </div>
   );
 }
+
+
