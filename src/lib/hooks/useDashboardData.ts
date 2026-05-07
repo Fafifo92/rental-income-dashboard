@@ -41,7 +41,7 @@ export function useDashboardData({ period, authStatus, propertyIds, customRange 
       setPayoutBreakdown(result.payoutBreakdown);
       setGranularity(result.granularity);
       setLoading(false);
-    });
+    }).catch(() => { if (!cancelled) setLoading(false); });
 
     setTxLoading(true);
     const { from, to } = resolvePeriodRange(period, customRange);
@@ -49,7 +49,7 @@ export function useDashboardData({ period, authStatus, propertyIds, customRange 
       if (cancelled) return;
       setTransactions(result.data ?? []);
       setTxLoading(false);
-    });
+    }).catch(() => { if (!cancelled) setTxLoading(false); });
 
     return () => { cancelled = true; };
   }, [period, authStatus, propertyIds, customRange]);

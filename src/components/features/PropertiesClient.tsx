@@ -37,18 +37,21 @@ export default function PropertiesClient() {
       return;
     }
 
+    let cancelled = false;
     Promise.all([
       listProperties(),
       listPropertyGroups(),
       listPropertyTags(),
       listAllTagAssignments(),
     ]).then(([propRes, gRes, tRes, aRes]) => {
+      if (cancelled) return;
       setProperties(propRes.error ? [] : (propRes.data as Property[]));
       if (gRes.data) setGroups(gRes.data);
       if (tRes.data) setTags(tRes.data);
       if (aRes.data) setTagAssigns(aRes.data);
       setLoading(false);
-    });
+    }).catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [authStatus]);
 
   const tagsByPropertyId = useMemo(() => {

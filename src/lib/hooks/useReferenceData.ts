@@ -34,20 +34,22 @@ export function useReferenceData({
 
   useEffect(() => {
     if (authStatus !== 'authed') return;
+    let cancelled = false;
     if (withProperties) {
-      listProperties().then(res => { if (!res.error) setProperties(res.data ?? []); });
+      listProperties().then(res => { if (!cancelled && !res.error) setProperties(res.data ?? []); });
     }
     if (withBankAccounts) {
       listBankAccounts().then(res => {
-        if (!res.error) {
+        if (!cancelled && !res.error) {
           const data = res.data ?? [];
           setBankAccounts(activeBankAccountsOnly ? data.filter(a => a.is_active) : data);
         }
       });
     }
     if (withListings) {
-      listListings().then(res => { if (!res.error) setListings(res.data ?? []); });
+      listListings().then(res => { if (!cancelled && !res.error) setListings(res.data ?? []); });
     }
+    return () => { cancelled = true; };
   }, [authStatus, withProperties, withBankAccounts, activeBankAccountsOnly, withListings]);
 
   return { properties, bankAccounts, listings };

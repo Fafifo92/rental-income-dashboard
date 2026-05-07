@@ -38,8 +38,9 @@ export const createProperty = async (
   baseCurrency = 'COP',
   rnt?: string | null,
 ): Promise<ServiceResult<PropertyRow>> => {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { data: null, error: 'No autenticado — inicia sesión primero' };
+  const { data: authData, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !authData?.user) return { data: null, error: 'No autenticado — inicia sesión primero' };
+  const user = authData.user;
 
   const { data, error } = await supabase
     .from('properties')

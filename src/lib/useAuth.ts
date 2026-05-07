@@ -7,21 +7,22 @@ export function useAuth(requireAuth = true): AuthStatus {
   const [status, setStatus] = useState<AuthStatus>('checking');
 
   useEffect(() => {
-    // No env vars → always demo mode (local dev / public demo)
+    let cancelled = false;
     if (!isSupabaseConfigured()) {
       setStatus('demo');
       return;
     }
     getSession().then(session => {
+      if (cancelled) return;
       if (session) {
         setStatus('authed');
       } else if (requireAuth) {
-        // Supabase is configured but user is not logged in → go to login
         window.location.href = '/login';
       } else {
         setStatus('demo');
       }
-    });
+    }).catch(() => { if (!cancelled) setStatus('demo'); });
+    return () => { cancelled = true; };
   }, [requireAuth]);
 
   return status;

@@ -75,19 +75,22 @@ export default function InventoryClient(): JSX.Element {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [pRes, cRes, iRes, sRes, allSRes] = await Promise.all([
-      listProperties(),
-      ensureDefaultCategories(),
-      listInventoryItems(),
-      getUpcomingAndOverdueSchedules(),
-      listMaintenanceSchedules(),
-    ]);
-    if (pRes.data) setProperties(pRes.data);
-    if (cRes.data) setCategories(cRes.data);
-    if (iRes.data) setItems(iRes.data);
-    if (sRes.data) setSchedules(sRes.data);
-    if (!allSRes.error) setAllSchedules(allSRes.data);
-    setLoading(false);
+    try {
+      const [pRes, cRes, iRes, sRes, allSRes] = await Promise.all([
+        listProperties(),
+        ensureDefaultCategories(),
+        listInventoryItems(),
+        getUpcomingAndOverdueSchedules(),
+        listMaintenanceSchedules(),
+      ]);
+      if (pRes.data) setProperties(pRes.data);
+      if (cRes.data) setCategories(cRes.data);
+      if (iRes.data) setItems(iRes.data);
+      if (sRes.data) setSchedules(sRes.data);
+      if (!allSRes.error) setAllSchedules(allSRes.data);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
