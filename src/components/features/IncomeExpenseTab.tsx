@@ -145,7 +145,7 @@ export default function IncomeExpenseTab({ payout, kpis, granularity = 'month', 
           </div>
         </div>
 
-        <ResponsiveContainer width="100%" height={340}>
+        <ResponsiveContainer width="100%" height={340} minWidth={0}>
           <ComposedChart data={monthlyBreakdown} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
             barCategoryGap="22%"
           >

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Period } from '@/services/financial';
 import { todayISO } from '@/lib/dateUtils';
@@ -22,7 +22,6 @@ export default function PeriodSelector({ value, onChange, customRange, onCustomR
   const today      = todayISO();
   const [from, setFrom] = useState(customRange?.from ?? '');
   const [to,   setTo  ] = useState(customRange?.to   ?? '');
-  const panelRef = useRef<HTMLDivElement>(null);
 
   // Sync local state when parent resets
   useEffect(() => {
@@ -67,7 +66,6 @@ export default function PeriodSelector({ value, onChange, customRange, onCustomR
       <AnimatePresence>
         {value === 'custom' && (
           <motion.div
-            ref={panelRef}
             initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}

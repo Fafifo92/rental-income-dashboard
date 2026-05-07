@@ -6,6 +6,7 @@ import { listVendors, createVendor, updateVendor, deleteVendor, type Vendor } fr
 import { listBankAccounts } from '@/services/bankAccounts';
 import {
   listAllCleanings,
+  listAllCleaningsEnriched,
   computeCleanerBalances,
   payoutCleanerConsolidated,
   getLooseCleanerSuppliesTotals,
@@ -20,7 +21,8 @@ import {
 } from '@/services/cleanerGroups';
 import type { BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
-import { Pencil, UserMinus } from 'lucide-react';
+import { Pencil, UserMinus, Download } from 'lucide-react';
+import { exportAseoToCsv, exportAseoToExcel, exportAseoToPdf, type AseoExportRow } from '@/services/export';
 import { TagChip, NewTagInline } from './aseo/CleanerTagControls';
 import NewCleanerModal from './aseo/NewCleanerModal';
 import DetailModal from './aseo/DetailModal';
@@ -44,6 +46,16 @@ export default function AseoClient(): JSX.Element {
   const [payoutTarget, setPayoutTarget] = useState<Vendor | null>(null);
   const [editing, setEditing] = useState<Vendor | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Vendor | null>(null);
+
+  // Historial state
+  const [histDateFrom, setHistDateFrom] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [histDateTo, setHistDateTo]     = useState(() => new Date().toISOString().slice(0, 10));
+  const [histCleanerIds, setHistCleanerIds] = useState<string[]>([]);
+  const [exporting, setExporting]       = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -107,6 +119,23 @@ export default function AseoClient(): JSX.Element {
       return cTags.some(t => tagFilters.includes(t.id));
     });
   }, [cleaners, tagFilters, cleanerTagsMap]);
+
+  const cleanerMap = useMemo(() => new Map(cleaners.map(c => [c.id, c])), [cleaners]);
+
+  const filteredHistCleanings = useMemo(() => {
+    return cleanings
+      .filter(c => {
+        if (histCleanerIds.length > 0 && c.cleaner_id && !histCleanerIds.includes(c.cleaner_id)) return false;
+        if (histDateFrom && c.done_date && c.done_date < histDateFrom) return false;
+        if (histDateTo && c.done_date && c.done_date > histDateTo) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const da = a.done_date ?? a.created_at ?? '';
+        const db = b.done_date ?? b.created_at ?? '';
+        return db.localeCompare(da);
+      });
+  }, [cleanings, histCleanerIds, histDateFrom, histDateTo]);
 
   const handleCreate = async () => {
     if (!form.name.trim()) { setErr('El nombre es obligatorio.'); return; }
@@ -184,6 +213,38 @@ export default function AseoClient(): JSX.Element {
   // Bloque 9: NO marcamos paid individual. El paid se crea junto con el expense
   // a través de payoutCleanerConsolidated (botón "Liquidar"). Mantener
   // consistencia entre booking_cleanings.status='paid' y un expense real.
+
+  const handleExport = async (format: 'csv' | 'excel' | 'pdf') => {
+    setExporting(true);
+    setExportMenuOpen(false);
+    const res = await listAllCleaningsEnriched({
+      from: histDateFrom || undefined,
+      to:   histDateTo   || undefined,
+      cleanerIds: histCleanerIds.length > 0 ? histCleanerIds : undefined,
+    });
+    if (res.error || !res.data) {
+      toast.error('Error al cargar historial para exportar');
+      setExporting(false);
+      return;
+    }
+    const periodLabel = [histDateFrom, histDateTo].filter(Boolean).join('_al_') || 'todos';
+    const rows: AseoExportRow[] = res.data.map(r => ({
+      cleaner_name:  r.cleaner_id ? (cleanerMap.get(r.cleaner_id)?.name ?? '—') : '—',
+      done_date:     r.done_date,
+      booking_code:  r.booking_code,
+      property_name: r.property_name,
+      guest_name:    r.guest_name,
+      check_in:      r.check_in,
+      check_out:     r.check_out,
+      fee:           r.fee,
+      status:        r.status,
+      paid_date:     r.paid_date,
+    }));
+    if (format === 'csv')   exportAseoToCsv(rows, periodLabel);
+    else if (format === 'excel') exportAseoToExcel(rows, periodLabel);
+    else                    exportAseoToPdf(rows, periodLabel);
+    setExporting(false);
+  };
 
   const totalOwed = useMemo(
     () => Array.from(balances.values()).reduce((s, b) => s + b.total_owed, 0),
@@ -384,6 +445,143 @@ export default function AseoClient(): JSX.Element {
               </motion.div>
             );
           })}
+        </div>
+      )}
+
+      {/* ── Historial Global de Aseo ──────────────────────────────────────── */}
+      {!loading && cleanings.length > 0 && (
+        <div className="mt-10">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <h2 className="text-xl font-bold text-slate-800">📋 Historial de Aseo</h2>
+            <div className="relative">
+              <button
+                onClick={() => setExportMenuOpen(v => !v)}
+                disabled={exporting || filteredHistCleanings.length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-slate-700 text-white text-sm font-semibold rounded-lg hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed shadow-sm"
+              >
+                <Download size={15} />
+                {exporting ? 'Exportando…' : 'Exportar'}
+              </button>
+              {exportMenuOpen && (
+                <div
+                  className="absolute right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-20 min-w-[168px] overflow-hidden"
+                  onMouseLeave={() => setExportMenuOpen(false)}
+                >
+                  {(['csv', 'excel', 'pdf'] as const).map(fmt => (
+                    <button
+                      key={fmt}
+                      onClick={() => handleExport(fmt)}
+                      className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50"
+                    >
+                      {fmt === 'csv' ? '📄 CSV' : fmt === 'excel' ? '📊 Excel (.xls)' : '🖨️ PDF / Imprimir'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Filters */}
+          <div className="flex flex-wrap gap-3 items-start p-3 bg-slate-50 border border-slate-200 rounded-xl mb-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Período:</span>
+              <input
+                type="date"
+                value={histDateFrom}
+                max={histDateTo || undefined}
+                onChange={e => setHistDateFrom(e.target.value)}
+                className="border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+              <span className="text-slate-400 text-xs">—</span>
+              <input
+                type="date"
+                value={histDateTo}
+                min={histDateFrom || undefined}
+                onChange={e => setHistDateTo(e.target.value)}
+                className="border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+              {(histDateFrom || histDateTo) && (
+                <button
+                  onClick={() => { setHistDateFrom(''); setHistDateTo(''); }}
+                  className="text-xs text-blue-600 underline"
+                >
+                  Ver todos
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Personal:</span>
+              {histCleanerIds.length > 0 && (
+                <button onClick={() => setHistCleanerIds([])} className="text-xs text-blue-600 underline">
+                  Todos
+                </button>
+              )}
+              {cleaners.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => setHistCleanerIds(prev =>
+                    prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]
+                  )}
+                  className={`px-2 py-0.5 rounded-full text-xs font-semibold border transition-colors ${
+                    histCleanerIds.includes(c.id)
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
+                  }`}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                {filteredHistCleanings.length} registro{filteredHistCleanings.length !== 1 ? 's' : ''}
+              </span>
+              <span className="text-xs font-semibold text-slate-700">
+                Total: {formatCurrency(filteredHistCleanings.reduce((s, c) => s + c.fee, 0))}
+              </span>
+            </div>
+            {filteredHistCleanings.length === 0 ? (
+              <p className="text-center text-slate-400 text-sm py-8">Sin registros para el período seleccionado</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left bg-slate-50">
+                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Personal</th>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Fecha hecho</th>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide text-right">Valor</th>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Estado</th>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Liquidado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredHistCleanings.slice(0, 200).map(c => {
+                      const cleanerName = c.cleaner_id ? (cleanerMap.get(c.cleaner_id)?.name ?? '—') : '—';
+                      const statusLabel = c.status === 'paid' ? '✅ Liquidado' : c.status === 'done' ? '🔵 Hecho' : '🟡 Pendiente';
+                      return (
+                        <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50">
+                          <td className="px-4 py-2.5 font-medium text-slate-800">{cleanerName}</td>
+                          <td className="px-4 py-2.5 text-slate-600">{c.done_date ?? '—'}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-slate-700">{formatCurrency(c.fee)}</td>
+                          <td className="px-4 py-2.5 text-slate-600">{statusLabel}</td>
+                          <td className="px-4 py-2.5 text-slate-500">{c.paid_date ?? '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {filteredHistCleanings.length > 200 && (
+                  <p className="text-center text-xs text-slate-400 py-3 border-t">
+                    Mostrando 200 de {filteredHistCleanings.length} registros. Usa el exportador para ver todos.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
