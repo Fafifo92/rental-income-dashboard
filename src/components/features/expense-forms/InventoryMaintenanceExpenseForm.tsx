@@ -548,7 +548,7 @@ export default function InventoryMaintenanceExpenseForm({
               >
                 <option value="">Sin especificar</option>
                 {bankAccounts.map(b => (
-                  <option key={b.id} value={b.id}>{b.bank_name} {b.alias ? `· ${b.alias}` : ''}</option>
+                  <option key={b.id} value={b.id}>{b.name}{b.bank ? ` · ${b.bank}` : ''}</option>
                 ))}
               </select>
             </div>

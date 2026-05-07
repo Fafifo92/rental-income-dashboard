@@ -4,7 +4,7 @@ import { Eye } from 'lucide-react';
 import { listBookings, type BookingWithListingRow } from '@/services/bookings';
 import { listProperties } from '@/services/properties';
 import { listBankAccounts } from '@/services/bankAccounts';
-import { getBookingStatus, statusUI, inferOperationalFlags } from '@/lib/bookingStatus';
+import { getBookingStatus, statusUI } from '@/lib/bookingStatus';
 import { formatCurrency } from '@/lib/utils';
 import BookingDetailModal from './BookingDetailModal';
 import type { PropertyRow, BankAccountRow } from '@/types/database';
@@ -158,11 +158,6 @@ export default function ActiveBookingsWidget({ propertyIds }: Props) {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {active.map((b, i) => {
-                const info = inferOperationalFlags({
-                  checkin_done: b.checkin_done,
-                  checkout_done: b.checkout_done,
-                  status: b.status,
-                });
                 const derived = getBookingStatus({
                   start_date: b.start_date,
                   end_date: b.end_date,

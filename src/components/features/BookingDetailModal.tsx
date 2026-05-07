@@ -30,12 +30,12 @@ import { getDamageReconciliations, type DamageReconciliation } from '@/services/
 interface BookingLite {
   id: string;
   confirmation_code: string;
-  guest_name: string;
+  guest_name: string | null;
   start_date: string;
   end_date: string;
   num_nights: number;
   total_revenue: number;
-  status: string;
+  status: string | null;
   channel?: string | null;
   gross_revenue?: number | null;
   channel_fees?: number | null;
@@ -389,7 +389,7 @@ export default function BookingDetailModal({
               <InfoRow label="Check-in" value={booking.start_date} />
               <InfoRow label="Check-out" value={booking.end_date} />
               <InfoRow label="Noches" value={String(booking.num_nights)} />
-              <InfoRow label="Estado" value={booking.status} />
+              <InfoRow label="Estado" value={booking.status ?? '—'} />
               <InfoRow label="Propiedad" value={property?.name ?? '—'} />
               <InfoRow label="Canal" value={booking.channel ?? '—'} />
               <InfoRow label="Adultos" value={String(booking.num_adults ?? 1)} />

@@ -171,7 +171,7 @@ export const getBooking = async (
     .eq('id', id)
     .single();
   if (error) return { data: null, error: error.message };
-  return { data: data as BookingWithListingRow, error: null };
+  return { data: data as unknown as BookingWithListingRow, error: null };
 };
 
 export const listBookings = async (
@@ -210,7 +210,7 @@ export const listBookings = async (
   const { data, error } = await query;
   if (error) return { data: null, error: error.message };
 
-  let rows = (data ?? []) as BookingWithListingRow[];
+  let rows = (data ?? []) as unknown as BookingWithListingRow[];
   if (filters?.search) {
     const q = filters.search.toLowerCase();
     rows = rows.filter(

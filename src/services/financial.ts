@@ -95,11 +95,9 @@ interface BookingData {
   num_nights: number;
   revenue: number;
   status: string;
-  listing_id: string | null;
-  /** null = payout no confirmado aún */
-  payout_bank_account_id: string | null;
-  /** payout neto real. null = dato no disponible aún */
-  net_payout: number | null;
+  listing_id?: string | null;
+  payout_bank_account_id?: string | null;
+  net_payout?: number | null;
 }
 
 /**
