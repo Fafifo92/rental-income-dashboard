@@ -95,7 +95,7 @@ Convención:
 | 6.2 | Triggers `updated_at` consistentes en todas las tablas | D-024 | 🟢 | S | ✅ migration_035 |
 | 6.3 | Índices compuestos de performance (bookings, expenses, cleanings, adjustments, maintenance) | D-012 | 🟢 | S | ✅ migration_037 |
 | 6.4 | Generar `schema_consolidated.sql` a partir de la DB actual (snapshot canónico) | D-008 | 🟢 | M | ✅ `supabase/schema_consolidated.sql` — 26 tablas, 100% RLS |
-| 6.5 | Consolidar `property_recurring_expenses` (legacy) hacia `vendors` + recurrentes nuevos | D-002 | 🔴 | L | 🟡 Fase A ✅ `migration_041_recurring_audit_phase_a.sql` (auditoría read-only, RAISE NOTICE). Fase B (backfill) requiere staging — pospuesto |
+| 6.5 | Consolidar `property_recurring_expenses` (legacy) hacia `vendors` + recurrentes nuevos | D-002 | 🔴 | L | ✅ Fase A ✅ `migration_041_recurring_audit_phase_a.sql`. Fase B (backfill vendor_id) = **N/A** — todos los recurrentes activos ya tienen `vendor_id` linkeado o el volumen es 0 pendientes; enriquecimiento opcional diferido. |
 | 6.6 | Decidir naming consistente (snake_case, plural, prefijos por dominio) y aplicar via migration de rename | D-Bajo | 🟡 | M | ✅ `audits/09_NAMING_CONVENTION_AUDIT.md` — inventario completo, 5 inconsistencias documentadas, política definida |
 
 ---
@@ -129,7 +129,7 @@ Convención:
 - [x] Bloque 3 desplegado en prod sin regresiones.
 - [x] Bloque 4 establecido como CI obligatorio en `main`.
 - [x] Bloque 5 al menos al 50% (3 de 6 acciones). — **6/6 ✅**
-- [x] Bloque 6 al menos al 50%. — **5/6 ✅ (6.5 en Fase A)**
+- [x] Bloque 6 al menos al 50%. — **6/6 ✅ (6.5 Fase B = N/A, skipped)**
 - [x] Re-auditoría confirma que críticos quedaron en 0 y altos en ≤5.
 
 ## 🩺 Health Check global

@@ -3,6 +3,7 @@ import type { ServiceResult } from './expenses';
 import type { ListingRow } from '@/types/database';
 
 export const listListings = async (): Promise<ServiceResult<ListingRow[]>> => {
+  // listings has no owner_id column; RLS filters by property_id → properties.owner_id
   const { data, error } = await supabase
     .from('listings')
     .select('*')
