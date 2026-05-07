@@ -81,9 +81,9 @@ Convención:
 | 5.1 | Extraer hooks de data-fetching de `*Client.tsx` hacia `src/lib/hooks/` (`useBookingsList`, `useExpensesList`, `useDashboardData`, `useReferenceData`) | A-Crítico | 🟢 | L | ✅ |
 | 5.2 | Romper `InventoryClient.tsx` (90 KB) en sub-componentes + hooks | A-Crítico | 🔴 | L | ✅ (checkpoint 003) |
 | 5.3 | Romper `BookingDetailModal.tsx` (75 KB) en steps/secciones independientes | A-Crítico | 🔴 | L | ✅ (1551→929 + 7 sub-archivos) |
-| 5.4 | Romper `BookingsClient.tsx`, `AseoClient.tsx`, `ExpensesClient.tsx`, `PropertiesClient.tsx`, `VendorsClient.tsx` (uno por sprint) | A-Crítico | 🔴 | XL | 🟡 BookingsClient ✅ · ExpensesClient ✅ (993→530) |
+| 5.4 | Romper `BookingsClient.tsx`, `AseoClient.tsx`, `ExpensesClient.tsx`, `PropertiesClient.tsx`, `VendorsClient.tsx` (uno por sprint) | A-Crítico | 🔴 | XL | 🟡 BookingsClient ✅ · ExpensesClient ✅ (993→530) · faltan AseoClient (1197), PropertiesClient (1113), VendorsClient (869) |
 | 5.5 | Mover acceso directo a `supabase.from(...)` desde componentes a la capa `services/` (DIP) | A-Crítico | 🟡 | L | ✅ |
-| 5.6 | Aplicar Strategy Pattern a clasificación de gastos / tipos de booking (eliminar switch gigantes) | A-Alto | 🟡 | M |
+| 5.6 | Aplicar Strategy Pattern a clasificación de gastos / tipos de booking (eliminar switch gigantes) | A-Alto | 🟡 | M | ✅ `expenseClassifyRules.ts` + refactor de `expenseClassify.ts` |
 
 ---
 
@@ -102,12 +102,12 @@ Convención:
 
 ## 🛡️ BLOQUE 7 — Seguridad de profundidad (largo plazo)
 
-| # | Acción | Origen | Riesgo | Esfuerzo |
-|---|--------|--------|:------:|:--------:|
-| 7.1 | Revisar funciones SQL `SECURITY DEFINER` y verificar que filtren por owner | S-Medio | 🟡 | M |
-| 7.2 | Auditar Edge Functions (CORS, auth, rate limit) | S-Medio | 🟡 | M |
-| 7.3 | Implementar logging de auditoría centralizado (tabla `audit_log`) | S-Bajo | 🟡 | L |
-| 7.4 | Política de rotación de claves Supabase y secretos | S-Info | 🟢 | S |
+| # | Acción | Origen | Riesgo | Esfuerzo | Estado |
+|---|--------|--------|:------:|:--------:|:------:|
+| 7.1 | Auditoría exhaustiva RLS + funciones `SECURITY DEFINER` filtran por owner | S-Medio | 🟡 | M | ✅ `audits/06_RLS_AUDIT.md` + `migration_038_rls_hardening.sql` |
+| 7.2 | Auditar Edge Functions (CORS, auth, rate limit) | S-Medio | 🟡 | M | 🟢 N/A — no hay Edge Functions custom en `supabase/functions/`. Re-evaluar si se introducen |
+| 7.3 | Implementar logging de auditoría centralizado (tabla `audit_log`) | S-Bajo | 🟡 | L | ⏳ |
+| 7.4 | Política de rotación de claves Supabase y secretos | S-Info | 🟢 | S | ⏳ |
 
 ---
 
