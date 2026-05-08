@@ -265,7 +265,7 @@ export function DamageReconciliationSection(): JSX.Element | null {
       <header className="flex items-start justify-between gap-3 mb-3">
         <div>
           <h2 className="text-lg font-bold text-amber-800 flex items-center gap-2">
-            ⚠´©Å Daños sin reconciliar ({open.length})
+            ⚠️ Daños sin reconciliar ({open.length})
           </h2>
           <p className="text-xs text-amber-700/80 mt-0.5">
             Diferencias entre lo que cobraste al huésped/plataforma y lo que costó realmente reparar.
@@ -540,7 +540,7 @@ export function RecoverDamageModal({
               'bg-slate-50 text-slate-700 border border-slate-200'
             }`}>
               {profit > 0 && <>✨ <strong>Ganancia:</strong> +{formatCurrency(profit)} (recibiste más de lo que costó)</>}
-              {profit < 0 && <>⚠´©Å Aún faltan {formatCurrency(Math.abs(profit))} por recuperar.</>}
+              {profit < 0 && <>⚠️ Aún faltan {formatCurrency(Math.abs(profit))} por recuperar.</>}
               {profit === 0 && <>✅ Quedará balanceado exactamente.</>}
             </div>
           )}

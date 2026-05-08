@@ -5,9 +5,9 @@ import type {
   MaintenanceScheduleRow,
   PropertyRow,
 } from '@/types/database';
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────────
 // Historial de mantenimiento (tab)
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────────
 const MAINT_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   pending:   { label: 'Pendiente',  cls: 'bg-amber-100 text-amber-700' },
   done:      { label: 'Realizado',  cls: 'bg-emerald-100 text-emerald-700' },
@@ -62,7 +62,7 @@ export function MaintenanceHistoryView({
   if (schedules.length === 0) {
     return (
       <div className="text-center py-16 text-slate-400">
-        <div className="text-4xl mb-3">­ƒöº</div>
+        <div className="text-4xl mb-3">🔧</div>
         <p className="font-medium text-slate-600">Sin historial de mantenimiento</p>
         <p className="text-sm mt-1">Los mantenimientos agendados y realizados apareceran aqui.</p>
       </div>
@@ -172,7 +172,7 @@ export function MaintenanceHistoryView({
                               onClick={() => onResetExpense(s.id)}
                               className="text-[10px] font-semibold text-blue-600 hover:bg-blue-50 px-2 py-0.5 rounded border border-blue-200"
                             >
-                              Ôå® Quitar gasto
+                              ↩ Quitar gasto
                             </button>
                           )}
                           <button
@@ -181,7 +181,7 @@ export function MaintenanceHistoryView({
                             onClick={() => onDeleteSchedule(s.id)}
                             className="text-[10px] font-semibold text-red-600 hover:bg-red-50 px-1.5 py-0.5 rounded border border-red-200"
                           >
-                            ­ƒùæ
+                            🗑
                           </button>
                         </div>
                       </td>
