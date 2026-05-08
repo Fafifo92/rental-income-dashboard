@@ -585,7 +585,6 @@ export const computeFinancials = async (
   let isDemo = false;
   const bookingFilters = propertyIds ? { propertyIds } : undefined;
 
-  let totalChannelFees = 0;
   let rawBookingFees: Array<{ start_date: string | null; channel_fees: number }> = [];
 
   if (isAuthenticated) {
@@ -688,7 +687,7 @@ export const computeFinancials = async (
     : getPeriodRange(period);
 
   // Compute channel fees scoped to the selected period (was summing all-time before)
-  totalChannelFees = rawBookingFees
+  const totalChannelFees = rawBookingFees
     .filter(b => {
       if (!b.start_date) return false;
       const d = new Date(b.start_date + 'T00:00:00');
