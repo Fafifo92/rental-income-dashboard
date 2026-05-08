@@ -37,19 +37,22 @@ interface Props {
   defaultPropertyId?: string | null;
   /** Pre-linked schedule (from "Registrar gasto" button on a schedule card). */
   linkedSchedule?: MaintenanceScheduleRow | null;
+  /** Expense being edited — puts the form in edit mode (no wizard, no side-effects). */
+  initial?: Expense | null;
   onClose: () => void;
   onSave: (expense: FormData) => Promise<boolean | void>;
   error?: string | null;
 }
 
 export default function InventoryMaintenanceExpenseForm({
-  properties, bankAccounts, defaultPropertyId, linkedSchedule, onClose, onSave, error: propError,
+  properties, bankAccounts, defaultPropertyId, linkedSchedule, initial, onClose, onSave, error: propError,
 }: Props) {
   const backdrop = makeBackdropHandlers(onClose);
+  const isEditMode = !!initial;
 
   // ── Step state ──────────────────────────────────────────────────────────────
   const [propertyId, setPropertyId] = useState<string | null>(
-    linkedSchedule?.property_id ?? defaultPropertyId ?? (properties.length === 1 ? properties[0].id : null),
+    initial?.property_id ?? linkedSchedule?.property_id ?? defaultPropertyId ?? (properties.length === 1 ? properties[0].id : null),
   );
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [itemId, setItemId] = useState<string | null>(linkedSchedule?.item_id ?? null);
@@ -66,10 +69,10 @@ export default function InventoryMaintenanceExpenseForm({
   const [loadingItems, setLoadingItems] = useState(false);
 
   // ── Expense fields ──────────────────────────────────────────────────────────
-  const [amount, setAmount] = useState<number | null>(null);
-  const [date, setDate] = useState(todayISO());
-  const [status, setStatus] = useState<'pending' | 'paid' | 'partial'>('paid');
-  const [bankId, setBankId] = useState<string | null>(null);
+  const [amount, setAmount] = useState<number | null>(initial?.amount ?? null);
+  const [date, setDate] = useState(initial?.date ?? todayISO());
+  const [status, setStatus] = useState<'pending' | 'paid' | 'partial'>(initial?.status ?? 'paid');
+  const [bankId, setBankId] = useState<string | null>(initial?.bank_account_id ?? null);
   const [notes, setNotes] = useState('');
   const [itemSearch, setItemSearch] = useState('');
   const [saving, setSaving] = useState(false);
@@ -84,7 +87,7 @@ export default function InventoryMaintenanceExpenseForm({
 
   // Load items + pending schedules when property changes
   useEffect(() => {
-    if (!propertyId) { setAllItems([]); setPendingSchedules([]); return; }
+    if (!propertyId || isEditMode) { setAllItems([]); setPendingSchedules([]); return; }
     setLoadingItems(true);
     Promise.all([
       listInventoryItems({ property_ids: [propertyId] }),
@@ -97,7 +100,7 @@ export default function InventoryMaintenanceExpenseForm({
     // Reset downstream selections when property changes
     setCategoryId(null);
     if (!linkedSchedule) { setItemId(null); setScheduleId(null); }
-  }, [propertyId, linkedSchedule]);
+  }, [propertyId, linkedSchedule, isEditMode]);
 
   // Auto-set category when item is pre-set from linked schedule
   useEffect(() => {
@@ -172,12 +175,40 @@ export default function InventoryMaintenanceExpenseForm({
   // ── Submit ──────────────────────────────────────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!propertyId) { setErr('Selecciona una propiedad.'); return; }
-    if (!itemId) { setErr('Selecciona un item.'); return; }
     if (!amount || amount <= 0) { setErr('Ingresa el monto del mantenimiento.'); return; }
 
     setSaving(true);
     setErr(null);
+
+    // ── Edit mode: just update financial fields, no side effects ─────────────
+    if (isEditMode) {
+      const editData: FormData = {
+        category:         initial!.category,
+        subcategory:      initial!.subcategory ?? 'maintenance',
+        type:             initial!.type,
+        amount:           amount!,
+        date,
+        status,
+        property_id:      initial!.property_id ?? null,
+        bank_account_id:  bankId,
+        vendor:           initial!.vendor ?? null,
+        person_in_charge: initial!.person_in_charge ?? null,
+        booking_id:       initial!.booking_id ?? null,
+        adjustment_id:    initial!.adjustment_id ?? null,
+        description:      initial!.description,
+        vendor_id:        initial!.vendor_id ?? null,
+        shared_bill_id:   initial!.shared_bill_id ?? null,
+        expense_group_id: initial!.expense_group_id ?? null,
+      };
+      const saved = await onSave(editData);
+      if (saved === false) { setSaving(false); return; }
+      setSaving(false);
+      return;
+    }
+
+    // ── Create mode ──────────────────────────────────────────────────────────
+    if (!propertyId) { setErr('Selecciona una propiedad.'); setSaving(false); return; }
+    if (!itemId) { setErr('Selecciona un item.'); setSaving(false); return; }
 
     // Resolve which schedule to mark as done
     const resolvedScheduleId = linkedSchedule?.id ?? (maintType === 'scheduled' ? (scheduleId ?? closestScheduleForItem?.id ?? null) : null);
@@ -239,8 +270,10 @@ export default function InventoryMaintenanceExpenseForm({
           <div className="flex items-center gap-2">
             <Wrench className="w-5 h-5 text-amber-500" />
             <div>
-              <h3 className="text-lg font-bold text-slate-800">Gasto de mantenimiento</h3>
-              <p className="text-xs text-slate-500">Inventario · Registra el costo real del mantenimiento</p>
+              <h3 className="text-lg font-bold text-slate-800">
+                {isEditMode ? 'Editar gasto de mantenimiento' : 'Gasto de mantenimiento'}
+              </h3>
+              <p className="text-xs text-slate-500">Inventario · {isEditMode ? 'Edita los datos del mantenimiento' : 'Registra el costo real del mantenimiento'}</p>
             </div>
           </div>
           <button
@@ -260,7 +293,26 @@ export default function InventoryMaintenanceExpenseForm({
             </p>
           )}
 
+          {/* ── Edit mode: read-only item info ────────────────────────────── */}
+          {isEditMode && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-3 space-y-1.5">
+              <div className="flex items-start gap-2">
+                <span className="text-xs font-semibold text-amber-800 shrink-0">Propiedad:</span>
+                <span className="text-xs text-amber-700">
+                  {properties.find(p => p.id === initial!.property_id)?.name ?? '—'}
+                </span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="text-xs font-semibold text-amber-800 shrink-0">Item:</span>
+                <span className="text-xs text-amber-700">
+                  {initial!.description?.replace(/^\[Inventario\]\s*/, '') ?? '—'}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* ── Step 1: Propiedad ─────────────────────────────────────────── */}
+          {!isEditMode && (
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">
               Propiedad <span className="text-rose-500">*</span>
@@ -274,10 +326,11 @@ export default function InventoryMaintenanceExpenseForm({
               {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
+          )}
 
           {/* ── Step 2: Categoría ─────────────────────────────────────────── */}
           <AnimatePresence>
-            {propertyId && (
+            {!isEditMode && propertyId && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
@@ -324,7 +377,7 @@ export default function InventoryMaintenanceExpenseForm({
 
           {/* ── Step 3: Item ──────────────────────────────────────────────── */}
           <AnimatePresence>
-            {propertyId && !loadingItems && (
+            {!isEditMode && propertyId && !loadingItems && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
@@ -402,7 +455,7 @@ export default function InventoryMaintenanceExpenseForm({
 
           {/* ── Tipo de mantenimiento ─────────────────────────────────────── */}
           <AnimatePresence>
-            {itemId && !linkedSchedule && (
+            {!isEditMode && itemId && !linkedSchedule && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
@@ -442,7 +495,7 @@ export default function InventoryMaintenanceExpenseForm({
 
           {/* ── Schedule vinculado ────────────────────────────────────────── */}
           <AnimatePresence>
-            {itemId && (
+            {!isEditMode && itemId && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
@@ -578,13 +631,18 @@ export default function InventoryMaintenanceExpenseForm({
             </button>
             <button
               type="submit"
-              disabled={saving || !propertyId || !itemId || !amount}
+              disabled={saving || (!isEditMode && (!propertyId || !itemId)) || !amount}
               className="px-5 py-2 bg-amber-500 text-white rounded-lg text-sm font-semibold hover:bg-amber-600 disabled:opacity-50 flex items-center gap-1.5"
             >
               {saving ? (
                 <>
                   <span className="inline-block w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   Guardando…
+                </>
+              ) : isEditMode ? (
+                <>
+                  <Wrench className="w-3.5 h-3.5" />
+                  Guardar cambios
                 </>
               ) : (
                 <>

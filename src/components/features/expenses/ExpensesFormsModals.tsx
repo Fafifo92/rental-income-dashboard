@@ -67,8 +67,12 @@ export default function ExpensesFormsModals({
 
   const isCleaningEdit = editSub === 'cleaning' || editCat.includes('aseo');
   const isVendorEdit = !!editingExpense?.vendor_id && !isCleaningEdit;
+  // Inventory maintenance: subcategory='maintenance' with [Inventario] description prefix
+  const isInventoryMaintenanceEdit = !!editingExpense
+    && editSub === 'maintenance'
+    && (editingExpense.description ?? '').startsWith('[Inventario]');
   // PropertyExpenseForm handles: known property subcategories, matching legacy categories, AND the fallback for everything else
-  const isPropertyEdit = !!editingExpense && !isCleaningEdit && !isVendorEdit;
+  const isPropertyEdit = !!editingExpense && !isCleaningEdit && !isVendorEdit && !isInventoryMaintenanceEdit;
 
   const handleEditSave = async (data: Omit<Expense, 'id' | 'owner_id'>) => {
     const ok = await onEditSave!(data);
@@ -162,8 +166,20 @@ export default function ExpensesFormsModals({
         />
       )}
 
-      {/* PropertyExpenseForm is the catch-all for all non-cleaning, non-vendor edits
+      {/* PropertyExpenseForm is the catch-all for all non-cleaning, non-vendor, non-inventory-maintenance edits
           (property subs, legacy category strings, booking-related, unclassified, etc.) */}
+      {editingExpense && isInventoryMaintenanceEdit && (
+        <InventoryMaintenanceExpenseForm
+          key={editingExpense.id}
+          properties={properties}
+          bankAccounts={bankAccounts}
+          initial={editingExpense}
+          error={saveError || undefined}
+          onClose={onEditClose!}
+          onSave={handleEditSave}
+        />
+      )}
+
       {editingExpense && isPropertyEdit && (
         <PropertyExpenseForm
           key={editingExpense.id}

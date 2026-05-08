@@ -37,7 +37,7 @@ const SUBCATS: { id: SubKind; icon: string; label: string; helper: string }[] = 
 const DETAIL_OPTIONS: Record<SubKind, string[]> = {
   utilities:      ['Energía', 'Agua', 'Gas', 'Internet', 'TV / Streaming', 'Aseo público', 'Otro'],
   administration: ['Administración', 'Impuesto predial', 'Seguro', 'Otro impuesto', 'Otro'],
-  maintenance:    ['Cocina', 'Baño', 'Sala', 'Habitación', 'Exterior / Balcón', 'Electrodoméstico', 'Plomería', 'Eléctrico', 'General'],
+  maintenance:    ['Cocina', 'Baño', 'Sala', 'Habitación', 'Exterior / Balcón', 'Plomería', 'Eléctrico', 'General'],
   stock:          ['Lencería', 'Papel higiénico', 'Jabón / amenities', 'Cocina (utensilios)', 'Decoración', 'Otros'],
 };
 
