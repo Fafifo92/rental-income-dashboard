@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase/client';
 import type { ServiceResult } from './expenses';
 import type { BookingRow } from '@/types/database';
-import { datesOverlap, type ParsedBooking, type ConflictEntry } from './etl';
+import { datesOverlap, type ParsedBooking, type ConflictEntry, type DuplicateEntry } from './etl';
 import { findOrCreateListing } from './listings';
 import { inferOperationalFlags, isCancelled } from '@/lib/bookingStatus';
 import { todayISO } from '@/lib/dateUtils';
@@ -394,6 +394,68 @@ export const detectDbConflicts = async (
   }
 
   return { data: conflicts, error: null };
+};
+
+/**
+ * Fetches existing DB rows for any confirmation_code in the incoming list.
+ * Returns one DuplicateEntry per code that already exists in the DB.
+ */
+export const detectDbDuplicates = async (
+  bookings: ParsedBooking[],
+): Promise<ServiceResult<DuplicateEntry[]>> => {
+  const codes = [...new Set(bookings.map(b => b.confirmation_code).filter(Boolean))];
+  if (codes.length === 0) return { data: [], error: null };
+
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('confirmation_code, status, guest_name, start_date, end_date, num_nights, total_revenue, payout_date, payout_bank_account_id, notes, listings(external_name)')
+    .in('confirmation_code', codes);
+  if (error) return { data: null, error: error.message };
+
+  const dbMap = new Map<string, Record<string, unknown>>();
+  for (const row of (data ?? []) as Record<string, unknown>[]) {
+    dbMap.set(row.confirmation_code as string, row);
+  }
+
+  const duplicates: DuplicateEntry[] = [];
+  for (const b of bookings) {
+    const row = dbMap.get(b.confirmation_code);
+    if (!row) continue;
+
+    const dbRevenue = Number(row.total_revenue ?? 0);
+    const differingFields: string[] = [];
+    if ((b.status ?? '') !== String(row.status ?? '')) differingFields.push('status');
+    if ((b.guest_name ?? '') !== String(row.guest_name ?? '')) differingFields.push('guest_name');
+    if ((b.start_date ?? '') !== String(row.start_date ?? '')) differingFields.push('start_date');
+    if ((b.end_date ?? '') !== String(row.end_date ?? '')) differingFields.push('end_date');
+    if (b.num_nights !== Number(row.num_nights ?? 0)) differingFields.push('num_nights');
+    if (b.revenue !== dbRevenue) differingFields.push('revenue');
+
+    const listingRow = row.listings as { external_name?: string } | null | undefined;
+
+    duplicates.push({
+      id: `db-dup-${b.confirmation_code}`,
+      confirmation_code: b.confirmation_code,
+      type: 'with_db',
+      incoming: b,
+      existing: {
+        confirmation_code: b.confirmation_code,
+        status: String(row.status ?? ''),
+        guest_name: (row.guest_name as string | null) ?? null,
+        start_date: String(row.start_date ?? ''),
+        end_date: String(row.end_date ?? ''),
+        num_nights: Number(row.num_nights ?? 0),
+        listing_name: listingRow?.external_name ?? '',
+        revenue: dbRevenue,
+        has_payout: !!(row.payout_date || row.payout_bank_account_id),
+        has_notes: !!row.notes,
+        source: 'db',
+      },
+      differingFields,
+    });
+  }
+
+  return { data: duplicates, error: null };
 };
 
 export type OccupancyBooking = Pick<BookingRow, 'id' | 'listing_id' | 'confirmation_code' | 'guest_name' | 'start_date' | 'end_date' | 'status' | 'channel'>;

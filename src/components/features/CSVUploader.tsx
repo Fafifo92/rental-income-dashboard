@@ -1,13 +1,17 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { parseAirbnbFile, detectWithinFileConflicts, type ParsedBooking, type ConflictEntry } from '@/services/etl';
-import { upsertBookings, saveDemoBookings, detectDbConflicts, type ImportResult } from '@/services/bookings';
+import {
+  parseAirbnbFile, detectWithinFileConflicts, detectWithinFileDuplicates,
+  type ParsedBooking, type ConflictEntry, type DuplicateEntry,
+} from '@/services/etl';
+import { upsertBookings, saveDemoBookings, detectDbConflicts, detectDbDuplicates, type ImportResult } from '@/services/bookings';
 import ListingMapper from './ListingMapper';
 import ConflictResolver from './ConflictResolver';
+import DuplicateResolver from './DuplicateResolver';
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 
-type Step = 'idle' | 'dragging' | 'parsing' | 'preview' | 'mapping' | 'checking' | 'conflicts' | 'importing' | 'complete' | 'error';
+type Step = 'idle' | 'dragging' | 'parsing' | 'preview' | 'mapping' | 'checking_dupes' | 'dupes' | 'checking' | 'conflicts' | 'importing' | 'complete' | 'error';
 
 interface Props {
   onClose: () => void;
@@ -29,12 +33,18 @@ export default function CSVUploader({ onClose, onImport }: Props) {
   const [result, setResult] = useState<ImportResult | null>(null);
   const [withinFileConflicts, setWithinFileConflicts] = useState<ConflictEntry[]>([]);
   const [dbConflicts, setDbConflicts] = useState<ConflictEntry[]>([]);
+  const [withinFileDupes, setWithinFileDupes] = useState<DuplicateEntry[]>([]);
+  const [dbDupes, setDbDupes] = useState<DuplicateEntry[]>([]);
   const [pendingListingMap, setPendingListingMap] = useState<Record<string, string>>({});
   const inputRef = useRef<HTMLInputElement>(null);
 
   const allConflicts = useMemo(
     () => [...withinFileConflicts, ...dbConflicts],
     [withinFileConflicts, dbConflicts],
+  );
+  const allDuplicates = useMemo(
+    () => [...withinFileDupes, ...dbDupes],
+    [withinFileDupes, dbDupes],
   );
 
   // Set of confirmation_codes involved in within-file conflicts (for highlighting preview table)
@@ -46,14 +56,17 @@ export default function CSVUploader({ onClose, onImport }: Props) {
   );
 
   const hasConflictStep = allConflicts.length > 0 || step === 'checking' || step === 'conflicts';
+  const hasDupesStep = allDuplicates.length > 0 || step === 'checking_dupes' || step === 'dupes';
 
-  const STEP_LABELS = useMemo((): Partial<Record<Step, string>> => ({
-    preview: '1. Vista previa',
-    mapping: '2. Vincular',
-    ...(hasConflictStep
-      ? { conflicts: '3. Conflictos', importing: '4. Importando…', complete: '4. Completado' }
-      : { importing: '3. Importando…', complete: '3. Completado' }),
-  }), [hasConflictStep]);
+  const STEP_LABELS = useMemo((): Partial<Record<Step, string>> => {
+    const labels: Partial<Record<Step, string>> = { preview: '1. Vista previa', mapping: '2. Vincular' };
+    let n = 3;
+    if (hasDupesStep) { labels.dupes = `${n}. Duplicados`; n++; }
+    if (hasConflictStep) { labels.conflicts = `${n}. Conflictos`; n++; }
+    labels.importing = `${n}. Importando…`;
+    labels.complete = `${n}. Completado`;
+    return labels;
+  }, [hasDupesStep, hasConflictStep]);
 
   const uniqueListingNames = useMemo(
     () => [...new Set(bookings.map(b => b.listing_name).filter(Boolean))],
@@ -81,11 +94,14 @@ export default function CSVUploader({ onClose, onImport }: Props) {
     setError('');
     setWithinFileConflicts([]);
     setDbConflicts([]);
+    setWithinFileDupes([]);
+    setDbDupes([]);
     try {
       const parsed = await parseAirbnbFile(file);
       if (parsed.length === 0) throw new Error('El archivo no contiene filas válidas.');
       setBookings(parsed);
       setWithinFileConflicts(detectWithinFileConflicts(parsed));
+      setWithinFileDupes(detectWithinFileDuplicates(parsed));
       setStep('preview');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al procesar el archivo.');
@@ -105,6 +121,27 @@ export default function CSVUploader({ onClose, onImport }: Props) {
     if (file) processFile(file);
   };
 
+  const checkConflictsAndImport = useCallback(async (
+    booksToCheck: ParsedBooking[],
+    listingMap: Record<string, string>,
+  ) => {
+    setStep('checking');
+    const res = await detectDbConflicts(booksToCheck, listingMap);
+    if (res.error) {
+      setError(res.error);
+      setStep('error');
+      return;
+    }
+    const dbc = res.data ?? [];
+    setDbConflicts(dbc);
+    const combined = [...withinFileConflicts, ...dbc];
+    if (combined.length > 0) {
+      setStep('conflicts');
+    } else {
+      await runImport(booksToCheck, listingMap);
+    }
+  }, [withinFileConflicts, runImport]);
+
   const handleMappingConfirm = useCallback(async (
     listingMap: Record<string, string>,
     isDemo: boolean,
@@ -118,29 +155,36 @@ export default function CSVUploader({ onClose, onImport }: Props) {
     }
 
     setPendingListingMap(listingMap);
-    setStep('checking');
+    setStep('checking_dupes');
 
-    const res = await detectDbConflicts(bookings, listingMap);
-    if (res.error) {
-      setError(res.error);
+    const dupRes = await detectDbDuplicates(bookings);
+    if (dupRes.error) {
+      setError(dupRes.error);
       setStep('error');
       return;
     }
 
-    const dbc = res.data ?? [];
-    setDbConflicts(dbc);
-    const combined = [...withinFileConflicts, ...dbc];
+    const newDbDupes = dupRes.data ?? [];
+    setDbDupes(newDbDupes);
+    const allDupes = [...withinFileDupes, ...newDbDupes];
 
-    if (combined.length > 0) {
-      setStep('conflicts');
+    if (allDupes.length > 0) {
+      setStep('dupes');
     } else {
-      await runImport(bookings, listingMap);
+      await checkConflictsAndImport(bookings, listingMap);
     }
-  }, [bookings, withinFileConflicts, runImport, onImport]);
+  }, [bookings, withinFileDupes, checkConflictsAndImport, onImport]);
+
+  const handleDupesResolved = useCallback(async (resolvedBookings: ParsedBooking[]) => {
+    setBookings(resolvedBookings);
+    await checkConflictsAndImport(resolvedBookings, pendingListingMap);
+  }, [pendingListingMap, checkConflictsAndImport]);
 
   const isDropZone = step === 'idle' || step === 'dragging' || step === 'error';
+  // Map transient steps to their indicator tab
+  const displayStep = (step === 'checking_dupes' ? 'dupes' : step === 'checking' ? 'conflicts' : step) as Step;
   const currentStepLabel =
-    ['preview', 'mapping', 'checking', 'conflicts', 'importing', 'complete'].includes(step)
+    ['preview', 'mapping', 'checking_dupes', 'dupes', 'checking', 'conflicts', 'importing', 'complete'].includes(step)
       ? (Object.keys(STEP_LABELS) as Step[]).map(k => ({ key: k, label: STEP_LABELS[k]! }))
       : [];
 
@@ -172,7 +216,7 @@ export default function CSVUploader({ onClose, onImport }: Props) {
                 <span
                   key={key}
                   className={`text-xs font-medium px-3 py-1 rounded-full transition-colors ${
-                    step === key
+                    displayStep === key
                       ? 'bg-blue-600 text-white'
                       : 'bg-slate-100 text-slate-400'
                   }`}
@@ -241,6 +285,14 @@ export default function CSVUploader({ onClose, onImport }: Props) {
               </motion.div>
             )}
 
+            {/* STEP: Checking duplicates */}
+            {step === 'checking_dupes' && (
+              <motion.div key="checking_dupes" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center gap-4 py-16">
+                <div className="w-12 h-12 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin" />
+                <p className="text-sm font-medium text-slate-500">Verificando duplicados…</p>
+              </motion.div>
+            )}
+
             {/* STEP: Checking conflicts */}
             {step === 'checking' && (
               <motion.div key="checking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center gap-4 py-16">
@@ -278,6 +330,25 @@ export default function CSVUploader({ onClose, onImport }: Props) {
                     </motion.div>
                   ))}
                 </div>
+
+                {/* Within-file duplicate warning */}
+                {withinFileDupes.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-purple-50 border border-purple-200 rounded-xl p-3 flex items-start gap-3"
+                  >
+                    <span className="text-lg flex-none">🔁</span>
+                    <div>
+                      <p className="text-sm font-semibold text-purple-800">
+                        {withinFileDupes.length} código{withinFileDupes.length > 1 ? 's' : ''} duplicado{withinFileDupes.length > 1 ? 's' : ''} en el archivo
+                      </p>
+                      <p className="text-xs text-purple-600 mt-0.5">
+                        Las filas marcadas con 🔁 tienen el mismo código de confirmación. Podrás elegir cuál conservar.
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
 
                 {/* Within-file conflict warning */}
                 {withinFileConflicts.length > 0 && (
@@ -317,16 +388,18 @@ export default function CSVUploader({ onClose, onImport }: Props) {
                       <tbody className="divide-y divide-slate-100">
                         {bookings.slice(0, 50).map((b, i) => {
                           const hasConflict = conflictCodesInFile.has(b.confirmation_code);
+                          const isDupe = withinFileDupes.some(d => d.confirmation_code === b.confirmation_code);
                           return (
                             <motion.tr
                               key={b.confirmation_code || i}
                               initial={{ opacity: 0 }}
                               animate={{ opacity: 1 }}
                               transition={{ delay: Math.min(i * 0.015, 0.4) }}
-                              className={`hover:bg-slate-50 ${hasConflict ? 'bg-amber-50/60' : ''}`}
+                              className={`hover:bg-slate-50 ${hasConflict ? 'bg-amber-50/60' : isDupe ? 'bg-purple-50/60' : ''}`}
                             >
                               <td className="px-4 py-2 font-mono text-slate-500">
                                 {hasConflict && <span className="mr-1" title="Conflicto de fechas">⚠️</span>}
+                                {isDupe && !hasConflict && <span className="mr-1" title="Código duplicado">🔁</span>}
                                 {b.confirmation_code || '—'}
                               </td>
                               <td className="px-4 py-2">
@@ -359,6 +432,18 @@ export default function CSVUploader({ onClose, onImport }: Props) {
               </motion.div>
             )}
 
+            {/* STEP: Duplicate Resolver */}
+            {step === 'dupes' && (
+              <motion.div key="dupes" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+                <DuplicateResolver
+                  duplicates={allDuplicates}
+                  allBookings={bookings}
+                  onResolve={handleDupesResolved}
+                  onBack={() => setStep('mapping')}
+                />
+              </motion.div>
+            )}
+
             {/* STEP: Conflict Resolver */}
             {step === 'conflicts' && (
               <motion.div key="conflicts" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
@@ -366,7 +451,7 @@ export default function CSVUploader({ onClose, onImport }: Props) {
                   conflicts={allConflicts}
                   allBookings={bookings}
                   onResolve={(kept) => runImport(kept, pendingListingMap)}
-                  onBack={() => setStep('mapping')}
+                  onBack={() => setStep(hasDupesStep ? 'dupes' : 'mapping')}
                 />
               </motion.div>
             )}
@@ -423,12 +508,12 @@ export default function CSVUploader({ onClose, onImport }: Props) {
         {/* Footer */}
         <div className="px-6 py-4 border-t bg-slate-50 flex items-center justify-between">
           <p className="text-xs text-slate-400">
-            {(step === 'preview' || step === 'mapping' || step === 'conflicts')
+            {(['preview', 'mapping', 'dupes', 'conflicts'] as Step[]).includes(step)
               ? `${bookings.length} reservas detectadas • ${uniqueListingNames.length} anuncio(s) único(s)`
               : 'Exporta desde Airbnb → Informes → Reservas'}
           </p>
           <div className="flex gap-3">
-            {step !== 'complete' && step !== 'checking' && step !== 'conflicts' && (
+            {step !== 'complete' && step !== 'checking' && step !== 'checking_dupes' && step !== 'conflicts' && step !== 'dupes' && (
               <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
                 Cancelar
               </button>
