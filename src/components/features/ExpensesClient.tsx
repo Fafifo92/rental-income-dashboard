@@ -58,6 +58,22 @@ export default function ExpensesClient() {
   const [tab, setTab] = useState<'all' | ExpenseSection | 'others'>('all');
   const [subFilter, setSubFilter] = useState<ExpenseSubcategory | null>(null);
 
+  // Deep-link: capture ?recurring=<id>&ym=<ym> at mount and clear from URL immediately
+  const [deepLinkRecurring] = useState<{ id: string; ym: string } | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('recurring');
+    const ym = params.get('ym');
+    if (id && ym) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('recurring');
+      url.searchParams.delete('ym');
+      window.history.replaceState({}, '', url.toString());
+      return { id, ym };
+    }
+    return null;
+  });
+
   // Maintenance due panel
   const [maintenanceSchedules, setMaintenanceSchedules] = useState<MaintenanceScheduleRow[]>([]);
   const [doneNeedingExpense, setDoneNeedingExpense] = useState<MaintenanceScheduleRow[]>([]);
@@ -362,6 +378,8 @@ export default function ExpensesClient() {
         {/* Recurrentes pendientes (fuente única: tabla periods + auto-detección) */}
         <RecurringPendingPanel
           propertyFilter={propertyIds.length === 1 ? propertyIds[0] : null}
+          autoOpenRecurringId={deepLinkRecurring?.id ?? null}
+          autoOpenYm={deepLinkRecurring?.ym ?? null}
           onChanged={() => {
             reloadExpenses();
             if (typeof window !== 'undefined') {

@@ -79,6 +79,7 @@ function Section({ num, title, children }: { num: number; title: string; childre
 export default function PrintReport() {
   const [kpis, setKpis]                   = useState<FinancialKPIs | null>(null);
   const [monthly, setMonthly]             = useState<MonthlyPnL[]>([]);
+  const [reportMode, setReportMode]       = useState<'by-days' | 'by-bookings'>('by-days');
   const [payout, setPayout]               = useState<PayoutBreakdown | null>(null);
   const [propertyKPIs, setPropertyKPIs]   = useState<PropertyKPIs[]>([]);
   const [propertyNames, setPropertyNames] = useState<string[]>([]);
@@ -92,6 +93,8 @@ export default function PrintReport() {
     const fromParam = params.get('from');
     const toParam   = params.get('to');
     const idsParam  = params.get('propertyIds');
+    const modeParam = (params.get('mode') ?? 'by-days') as 'by-days' | 'by-bookings';
+    setReportMode(modeParam);
 
     const customRange = (period === 'custom' && fromParam && toParam)
       ? { from: fromParam, to: toParam }
@@ -112,7 +115,7 @@ export default function PrintReport() {
       listProperties(),
     ]).then(async ([main, propsRes]) => {
       setKpis(main.kpis);
-      setMonthly(main.exportMonthly);
+      setMonthly(modeParam === 'by-bookings' ? main.exportMonthlyByBookings : main.exportMonthly);
       setPayout(main.payoutBreakdown);
 
       const allProps    = propsRes.data ?? [];
@@ -206,6 +209,15 @@ export default function PrintReport() {
             )}
             <p className="text-xs text-slate-400 mt-1">
               Generado: {now()}{kpis.isDemo && ' · Modo demo'}
+            </p>
+            <p className="text-xs mt-1">
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium ${
+                reportMode === 'by-bookings'
+                  ? 'bg-indigo-100 text-indigo-700'
+                  : 'bg-slate-100 text-slate-500'
+              }`}>
+                {reportMode === 'by-bookings' ? 'Por reservas (check-in)' : 'Por días (prorrateo)'}
+              </span>
             </p>
           </div>
           <div className="text-right">

@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Download } from 'lucide-react';
 import {
@@ -74,6 +74,27 @@ export default function InventoryClient(): JSX.Element {
     schedule: MaintenanceScheduleRow | null;
   } | null>(null);
 
+  // Deep-link: capture ?schedule=<id> or ?item=<id> at mount and clear from URL immediately
+  const [deepLink] = useState<{ type: 'schedule' | 'item'; id: string } | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const scheduleId = params.get('schedule');
+    const itemId = params.get('item');
+    const url = new URL(window.location.href);
+    if (scheduleId) {
+      url.searchParams.delete('schedule');
+      window.history.replaceState({}, '', url.toString());
+      return { type: 'schedule', id: scheduleId };
+    }
+    if (itemId) {
+      url.searchParams.delete('item');
+      window.history.replaceState({}, '', url.toString());
+      return { type: 'item', id: itemId };
+    }
+    return null;
+  });
+  const deepLinkHandled = useRef(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -99,6 +120,27 @@ export default function InventoryClient(): JSX.Element {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Deep-link: open maintenance schedule modal or item edit modal after data loads
+  useEffect(() => {
+    if (!deepLink || loading || deepLinkHandled.current) return;
+    if (deepLink.type === 'schedule') {
+      const schedule = allSchedules.find(s => s.id === deepLink.id) ?? schedules.find(s => s.id === deepLink.id);
+      if (schedule) {
+        const item = items.find(i => i.id === schedule.item_id);
+        if (item) {
+          deepLinkHandled.current = true;
+          setMaintenanceTarget({ item, schedule });
+        }
+      }
+    } else if (deepLink.type === 'item') {
+      const item = items.find(i => i.id === deepLink.id);
+      if (item) {
+        deepLinkHandled.current = true;
+        setEditTarget(item);
+      }
+    }
+  }, [deepLink, loading, items, schedules, allSchedules]);
 
   const filteredItems = useMemo(() => {
     return items.filter(it => {

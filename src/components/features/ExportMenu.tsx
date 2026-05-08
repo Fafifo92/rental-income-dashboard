@@ -75,8 +75,8 @@ export default function ExportMenu({ kpis, monthly, monthlyByBookings, period, c
     {
       label: 'Imprimir / PDF',
       description: 'Reporte para archivar o compartir',
-      needsMode: false,
-      action: () => {
+      needsMode: true,
+      action: (mode) => {
         const url = new URL('/report', window.location.origin);
         url.searchParams.set('period', period);
         if (period === 'custom' && customRange) {
@@ -86,6 +86,7 @@ export default function ExportMenu({ kpis, monthly, monthlyByBookings, period, c
         if (propertyIds && propertyIds.length > 0) {
           url.searchParams.set('propertyIds', propertyIds.join(','));
         }
+        url.searchParams.set('mode', mode);
         window.open(url.toString(), '_blank');
       },
     },

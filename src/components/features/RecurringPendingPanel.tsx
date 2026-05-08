@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listPendingRecurringForOwner, markPeriodSkipped, type PendingRecurring } from '@/services/recurringPeriods';
 import { listBankAccounts } from '@/services/bankAccounts';
@@ -16,15 +16,20 @@ const ymLabel = (ym: string): string => {
 export default function RecurringPendingPanel({
   propertyFilter = null,
   onChanged,
+  autoOpenRecurringId,
+  autoOpenYm,
 }: {
   propertyFilter?: string | null;
   onChanged?: () => void;
+  autoOpenRecurringId?: string | null;
+  autoOpenYm?: string | null;
 }) {
   const [items, setItems] = useState<PendingRecurring[]>([]);
   const [banks, setBanks] = useState<BankAccountRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
   const [paying, setPaying] = useState<PendingRecurring | null>(null);
+  const autoOpened = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -42,6 +47,17 @@ export default function RecurringPendingPanel({
   const visible = propertyFilter
     ? items.filter(p => p.recurring.property_id === propertyFilter)
     : items;
+
+  // Deep-link: auto-open MarkPaidModal for a specific recurring + yearMonth
+  useEffect(() => {
+    if (!autoOpenRecurringId || !autoOpenYm || autoOpened.current || loading || visible.length === 0) return;
+    const match = visible.find(p => p.recurring.id === autoOpenRecurringId && p.yearMonth === autoOpenYm);
+    if (match) {
+      autoOpened.current = true;
+      setCollapsed(false);
+      setPaying(match);
+    }
+  }, [autoOpenRecurringId, autoOpenYm, loading, visible]);
 
   const handleSkip = async (p: PendingRecurring) => {
     const note = prompt(`Marcar "${p.recurring.category}" de ${ymLabel(p.yearMonth)} como no aplicable. Razón (opcional):`);

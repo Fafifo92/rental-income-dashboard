@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   getDemoBookings, saveDemoBookings, insertBooking,
   updateBooking, deleteBooking, checkBookingOverlap,
-  generateDirectBookingCode, type BookingFilters,
+  generateDirectBookingCode, getBooking, type BookingFilters,
 } from '@/services/bookings';
 import { findOrCreateListing } from '@/services/listings';
 import { runAutoCheckins } from '@/services/creditPools';
@@ -25,7 +25,7 @@ import {
   type DisplayBooking, type BookingForm,
   EMPTY_FORM, EMPTY_FILTERS,
 } from './bookings/types';
-import { fromDemo, todayISO, getSmartDefaultStartDate } from './bookings/helpers';
+import { fromDemo, fromRow, todayISO, getSmartDefaultStartDate } from './bookings/helpers';
 import { useBookingsColumns } from './bookings/useBookingsColumns';
 import BookingsKPICards, { buildBookingKPIs } from './bookings/BookingsKPICards';
 import BookingsFilterBar from './bookings/BookingsFilterBar';
@@ -52,6 +52,19 @@ export default function BookingsClient() {
   const [payoutTarget, setPayoutTarget] = useState<DisplayBooking | null>(null);
   const [detailTarget, setDetailTarget] = useState<DisplayBooking | null>(null);
   const [statusFilter, setStatusFilter] = useState<DerivedBookingStatus | 'all'>('all');
+
+  // Deep-link: capture ?booking=<id> at mount and clear from URL immediately
+  const [deepLinkBookingId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('booking');
+    if (id) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('booking');
+      window.history.replaceState({}, '', url.toString());
+    }
+    return id;
+  });
 
   const demoFallback = useCallback((f: BookingFilters): DisplayBooking[] => {
     let demo = getDemoBookings().map(fromDemo);
@@ -97,6 +110,14 @@ export default function BookingsClient() {
       }).catch(() => { /* silent */ });
     }
   }, [authStatus, reload]);
+
+  // Deep-link: open BookingDetailModal when ?booking=<id> was in the URL
+  useEffect(() => {
+    if (authStatus !== 'authed' || !deepLinkBookingId) return;
+    getBooking(deepLinkBookingId).then(({ data, error }) => {
+      if (!error && data) setDetailTarget(fromRow(data));
+    });
+  }, [authStatus, deepLinkBookingId]);
 
   const applySearch = useCallback(
     () => setFilters(prev => ({ ...prev, search })),
