@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { supabase } from '@/lib/supabase/client';
-import type { PropertyRow, ListingRow, BookingRow } from '@/types/database';
+import type { ListingRow } from '@/types/database';
+import { listPropertiesSlim } from '@/services/properties';
+import { listListingsByPropertyIds } from '@/services/listings';
+import { listBookingsForOccupancy, type OccupancyBooking } from '@/services/bookings';
 
 interface Props {
   from: string;
@@ -21,7 +23,7 @@ const MAX_DAYS = 180; // cap visible window to avoid freeze on "Todo"
 const MONTHS_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 const DOW_ES = ['D', 'L', 'M', 'X', 'J', 'V', 'S']; // indexed by JS Date.getDay()
 
-type GanttBooking = Pick<BookingRow, 'id' | 'listing_id' | 'confirmation_code' | 'guest_name' | 'start_date' | 'end_date' | 'status' | 'channel'>;
+type GanttBooking = OccupancyBooking;
 
 interface DayInfo {
   date: Date;
@@ -90,7 +92,7 @@ export default function OccupancyGrid({
   breakEvenOccupancy,
   onBookingClick,
 }: Props) {
-  const [properties, setProperties] = useState<Pick<PropertyRow, 'id' | 'name'>[]>([]);
+  const [properties, setProperties] = useState<Array<{ id: string; name: string }>>([]);
   const [bookingsByProp, setBookingsByProp] = useState<Map<string, GanttBooking[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
@@ -116,9 +118,7 @@ export default function OccupancyGrid({
 
     (async () => {
       // 1. Fetch properties
-      let propQuery = supabase.from('properties').select('id, name').order('name');
-      if (propertyIds?.length) propQuery = propQuery.in('id', propertyIds);
-      const { data: props } = await propQuery;
+      const { data: props } = await listPropertiesSlim(propertyIds);
 
       if (cancelled) return;
       if (!props?.length) {
@@ -130,10 +130,7 @@ export default function OccupancyGrid({
 
       // 2. Fetch listings → build listingId → propertyId map
       const propIds = props.map(p => p.id);
-      const { data: listings } = await supabase
-        .from('listings')
-        .select('id, property_id')
-        .in('property_id', propIds);
+      const { data: listings } = await listListingsByPropertyIds(propIds);
 
       if (cancelled) return;
 
@@ -146,13 +143,8 @@ export default function OccupancyGrid({
       // 3. Fetch bookings overlapping [from, to] — all statuses
       let bookings: GanttBooking[] = [];
       if (listingIds.length) {
-        const { data: bkgs } = await supabase
-          .from('bookings')
-          .select('id, listing_id, confirmation_code, guest_name, start_date, end_date, status, channel')
-          .gte('end_date', from)
-          .lte('start_date', to)
-          .in('listing_id', listingIds);
-        bookings = (bkgs ?? []) as GanttBooking[];
+        const { data: bkgs } = await listBookingsForOccupancy({ from, to, listingIds });
+        bookings = bkgs ?? [];
       }
 
       // 4. Group bookings by property

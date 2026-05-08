@@ -68,7 +68,7 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
   // ── Total payment fields ──────────────────────────────────────────────────
   const [totalAmount, setTotalAmount]   = useState<number | null>(netoVal !== 0 ? Math.abs(netoVal) : null);
   const [totalAccount, setTotalAccount] = useState('');
-  const [totalDate, setTotalDate]       = useState(todayISO());
+  const [totalDate, setTotalDate]       = useState(booking.start_date ?? todayISO());
   const [savingTotal, setSavingTotal]   = useState(false);
   const [totalError, setTotalError]     = useState('');
 
@@ -77,7 +77,7 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
   const [loadingPay, setLoadingPay] = useState(true);
   const [newAmount, setNewAmount]   = useState<number | null>(null);
   const [newAccount, setNewAccount] = useState('');
-  const [newDate, setNewDate]       = useState(todayISO());
+  const [newDate, setNewDate]       = useState(booking.start_date ?? todayISO());
   const [newNotes, setNewNotes]     = useState('');
   const [addingPay, setAddingPay]   = useState(false);
   const [payError, setPayError]     = useState('');

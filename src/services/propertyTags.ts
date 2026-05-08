@@ -3,9 +3,12 @@ import type { PropertyTagRow, PropertyTagAssignmentRow } from '@/types/database'
 import type { ServiceResult } from './expenses';
 
 export const listPropertyTags = async (): Promise<ServiceResult<PropertyTagRow[]>> => {
+  const { data: authData, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !authData?.user) return { data: [], error: null };
   const { data, error } = await supabase
     .from('property_tags')
-    .select('*')
+    .select('id, owner_id, name, color, created_at')
+    .eq('owner_id', authData.user.id)
     .order('name');
   if (error) return { data: null, error: error.message };
   return { data: data ?? [], error: null };
@@ -50,9 +53,12 @@ export const deletePropertyTag = async (id: string): Promise<ServiceResult<true>
 };
 
 export const listAllTagAssignments = async (): Promise<ServiceResult<PropertyTagAssignmentRow[]>> => {
+  const { data: authData, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !authData?.user) return { data: [], error: null };
   const { data, error } = await supabase
     .from('property_tag_assignments')
-    .select('*');
+    .select('property_id, tag_id, owner_id, created_at')
+    .eq('owner_id', authData.user.id);
   if (error) return { data: null, error: error.message };
   return { data: data ?? [], error: null };
 };

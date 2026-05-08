@@ -2,6 +2,7 @@ import { getDemoBookings, listBookings } from './bookings';
 import { listExpenses } from './expenses';
 import { listAllRecurringExpensesForOwner } from './recurringExpenses';
 import { listAllBookingAdjustmentsForOwner } from './bookingAdjustments';
+import { addMoney, subMoney } from '@/lib/money';
 import type { Expense } from '@/types';
 import type { PropertyRecurringExpenseRow } from '@/types/database';
 
@@ -95,11 +96,9 @@ interface BookingData {
   num_nights: number;
   revenue: number;
   status: string;
-  listing_id: string | null;
-  /** null = payout no confirmado aún */
-  payout_bank_account_id: string | null;
-  /** payout neto real. null = dato no disponible aún */
-  net_payout: number | null;
+  listing_id?: string | null;
+  payout_bank_account_id?: string | null;
+  net_payout?: number | null;
 }
 
 /**
@@ -273,9 +272,9 @@ const computeCore = (
 
   // Ajustes de reserva en el rango: cobros de daños, ingresos extra, descuentos dados
   const adjInRange = adjustments.filter(a => a.date && inRange(a.date));
-  const incomeFromAdj  = adjInRange.filter(a => a.kind !== 'discount').reduce((s, a) => s + Number(a.amount), 0);
-  const discountsGiven = adjInRange.filter(a => a.kind === 'discount').reduce((s, a) => s + Number(a.amount), 0);
-  const netAdjustmentIncome = incomeFromAdj - discountsGiven;
+  const incomeFromAdj  = adjInRange.filter(a => a.kind !== 'discount').reduce((s, a) => addMoney(s, Number(a.amount)), 0);
+  const discountsGiven = adjInRange.filter(a => a.kind === 'discount').reduce((s, a) => addMoney(s, Number(a.amount)), 0);
+  const netAdjustmentIncome = subMoney(incomeFromAdj, discountsGiven);
 
   // grossRevenue includes cancelled-with-revenue (cancellation fees earned)
   const grossRevenue = bookingRevenue + netAdjustmentIncome + cancelledRevenue;
@@ -587,6 +586,7 @@ export const computeFinancials = async (
   const bookingFilters = propertyIds ? { propertyIds } : undefined;
 
   let totalChannelFees = 0;
+  let rawBookingFees: Array<{ start_date: string | null; channel_fees: number }> = [];
 
   if (isAuthenticated) {
     const bookingRes = await listBookings(bookingFilters);
@@ -601,8 +601,10 @@ export const computeFinancials = async (
         payout_bank_account_id: r.payout_bank_account_id ?? null,
         net_payout: r.net_payout !== null && r.net_payout !== undefined ? Number(r.net_payout) : null,
       }));
-      // Sum channel fees for informational display only — NOT counted as expenses
-      totalChannelFees = bookingRes.data.reduce((s, r) => s + Number(r.channel_fees ?? 0), 0);
+      rawBookingFees = bookingRes.data.map(r => ({
+        start_date: r.start_date ?? null,
+        channel_fees: Number(r.channel_fees ?? 0),
+      }));
     }
   } else {
     const bookingRes = await listBookings(bookingFilters);
@@ -684,6 +686,15 @@ export const computeFinancials = async (
   const range: DateRange = (period === 'custom' && customDateRange)
     ? { from: new Date(customDateRange.from + 'T00:00:00'), to: new Date(customDateRange.to + 'T00:00:00') }
     : getPeriodRange(period);
+
+  // Compute channel fees scoped to the selected period (was summing all-time before)
+  totalChannelFees = rawBookingFees
+    .filter(b => {
+      if (!b.start_date) return false;
+      const d = new Date(b.start_date + 'T00:00:00');
+      return d >= range.from && d <= range.to;
+    })
+    .reduce((s, b) => s + b.channel_fees, 0);
 
   const priorRange: DateRange = (() => {
     if (period === 'custom' && customDateRange) {

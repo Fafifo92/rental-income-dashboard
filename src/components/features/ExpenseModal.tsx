@@ -1,8 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Expense } from '@/types';
-import type { PropertyRow, BankAccountRow, BookingRow, ListingRow, ExpenseSubcategory } from '@/types/database';
-import { EXPENSE_SUBCATEGORY_META, SUBCATEGORY_TO_CATEGORY } from '@/types/database';
+import { type PropertyRow, type BankAccountRow, type BookingRow, type ListingRow, type ExpenseSubcategory, EXPENSE_SUBCATEGORY_META, SUBCATEGORY_TO_CATEGORY } from '@/types/database';
 import { listBookings } from '@/services/bookings';
 import { listListings } from '@/services/listings';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';

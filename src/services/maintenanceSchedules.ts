@@ -66,6 +66,8 @@ export async function createMaintenanceSchedule(
       email_notify:       input.email_notify ?? false,
       is_recurring:       input.is_recurring ?? false,
       recurrence_days:    input.recurrence_days ?? null,
+      status:             'pending',
+      expense_registered: false,
     })
     .select()
     .single();

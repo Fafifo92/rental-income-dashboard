@@ -314,3 +314,125 @@ export function exportInventoryToExcel(
 
   downloadFile(xml, `inventario-${today()}.xls`, 'application/vnd.ms-excel');
 }
+
+// ─── Aseo Export ──────────────────────────────────────────────────────────────
+
+export interface AseoExportRow {
+  cleaner_name: string;
+  done_date: string | null;
+  booking_code: string | null;
+  property_name: string | null;
+  guest_name: string | null;
+  check_in: string | null;
+  check_out: string | null;
+  fee: number;
+  status: string;
+  paid_date: string | null;
+}
+
+const ASEO_STATUS_LABEL: Record<string, string> = {
+  pending: 'Pendiente',
+  done:    'Hecho',
+  paid:    'Liquidado',
+};
+
+export function exportAseoToCsv(rows: AseoExportRow[], periodLabel: string) {
+  const header = toCsvRow(['Personal', 'Fecha hecho', 'Código reserva', 'Propiedad', 'Huésped', 'Check-in', 'Check-out', 'Valor', 'Estado', 'Fecha liquidado']);
+  const dataRows = rows.map(r => toCsvRow([
+    r.cleaner_name,
+    r.done_date ?? '',
+    r.booking_code ?? '',
+    r.property_name ?? '',
+    r.guest_name ?? '',
+    r.check_in ?? '',
+    r.check_out ?? '',
+    r.fee,
+    ASEO_STATUS_LABEL[r.status] ?? r.status,
+    r.paid_date ?? '',
+  ]));
+  downloadUtf8Csv([header, ...dataRows].join('\n'), `historial-aseo-${periodLabel}-${today()}.csv`);
+}
+
+export function exportAseoToExcel(rows: AseoExportRow[], periodLabel: string) {
+  const headerRow = ['Personal', 'Fecha hecho', 'Código reserva', 'Propiedad', 'Huésped', 'Check-in', 'Check-out', 'Valor', 'Estado', 'Fecha liquidado'];
+  const dataRows: (string | number)[][] = rows.map(r => [
+    r.cleaner_name,
+    r.done_date ?? '',
+    r.booking_code ?? '',
+    r.property_name ?? '',
+    r.guest_name ?? '',
+    r.check_in ?? '',
+    r.check_out ?? '',
+    r.fee,
+    ASEO_STATUS_LABEL[r.status] ?? r.status,
+    r.paid_date ?? '',
+  ]);
+  const xml = buildSpreadsheetML([
+    { name: 'Historial Aseo', rows: [headerRow, ...dataRows] },
+  ]);
+  downloadFile(xml, `historial-aseo-${periodLabel}-${today()}.xls`, 'application/vnd.ms-excel;charset=utf-8');
+}
+
+export function exportAseoToPdf(rows: AseoExportRow[], periodLabel: string) {
+  const total = rows.reduce((s, r) => s + r.fee, 0);
+  const tableRows = rows.map(r => `
+    <tr>
+      <td>${escXml(r.cleaner_name)}</td>
+      <td>${r.done_date ?? '—'}</td>
+      <td>${r.booking_code ?? '—'}</td>
+      <td>${escXml(r.property_name ?? '—')}</td>
+      <td class="num">${formatCurrency(r.fee)}</td>
+      <td>${ASEO_STATUS_LABEL[r.status] ?? r.status}</td>
+      <td>${r.paid_date ?? '—'}</td>
+    </tr>`).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Historial de Aseo — ${escXml(periodLabel)}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; font-size: 12px; color: #1e293b; padding: 24px; }
+    h1 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+    .sub { font-size: 12px; color: #64748b; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #f8fafc; color: #475569; font-size: 11px; text-transform: uppercase;
+         letter-spacing: .05em; padding: 8px; text-align: left; border-bottom: 2px solid #e2e8f0; }
+    td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tr:nth-child(even) td { background: #f8fafc; }
+    tfoot td { font-weight: 700; border-top: 2px solid #e2e8f0; padding-top: 10px; }
+    @media print { .no-print { display: none !important; } body { padding: 0; } }
+  </style>
+</head>
+<body>
+  <button class="no-print" onclick="window.print()"
+    style="position:fixed;top:16px;right:16px;padding:8px 16px;background:#2563eb;color:#fff;
+           border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;">
+    🖨️ Imprimir / PDF
+  </button>
+  <h1>🧹 Historial de Aseo</h1>
+  <p class="sub">Período: ${escXml(periodLabel)} — ${rows.length} registro${rows.length !== 1 ? 's' : ''}</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Personal</th><th>Fecha hecho</th><th>Código reserva</th>
+        <th>Propiedad</th><th>Valor</th><th>Estado</th><th>Fecha liquidado</th>
+      </tr>
+    </thead>
+    <tbody>${tableRows}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="4">Total</td>
+        <td class="num">${formatCurrency(total)}</td>
+        <td colspan="2"></td>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>`;
+
+  const w = window.open('', '_blank');
+  if (w) { w.document.write(html); w.document.close(); }
+}

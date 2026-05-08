@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ExpenseFilters } from '@/services/expenses';
-import type { BankAccountRow } from '@/types/database';
-import { EXPENSE_CATEGORIES } from '@/types/database';
+import { type BankAccountRow, EXPENSE_CATEGORIES } from '@/types/database';
 
 const CATEGORIES = EXPENSE_CATEGORIES;
 

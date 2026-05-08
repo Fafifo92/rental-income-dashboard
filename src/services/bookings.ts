@@ -1,8 +1,7 @@
 import { supabase } from '@/lib/supabase/client';
 import type { ServiceResult } from './expenses';
 import type { BookingRow } from '@/types/database';
-import { datesOverlap } from './etl';
-import type { ParsedBooking, ConflictEntry } from './etl';
+import { datesOverlap, type ParsedBooking, type ConflictEntry, type DuplicateEntry } from './etl';
 import { findOrCreateListing } from './listings';
 import { inferOperationalFlags, isCancelled } from '@/lib/bookingStatus';
 import { todayISO } from '@/lib/dateUtils';
@@ -24,6 +23,10 @@ export interface BookingFilters {
   dateFrom?: string;
   dateTo?: string;
   search?: string;
+  /** 1-indexed page number for server-side pagination. Requires `pageSize`. */
+  page?: number;
+  /** Rows per page for server-side pagination. Requires `page`. */
+  pageSize?: number;
 }
 
 export interface BookingKPIs {
@@ -171,7 +174,7 @@ export const getBooking = async (
     .eq('id', id)
     .single();
   if (error) return { data: null, error: error.message };
-  return { data: data as BookingWithListingRow, error: null };
+  return { data: data as unknown as BookingWithListingRow, error: null };
 };
 
 export const listBookings = async (
@@ -207,18 +210,24 @@ export const listBookings = async (
   if (filters?.dateFrom) query = query.gte('start_date', filters.dateFrom);
   if (filters?.dateTo) query = query.lte('start_date', filters.dateTo);
 
+  // Search: server-side ilike (avoids fetching all rows for JS filter)
+  if (filters?.search) {
+    const q = `%${filters.search}%`;
+    query = query.or(`guest_name.ilike.${q},confirmation_code.ilike.${q}`);
+  }
+
+  // Pagination: use range when requested, otherwise safety cap at 1 000 rows
+  if (filters?.page && filters?.pageSize) {
+    const from = (filters.page - 1) * filters.pageSize;
+    query = query.range(from, from + filters.pageSize - 1);
+  } else {
+    query = query.limit(1000);
+  }
+
   const { data, error } = await query;
   if (error) return { data: null, error: error.message };
 
-  let rows = (data ?? []) as BookingWithListingRow[];
-  if (filters?.search) {
-    const q = filters.search.toLowerCase();
-    rows = rows.filter(
-      b =>
-        b.guest_name?.toLowerCase().includes(q) ||
-        b.confirmation_code.toLowerCase().includes(q),
-    );
-  }
+  const rows = (data ?? []) as unknown as BookingWithListingRow[];
 
   return { data: rows, error: null };
 };
@@ -385,6 +394,93 @@ export const detectDbConflicts = async (
   }
 
   return { data: conflicts, error: null };
+};
+
+/**
+ * Fetches existing DB rows for any confirmation_code in the incoming list.
+ * Returns one DuplicateEntry per code that already exists in the DB.
+ */
+export const detectDbDuplicates = async (
+  bookings: ParsedBooking[],
+): Promise<ServiceResult<DuplicateEntry[]>> => {
+  const codes = [...new Set(bookings.map(b => b.confirmation_code).filter(Boolean))];
+  if (codes.length === 0) return { data: [], error: null };
+
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('confirmation_code, status, guest_name, start_date, end_date, num_nights, total_revenue, payout_date, payout_bank_account_id, notes, listings(external_name)')
+    .in('confirmation_code', codes);
+  if (error) return { data: null, error: error.message };
+
+  const dbMap = new Map<string, Record<string, unknown>>();
+  for (const row of (data ?? []) as Record<string, unknown>[]) {
+    dbMap.set(row.confirmation_code as string, row);
+  }
+
+  const duplicates: DuplicateEntry[] = [];
+  for (const b of bookings) {
+    const row = dbMap.get(b.confirmation_code);
+    if (!row) continue;
+
+    const dbRevenue = Number(row.total_revenue ?? 0);
+    const differingFields: string[] = [];
+    if ((b.status ?? '') !== String(row.status ?? '')) differingFields.push('status');
+    if ((b.guest_name ?? '') !== String(row.guest_name ?? '')) differingFields.push('guest_name');
+    if ((b.start_date ?? '') !== String(row.start_date ?? '')) differingFields.push('start_date');
+    if ((b.end_date ?? '') !== String(row.end_date ?? '')) differingFields.push('end_date');
+    if (b.num_nights !== Number(row.num_nights ?? 0)) differingFields.push('num_nights');
+    if (b.revenue !== dbRevenue) differingFields.push('revenue');
+
+    const listingRow = row.listings as { external_name?: string } | null | undefined;
+
+    duplicates.push({
+      id: `db-dup-${b.confirmation_code}`,
+      confirmation_code: b.confirmation_code,
+      type: 'with_db',
+      incoming: b,
+      existing: {
+        confirmation_code: b.confirmation_code,
+        status: String(row.status ?? ''),
+        guest_name: (row.guest_name as string | null) ?? null,
+        start_date: String(row.start_date ?? ''),
+        end_date: String(row.end_date ?? ''),
+        num_nights: Number(row.num_nights ?? 0),
+        listing_name: listingRow?.external_name ?? '',
+        revenue: dbRevenue,
+        has_payout: !!(row.payout_date || row.payout_bank_account_id),
+        has_notes: !!row.notes,
+        source: 'db',
+      },
+      differingFields,
+    });
+  }
+
+  return { data: duplicates, error: null };
+};
+
+export type OccupancyBooking = Pick<BookingRow, 'id' | 'listing_id' | 'confirmation_code' | 'guest_name' | 'start_date' | 'end_date' | 'status' | 'channel'>;
+
+/**
+ * Fetches bookings overlapping [from, to] for given listing IDs.
+ * Used by occupancy charts/grid — applies an optional cancelled-status filter.
+ */
+export const listBookingsForOccupancy = async (opts: {
+  from: string;
+  to: string;
+  listingIds: string[];
+  excludeCancelled?: boolean;
+}): Promise<ServiceResult<OccupancyBooking[]>> => {
+  if (!opts.listingIds.length) return { data: [], error: null };
+  let q = supabase
+    .from('bookings')
+    .select('id, listing_id, confirmation_code, guest_name, start_date, end_date, status, channel')
+    .gte('end_date', opts.from)
+    .lte('start_date', opts.to)
+    .in('listing_id', opts.listingIds);
+  if (opts.excludeCancelled) q = q.not('status', 'ilike', '%cancel%');
+  const { data, error } = await q;
+  if (error) return { data: null, error: error.message };
+  return { data: (data ?? []) as OccupancyBooking[], error: null };
 };
 
 export type OverlapCheck = {

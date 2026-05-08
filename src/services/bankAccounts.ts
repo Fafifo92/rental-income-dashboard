@@ -12,7 +12,7 @@ export interface BankAccountBalance {
 export const listBankAccounts = async (): Promise<ServiceResult<BankAccountRow[]>> => {
   const { data, error } = await supabase
     .from('bank_accounts')
-    .select('*')
+    .select('id, owner_id, name, bank, account_type, account_number_mask, currency, opening_balance, is_active, notes, created_at, is_credit, credit_limit, is_cash')
     .order('is_cash', { ascending: false })   // cash account first
     .order('is_active', { ascending: false })
     .order('name');
@@ -92,7 +92,7 @@ export const listBookingPayments = async (
 ): Promise<ServiceResult<BookingPaymentRow[]>> => {
   const { data, error } = await supabase
     .from('booking_payments')
-    .select('*')
+    .select('id, owner_id, booking_id, amount, bank_account_id, payment_date, notes, created_at')
     .eq('booking_id', bookingId)
     .order('payment_date', { ascending: true })
     .order('created_at', { ascending: true });
@@ -128,97 +128,94 @@ export const deleteBookingPayment = async (id: string): Promise<ServiceResult<tr
  * Compute current balance for each account.
  * Inflows = booking_payments (new system) + legacy net_payout on bookings that
  * have no booking_payments entries yet (backward compat).
+ *
+ * Performance: pre-fetches ALL rows once and aggregates in JS — avoids N×3
+ * sequential Supabase queries that caused slow load on /accounts.
  */
 export const computeBalances = async (): Promise<ServiceResult<BankAccountBalance[]>> => {
   const accRes = await listBankAccounts();
   if (accRes.error) return { data: null, error: accRes.error };
+  const accounts = accRes.data ?? [];
+  if (accounts.length === 0) return { data: [], error: null };
 
-  // Pre-fetch all booking_payments grouped by account (gracefully handles missing table)
-  const { data: allPayments } = await supabase
-    .from('booking_payments')
-    .select('bank_account_id, amount, booking_id');
-
-  // Set of booking IDs that have at least one payment entry (new system)
-  const bookingsWithPayments = new Set(
-    (allPayments ?? []).map((p: { booking_id: string }) => p.booking_id),
-  );
-
-  // Sum of new-system payments per account
-  const paymentInflowByAccount = new Map<string, number>();
-  for (const p of allPayments ?? []) {
-    const acc = (p as { bank_account_id: string | null; amount: number }).bank_account_id;
-    if (!acc) continue;
-    paymentInflowByAccount.set(acc, (paymentInflowByAccount.get(acc) ?? 0) + Number(p.amount));
-  }
-
-  const balances: BankAccountBalance[] = [];
-
-  for (const account of accRes.data ?? []) {
-    // New-system inflows for this account
-    const newInflows = paymentInflowByAccount.get(account.id) ?? 0;
-
-    // Legacy inflows: bookings with payout_bank_account_id = this account
-    // AND no booking_payments entry (to avoid double-counting)
-    const { data: legacyData } = await supabase
+  // ── Single batch fetch of all data needed ───────────────────────────────────
+  const [paymentsRes, bookingsRes, adjRes, expensesRes] = await Promise.all([
+    supabase
+      .from('booking_payments')
+      .select('bank_account_id, amount, booking_id'),
+    supabase
       .from('bookings')
-      .select('id, net_payout, status')
-      .eq('payout_bank_account_id', account.id);
-
-    const legacyInflows = (legacyData ?? []).reduce(
-      (sum: number, row: { id: string; net_payout: number | null; status?: string | null }) => {
-        if (bookingsWithPayments.has(row.id)) return sum;
-        const net = Number(row.net_payout ?? 0);
-        return net > 0 ? sum + net : sum; // negatives are fine deductions → counted as outflows
-      },
-      0,
-    );
-
-    // Fine/deduction bookings: cancelled + negative net_payout with this account = outflow
-    const legacyFineOutflows = (legacyData ?? []).reduce(
-      (sum: number, row: { id: string; net_payout: number | null; status?: string | null }) => {
-        if (bookingsWithPayments.has(row.id)) return sum;
-        const net = Number(row.net_payout ?? 0);
-        const isCancelled = (row.status ?? '').toLowerCase().includes('cancel');
-        return (net < 0 && isCancelled) ? sum + Math.abs(net) : sum;
-      },
-      0,
-    );
-
-    const inflows = newInflows + legacyInflows;
-
-    // Adjustment inflows (damage recoveries, extras, etc.)
-    const { data: adjData } = await supabase
+      .select('id, net_payout, status, payout_bank_account_id')
+      .not('payout_bank_account_id', 'is', null),
+    supabase
       .from('booking_adjustments')
-      .select('amount, kind')
-      .eq('bank_account_id', account.id);
-
-    const adjInflows = (adjData ?? []).reduce(
-      (sum: number, row: { amount: number; kind: string }) =>
-        row.kind === 'discount' ? sum : sum + Number(row.amount ?? 0),
-      0,
-    );
-
-    // Outflows = PAID expenses + fine/deduction booking payments from this account
-    const { data: outflowData } = await supabase
+      .select('bank_account_id, amount, kind')
+      .not('bank_account_id', 'is', null),
+    supabase
       .from('expenses')
-      .select('amount')
-      .eq('bank_account_id', account.id)
-      .eq('status', 'paid');
+      .select('bank_account_id, amount')
+      .not('bank_account_id', 'is', null)
+      .eq('status', 'paid'),
+  ]);
 
-    const expenseOutflows = (outflowData ?? []).reduce(
-      (sum: number, row: { amount: number }) => sum + Number(row.amount),
-      0,
-    );
+  // ── Pre-process into Maps keyed by account.id ────────────────────────────────
+  const allPayments = paymentsRes.data ?? [];
+  const allBookings = bookingsRes.data ?? [];
+  const allAdj      = adjRes.data ?? [];
+  const allExpenses = expensesRes.data ?? [];
 
-    const outflows = expenseOutflows + legacyFineOutflows;
+  const bookingsWithPayments = new Set(allPayments.map(p => p.booking_id as string));
 
-    balances.push({
-      account,
-      inflows: inflows + adjInflows,
-      outflows,
-      currentBalance: Number(account.opening_balance) + inflows + adjInflows - outflows,
-    });
+  // payment inflows per account
+  const paymentInflowByAcc = new Map<string, number>();
+  for (const p of allPayments) {
+    if (!p.bank_account_id) continue;
+    paymentInflowByAcc.set(p.bank_account_id, (paymentInflowByAcc.get(p.bank_account_id) ?? 0) + Number(p.amount));
   }
+
+  // legacy booking inflows / outflows per account
+  type BookingRow = { id: string; net_payout: number | null; status?: string | null; payout_bank_account_id: string | null };
+  const legacyInflowByAcc  = new Map<string, number>();
+  const legacyFineByAcc    = new Map<string, number>();
+  for (const b of allBookings as BookingRow[]) {
+    const acc = b.payout_bank_account_id;
+    if (!acc || bookingsWithPayments.has(b.id)) continue;
+    const net = Number(b.net_payout ?? 0);
+    if (net > 0) {
+      legacyInflowByAcc.set(acc, (legacyInflowByAcc.get(acc) ?? 0) + net);
+    } else if (net < 0 && (b.status ?? '').toLowerCase().includes('cancel')) {
+      legacyFineByAcc.set(acc, (legacyFineByAcc.get(acc) ?? 0) + Math.abs(net));
+    }
+  }
+
+  // adjustment inflows per account
+  type AdjRow = { bank_account_id: string | null; amount: number; kind: string };
+  const adjInflowByAcc = new Map<string, number>();
+  for (const a of allAdj as AdjRow[]) {
+    if (!a.bank_account_id || a.kind === 'discount') continue;
+    adjInflowByAcc.set(a.bank_account_id, (adjInflowByAcc.get(a.bank_account_id) ?? 0) + Number(a.amount));
+  }
+
+  // expense outflows per account
+  type ExpRow = { bank_account_id: string | null; amount: number };
+  const expOutflowByAcc = new Map<string, number>();
+  for (const e of allExpenses as ExpRow[]) {
+    if (!e.bank_account_id) continue;
+    expOutflowByAcc.set(e.bank_account_id, (expOutflowByAcc.get(e.bank_account_id) ?? 0) + Number(e.amount));
+  }
+
+  // ── Assemble balances (pure JS, zero extra queries) ──────────────────────────
+  const balances: BankAccountBalance[] = accounts.map(account => {
+    const id = account.id;
+    const inflows  = (paymentInflowByAcc.get(id) ?? 0) + (legacyInflowByAcc.get(id) ?? 0) + (adjInflowByAcc.get(id) ?? 0);
+    const outflows = (expOutflowByAcc.get(id) ?? 0)    + (legacyFineByAcc.get(id) ?? 0);
+    return {
+      account,
+      inflows,
+      outflows,
+      currentBalance: Number(account.opening_balance) + inflows - outflows,
+    };
+  });
 
   return { data: balances, error: null };
 };
@@ -298,7 +295,7 @@ export const validateAccountSpend = async (
 ): Promise<ServiceResult<{ ok: boolean; account: BankAccountRow; currentBalance: number; after: number }>> => {
   const { data: account, error: accErr } = await supabase
     .from('bank_accounts')
-    .select('*')
+    .select('id, owner_id, name, bank, account_type, account_number_mask, currency, opening_balance, is_active, notes, created_at, is_credit, credit_limit, is_cash')
     .eq('id', accountId)
     .single();
   if (accErr || !account) return { data: null, error: accErr?.message ?? 'Cuenta no encontrada' };

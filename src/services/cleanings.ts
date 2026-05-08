@@ -144,6 +144,91 @@ export const listCleaningsByCleaner = async (
   return { data: rows, error: null };
 };
 
+/** Same enrichment as listCleaningsByCleaner but for ALL cleaners at once,
+ *  with optional date range (done_date) and cleaner id filter. */
+export const listAllCleaningsEnriched = async (options?: {
+  from?: string;
+  to?: string;
+  cleanerIds?: string[];
+}): Promise<ServiceResult<CleaningHistoryRow[]>> => {
+  let query = supabase
+    .from('booking_cleanings')
+    .select('*');
+  if (options?.cleanerIds && options.cleanerIds.length > 0) {
+    query = query.in('cleaner_id', options.cleanerIds);
+  }
+  if (options?.from) query = query.gte('done_date', options.from);
+  if (options?.to)   query = query.lte('done_date', options.to);
+  query = query
+    .order('done_date', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false });
+
+  const { data: cleaningRows, error: cErr } = await query;
+  if (cErr) return { data: null, error: cErr.message };
+
+  const cleanings = (cleaningRows ?? []) as BookingCleaningRow[];
+  if (cleanings.length === 0) return { data: [], error: null };
+
+  const bookingIds = Array.from(new Set(cleanings.map(c => c.booking_id)));
+  const { data: bookingRows, error: bErr } = await supabase
+    .from('bookings')
+    .select('id, confirmation_code, guest_name, start_date, end_date, listing_id')
+    .in('id', bookingIds);
+  if (bErr) return { data: null, error: bErr.message };
+
+  type BookingMini = {
+    id: string; confirmation_code: string | null; guest_name: string | null;
+    start_date: string | null; end_date: string | null; listing_id: string;
+  };
+  const bookings = (bookingRows ?? []) as BookingMini[];
+  const bookingMap = new Map(bookings.map(b => [b.id, b]));
+
+  const listingIds = Array.from(new Set(bookings.map(b => b.listing_id).filter(Boolean)));
+  type ListingMini = { id: string; source: string | null; property_id: string };
+  let listings: ListingMini[] = [];
+  if (listingIds.length > 0) {
+    const { data: lRows, error: lErr } = await supabase
+      .from('listings')
+      .select('id, source, property_id')
+      .in('id', listingIds);
+    if (lErr) return { data: null, error: lErr.message };
+    listings = (lRows ?? []) as ListingMini[];
+  }
+  const listingMap = new Map(listings.map(l => [l.id, l]));
+
+  const propertyIds = Array.from(new Set(listings.map(l => l.property_id).filter(Boolean)));
+  type PropertyMini = { id: string; name: string };
+  let properties: PropertyMini[] = [];
+  if (propertyIds.length > 0) {
+    const { data: pRows, error: pErr } = await supabase
+      .from('properties')
+      .select('id, name')
+      .in('id', propertyIds);
+    if (pErr) return { data: null, error: pErr.message };
+    properties = (pRows ?? []) as PropertyMini[];
+  }
+  const propertyMap = new Map(properties.map(p => [p.id, p]));
+
+  const rows: CleaningHistoryRow[] = cleanings.map((r) => {
+    const base = toCleaning(r);
+    const booking = bookingMap.get(r.booking_id);
+    const listing = booking ? listingMap.get(booking.listing_id) : undefined;
+    const property = listing ? propertyMap.get(listing.property_id) : undefined;
+    return {
+      ...base,
+      booking_code: booking?.confirmation_code ?? null,
+      guest_name: booking?.guest_name ?? null,
+      check_in: booking?.start_date ?? null,
+      check_out: booking?.end_date ?? null,
+      property_id: property?.id ?? null,
+      property_name: property?.name ?? null,
+      listing_source: listing?.source ?? null,
+    };
+  });
+
+  return { data: rows, error: null };
+};
+
 export const createCleaning = async (
   input: Omit<BookingCleaning, 'id' | 'created_at'>,
 ): Promise<ServiceResult<BookingCleaning>> => {

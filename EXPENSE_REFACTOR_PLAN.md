@@ -1,3 +1,5 @@
+> ⚠️ **ARCHIVO OBSOLETO** — Implementado. Ver `audits/05_REMEDIATION_ROADMAP.md` y `src/components/features/expenses/`. No actualizar.
+
 # Plan – Refactor del registro de gastos por tipo
 
 ## Contexto

@@ -143,6 +143,85 @@ export interface ConflictEntry {
 export type ConflictAction = 'skip' | 'import' | 'import_opponent';
 export type ConflictResolutions = Record<string, ConflictAction>;
 
+// ── Duplicate detection (same confirmation_code) ──────────────────────────────
+
+export interface DuplicateExisting {
+  confirmation_code: string;
+  status: string;
+  guest_name: string | null;
+  start_date: string;
+  end_date: string;
+  num_nights: number;
+  listing_name: string;
+  revenue: number;
+  has_payout?: boolean;
+  has_notes?: boolean;
+  source: 'file' | 'db';
+  /** Reference to the original ParsedBooking — only set for within_file duplicates. */
+  _fileRef?: ParsedBooking;
+}
+
+export interface DuplicateEntry {
+  id: string;
+  confirmation_code: string;
+  type: 'within_file' | 'with_db';
+  incoming: ParsedBooking;
+  existing: DuplicateExisting;
+  differingFields: string[];
+}
+
+export type DuplicateAction = 'use_incoming' | 'keep_existing';
+export type DuplicateResolutions = Record<string, DuplicateAction>;
+
+const DUPLICATE_COMPARE_FIELDS = ['status', 'guest_name', 'start_date', 'end_date', 'num_nights', 'listing_name', 'revenue'] as const;
+
+/**
+ * Finds rows within a single file that share the same confirmation_code.
+ * Returns ONE entry per duplicated code: first occurrence = "existing", last = "incoming".
+ */
+export const detectWithinFileDuplicates = (bookings: ParsedBooking[]): DuplicateEntry[] => {
+  const firstSeen = new Map<string, ParsedBooking>();
+  const lastSeen = new Map<string, ParsedBooking>();
+
+  for (const b of bookings) {
+    if (!b.confirmation_code) continue;
+    if (!firstSeen.has(b.confirmation_code)) firstSeen.set(b.confirmation_code, b);
+    lastSeen.set(b.confirmation_code, b);
+  }
+
+  const duplicates: DuplicateEntry[] = [];
+  for (const [code, last] of lastSeen.entries()) {
+    const first = firstSeen.get(code)!;
+    if (first === last) continue;
+
+    const differingFields = DUPLICATE_COMPARE_FIELDS.filter(
+      f => String(last[f] ?? '') !== String(first[f] ?? ''),
+    );
+
+    duplicates.push({
+      id: `file-dup-${code}`,
+      confirmation_code: code,
+      type: 'within_file',
+      incoming: last,
+      existing: {
+        confirmation_code: first.confirmation_code,
+        status: first.status,
+        guest_name: first.guest_name,
+        start_date: first.start_date,
+        end_date: first.end_date,
+        num_nights: first.num_nights,
+        listing_name: first.listing_name,
+        revenue: first.revenue,
+        source: 'file',
+        _fileRef: first,
+      },
+      differingFields,
+    });
+  }
+
+  return duplicates;
+};
+
 /** True iff date ranges [s1,e1) and [s2,e2) overlap. Back-to-back (s1===e2) is NOT an overlap. */
 export const datesOverlap = (s1: string, e1: string, s2: string, e2: string): boolean =>
   s1 < e2 && s2 < e1;

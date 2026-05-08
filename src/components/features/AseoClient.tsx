@@ -1,18 +1,16 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from '@/lib/toast';
 import { listVendors, createVendor, updateVendor, deleteVendor, type Vendor } from '@/services/vendors';
 import { listBankAccounts } from '@/services/bankAccounts';
 import {
   listAllCleanings,
+  listAllCleaningsEnriched,
   computeCleanerBalances,
   payoutCleanerConsolidated,
-  listCleaningsByCleaner,
   getLooseCleanerSuppliesTotals,
-  listCleanerLooseSupplies,
   type BookingCleaning,
-  type CleaningHistoryRow,
-  type LooseSupplyRow,
 } from '@/services/cleanings';
 import {
   listCleanerGroups,
@@ -23,9 +21,14 @@ import {
 } from '@/services/cleanerGroups';
 import type { BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
-import { useBackdropClose } from '@/lib/useBackdropClose';
-import { Pencil, UserMinus } from 'lucide-react';
-import { todayISO } from '@/lib/dateUtils';
+import { Pencil, UserMinus, Download } from 'lucide-react';
+import { exportAseoToCsv, exportAseoToExcel, exportAseoToPdf, type AseoExportRow } from '@/services/export';
+import { TagChip, NewTagInline } from './aseo/CleanerTagControls';
+import NewCleanerModal from './aseo/NewCleanerModal';
+import DetailModal from './aseo/DetailModal';
+import PayoutModal from './aseo/PayoutModal';
+import EditCleanerModal from './aseo/EditCleanerModal';
+import ConfirmDeleteModal from './aseo/ConfirmDeleteModal';
 
 export default function AseoClient(): JSX.Element {
   const [cleaners, setCleaners] = useState<Vendor[]>([]);
@@ -43,6 +46,16 @@ export default function AseoClient(): JSX.Element {
   const [payoutTarget, setPayoutTarget] = useState<Vendor | null>(null);
   const [editing, setEditing] = useState<Vendor | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Vendor | null>(null);
+
+  // Historial state
+  const [histDateFrom, setHistDateFrom] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [histDateTo, setHistDateTo]     = useState(() => new Date().toISOString().slice(0, 10));
+  const [histCleanerIds, setHistCleanerIds] = useState<string[]>([]);
+  const [exporting, setExporting]       = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -107,6 +120,23 @@ export default function AseoClient(): JSX.Element {
     });
   }, [cleaners, tagFilters, cleanerTagsMap]);
 
+  const cleanerMap = useMemo(() => new Map(cleaners.map(c => [c.id, c])), [cleaners]);
+
+  const filteredHistCleanings = useMemo(() => {
+    return cleanings
+      .filter(c => {
+        if (histCleanerIds.length > 0 && c.cleaner_id && !histCleanerIds.includes(c.cleaner_id)) return false;
+        if (histDateFrom && c.done_date && c.done_date < histDateFrom) return false;
+        if (histDateTo && c.done_date && c.done_date > histDateTo) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const da = a.done_date ?? a.created_at ?? '';
+        const db = b.done_date ?? b.created_at ?? '';
+        return db.localeCompare(da);
+      });
+  }, [cleanings, histCleanerIds, histDateFrom, histDateTo]);
+
   const handleCreate = async () => {
     if (!form.name.trim()) { setErr('El nombre es obligatorio.'); return; }
     setSaving(true);
@@ -122,7 +152,7 @@ export default function AseoClient(): JSX.Element {
       is_variable: false,
       start_year_month: null,
     });
-    if (res.error || !res.data) { setSaving(false); setErr(res.error ?? 'Error'); return; }
+    if (res.error || !res.data) { setSaving(false); setErr(res.error ?? 'Error'); toast.error(res.error ?? 'No se pudo crear el personal'); return; }
     if (form.tagIds.length > 0) {
       await setCleanerGroupMembership(res.data.id, form.tagIds);
     }
@@ -130,6 +160,7 @@ export default function AseoClient(): JSX.Element {
     setNewModal(false);
     setForm({ name: '', contact: '', tagIds: [] });
     setErr(null);
+    toast.success('Personal de aseo creado');
     await load();
   };
 
@@ -142,7 +173,9 @@ export default function AseoClient(): JSX.Element {
 
   const handleDeleteTag = async (id: string) => {
     if (!confirm('¿Eliminar etiqueta? Las personas seguirán existiendo.')) return;
-    await deleteCleanerGroup(id);
+    const res = await deleteCleanerGroup(id);
+    if (res?.error) { toast.error(res.error); return; }
+    toast.success('Etiqueta eliminada');
     setTagFilters(prev => prev.filter(t => t !== id));
     await load();
   };
@@ -180,6 +213,38 @@ export default function AseoClient(): JSX.Element {
   // Bloque 9: NO marcamos paid individual. El paid se crea junto con el expense
   // a través de payoutCleanerConsolidated (botón "Liquidar"). Mantener
   // consistencia entre booking_cleanings.status='paid' y un expense real.
+
+  const handleExport = async (format: 'csv' | 'excel' | 'pdf') => {
+    setExporting(true);
+    setExportMenuOpen(false);
+    const res = await listAllCleaningsEnriched({
+      from: histDateFrom || undefined,
+      to:   histDateTo   || undefined,
+      cleanerIds: histCleanerIds.length > 0 ? histCleanerIds : undefined,
+    });
+    if (res.error || !res.data) {
+      toast.error('Error al cargar historial para exportar');
+      setExporting(false);
+      return;
+    }
+    const periodLabel = [histDateFrom, histDateTo].filter(Boolean).join('_al_') || 'todos';
+    const rows: AseoExportRow[] = res.data.map(r => ({
+      cleaner_name:  r.cleaner_id ? (cleanerMap.get(r.cleaner_id)?.name ?? '—') : '—',
+      done_date:     r.done_date,
+      booking_code:  r.booking_code,
+      property_name: r.property_name,
+      guest_name:    r.guest_name,
+      check_in:      r.check_in,
+      check_out:     r.check_out,
+      fee:           r.fee,
+      status:        r.status,
+      paid_date:     r.paid_date,
+    }));
+    if (format === 'csv')   exportAseoToCsv(rows, periodLabel);
+    else if (format === 'excel') exportAseoToExcel(rows, periodLabel);
+    else                    exportAseoToPdf(rows, periodLabel);
+    setExporting(false);
+  };
 
   const totalOwed = useMemo(
     () => Array.from(balances.values()).reduce((s, b) => s + b.total_owed, 0),
@@ -383,6 +448,143 @@ export default function AseoClient(): JSX.Element {
         </div>
       )}
 
+      {/* ── Historial Global de Aseo ──────────────────────────────────────── */}
+      {!loading && cleanings.length > 0 && (
+        <div className="mt-10">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <h2 className="text-xl font-bold text-slate-800">📋 Historial de Aseo</h2>
+            <div className="relative">
+              <button
+                onClick={() => setExportMenuOpen(v => !v)}
+                disabled={exporting || filteredHistCleanings.length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-slate-700 text-white text-sm font-semibold rounded-lg hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed shadow-sm"
+              >
+                <Download size={15} />
+                {exporting ? 'Exportando…' : 'Exportar'}
+              </button>
+              {exportMenuOpen && (
+                <div
+                  className="absolute right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-20 min-w-[168px] overflow-hidden"
+                  onMouseLeave={() => setExportMenuOpen(false)}
+                >
+                  {(['csv', 'excel', 'pdf'] as const).map(fmt => (
+                    <button
+                      key={fmt}
+                      onClick={() => handleExport(fmt)}
+                      className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50"
+                    >
+                      {fmt === 'csv' ? '📄 CSV' : fmt === 'excel' ? '📊 Excel (.xls)' : '🖨️ PDF / Imprimir'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Filters */}
+          <div className="flex flex-wrap gap-3 items-start p-3 bg-slate-50 border border-slate-200 rounded-xl mb-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Período:</span>
+              <input
+                type="date"
+                value={histDateFrom}
+                max={histDateTo || undefined}
+                onChange={e => setHistDateFrom(e.target.value)}
+                className="border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+              <span className="text-slate-400 text-xs">—</span>
+              <input
+                type="date"
+                value={histDateTo}
+                min={histDateFrom || undefined}
+                onChange={e => setHistDateTo(e.target.value)}
+                className="border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+              {(histDateFrom || histDateTo) && (
+                <button
+                  onClick={() => { setHistDateFrom(''); setHistDateTo(''); }}
+                  className="text-xs text-blue-600 underline"
+                >
+                  Ver todos
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Personal:</span>
+              {histCleanerIds.length > 0 && (
+                <button onClick={() => setHistCleanerIds([])} className="text-xs text-blue-600 underline">
+                  Todos
+                </button>
+              )}
+              {cleaners.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => setHistCleanerIds(prev =>
+                    prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]
+                  )}
+                  className={`px-2 py-0.5 rounded-full text-xs font-semibold border transition-colors ${
+                    histCleanerIds.includes(c.id)
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
+                  }`}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                {filteredHistCleanings.length} registro{filteredHistCleanings.length !== 1 ? 's' : ''}
+              </span>
+              <span className="text-xs font-semibold text-slate-700">
+                Total: {formatCurrency(filteredHistCleanings.reduce((s, c) => s + c.fee, 0))}
+              </span>
+            </div>
+            {filteredHistCleanings.length === 0 ? (
+              <p className="text-center text-slate-400 text-sm py-8">Sin registros para el período seleccionado</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left bg-slate-50">
+                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Personal</th>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Fecha hecho</th>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide text-right">Valor</th>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Estado</th>
+                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Liquidado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredHistCleanings.slice(0, 200).map(c => {
+                      const cleanerName = c.cleaner_id ? (cleanerMap.get(c.cleaner_id)?.name ?? '—') : '—';
+                      const statusLabel = c.status === 'paid' ? '✅ Liquidado' : c.status === 'done' ? '🔵 Hecho' : '🟡 Pendiente';
+                      return (
+                        <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50">
+                          <td className="px-4 py-2.5 font-medium text-slate-800">{cleanerName}</td>
+                          <td className="px-4 py-2.5 text-slate-600">{c.done_date ?? '—'}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-slate-700">{formatCurrency(c.fee)}</td>
+                          <td className="px-4 py-2.5 text-slate-600">{statusLabel}</td>
+                          <td className="px-4 py-2.5 text-slate-500">{c.paid_date ?? '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {filteredHistCleanings.length > 200 && (
+                  <p className="text-center text-xs text-slate-400 py-3 border-t">
+                    Mostrando 200 de {filteredHistCleanings.length} registros. Usa el exportador para ver todos.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <AnimatePresence>
         {newModal && (
           <NewCleanerModal
@@ -473,721 +675,5 @@ function KPICard({ label, value, tone, highlight }: { label: string; value: stri
       <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">{label}</p>
       <p className={`text-xl lg:text-2xl font-bold mt-1 ${color}`}>{value}</p>
     </div>
-  );
-}
-
-function NewCleanerModal({
-  form, setForm, saving, err, groups, onCreateTag, onClose, onCreate,
-}: {
-  form: { name: string; contact: string; tagIds: string[] };
-  setForm: (f: { name: string; contact: string; tagIds: string[] }) => void;
-  saving: boolean;
-  err: string | null;
-  groups: CleanerGroup[];
-  onCreateTag: (name: string) => Promise<string | null>;
-  onClose: () => void;
-  onCreate: () => void;
-}) {
-  const backdrop = useBackdropClose(onClose);
-  const [newTagName, setNewTagName] = useState('');
-  const [creatingTag, setCreatingTag] = useState(false);
-
-  const toggleTag = (id: string) => {
-    setForm({
-      ...form,
-      tagIds: form.tagIds.includes(id)
-        ? form.tagIds.filter(g => g !== id)
-        : [...form.tagIds, id],
-    });
-  };
-
-  const addTag = async () => {
-    if (!newTagName.trim()) return;
-    setCreatingTag(true);
-    const id = await onCreateTag(newTagName.trim());
-    setCreatingTag(false);
-    if (id) {
-      setForm({ ...form, tagIds: [...form.tagIds, id] });
-      setNewTagName('');
-    }
-  };
-
-  return (
-    <motion.div
-      {...backdrop}
-      className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-    >
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-        onClick={e => e.stopPropagation()}
-        onMouseDown={e => e.stopPropagation()}
-        onMouseUp={e => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto"
-      >
-        <h3 className="text-xl font-bold text-slate-800 mb-4">Nueva persona de aseo</h3>
-        {err && <p className="text-xs text-red-600 mb-3">{err}</p>}
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Nombre *</label>
-            <input
-              type="text"
-              value={form.name}
-              onChange={e => setForm({ ...form, name: e.target.value })}
-              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Contacto</label>
-            <input
-              type="text"
-              value={form.contact}
-              onChange={e => setForm({ ...form, contact: e.target.value })}
-              placeholder="Teléfono / WhatsApp"
-              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Etiquetas (opcional)</label>
-            <p className="text-[11px] text-slate-500 mb-2">Filtra por región, confianza u otros criterios. Una persona puede tener varias etiquetas.</p>
-            {groups.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {groups.map(g => {
-                  const on = form.tagIds.includes(g.id);
-                  return (
-                    <button
-                      key={g.id}
-                      type="button"
-                      onClick={() => toggleTag(g.id)}
-                      className={`px-2 py-1 text-xs font-semibold rounded-full border transition ${
-                        on ? 'text-white' : 'text-slate-600 bg-white hover:bg-slate-50 border-slate-300'
-                      }`}
-                      style={on ? { backgroundColor: g.color ?? '#475569', borderColor: g.color ?? '#475569' } : undefined}
-                    >
-                      {on ? '✓ ' : '+ '}{g.name}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={newTagName}
-                onChange={e => setNewTagName(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
-                placeholder="Nueva etiqueta (ej: Villavicencio, Confianza)"
-                className="flex-1 px-2 py-1.5 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-              <button
-                type="button"
-                onClick={addTag}
-                disabled={creatingTag || !newTagName.trim()}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-700 rounded-lg hover:bg-slate-800 disabled:opacity-50"
-              >
-                + Crear
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
-          <button
-            onClick={onCreate}
-            disabled={saving}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
-          >
-            {saving ? 'Guardando…' : 'Crear'}
-          </button>
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-function TagChip({
-  active, onClick, label, color, onDelete,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  color?: string;
-  onDelete?: () => void;
-}) {
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full text-xs font-semibold border transition ${
-      active ? 'text-white' : 'text-slate-700 bg-white border-slate-300 hover:bg-slate-50'
-    }`}
-      style={active ? { backgroundColor: color ?? '#1e293b', borderColor: color ?? '#1e293b' } : undefined}
-    >
-      <button type="button" onClick={onClick} className="px-3 py-1">
-        {label}
-      </button>
-      {onDelete && (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className={`pr-2 ${active ? 'text-white/80 hover:text-white' : 'text-slate-400 hover:text-red-600'}`}
-          title="Eliminar etiqueta"
-          aria-label="Eliminar etiqueta"
-        >
-          ×
-        </button>
-      )}
-    </span>
-  );
-}
-
-function NewTagInline({ onCreateTag }: { onCreateTag: (name: string) => Promise<string | null> }) {
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [creating, setCreating] = useState(false);
-
-  const create = async () => {
-    if (!name.trim()) return;
-    setCreating(true);
-    await onCreateTag(name.trim());
-    setCreating(false);
-    setName('');
-    setOpen(false);
-  };
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="px-2 py-1 text-xs font-semibold text-slate-500 border border-dashed border-slate-300 rounded-full hover:border-slate-400 hover:text-slate-700 transition"
-      >
-        + Nueva etiqueta
-      </button>
-    );
-  }
-  return (
-    <div className="flex items-center gap-1.5">
-      <input
-        autoFocus
-        type="text"
-        value={name}
-        onChange={e => setName(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter') { e.preventDefault(); create(); }
-          if (e.key === 'Escape') setOpen(false);
-        }}
-        placeholder="ej: Villavicencio"
-        className="px-2 py-1 text-xs border rounded-full w-36 focus:ring-2 focus:ring-blue-400 outline-none"
-      />
-      <button
-        type="button"
-        onClick={create}
-        disabled={creating || !name.trim()}
-        className="px-2 py-1 text-xs font-semibold text-white bg-blue-600 rounded-full hover:bg-blue-700 disabled:opacity-50"
-      >
-        {creating ? '…' : 'Crear'}
-      </button>
-      <button type="button" onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>
-    </div>
-  );
-}
-
-function DetailModal({
-  cleaner, onClose,
-}: {
-  cleaner: Vendor;
-  cleanings: BookingCleaning[]; // legacy prop, ya no se usa (cargamos enriquecido)
-  onClose: () => void;
-}) {
-  const backdrop = useBackdropClose(onClose);
-  const [rows, setRows] = useState<CleaningHistoryRow[]>([]);
-  const [loose, setLoose] = useState<LooseSupplyRow[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let mounted = true;
-    Promise.all([
-      listCleaningsByCleaner(cleaner.id),
-      listCleanerLooseSupplies(cleaner.id),
-    ]).then(([res, lRes]) => {
-      if (!mounted) return;
-      setRows(res.data ?? []);
-      setLoose(lRes.data ?? []);
-      setLoading(false);
-    });
-    return () => { mounted = false; };
-  }, [cleaner.id]);
-
-  const totalEarned = rows.reduce((s, r) => s + r.fee, 0);
-  const totalPaid = rows.filter(r => r.status === 'paid').reduce((s, r) => s + r.fee, 0);
-  const totalUnpaid = rows.filter(r => r.status !== 'paid').reduce((s, r) => s + r.fee, 0);
-  const totalSuppliesReimb = rows.reduce((s, r) => s + (r.reimburse_to_cleaner ? r.supplies_amount : 0), 0);
-  const totalLoosePending = loose.filter(l => l.status === 'pending').reduce((s, l) => s + l.amount, 0);
-  const totalLoosePaid = loose.filter(l => l.status === 'paid').reduce((s, l) => s + l.amount, 0);
-  const sourceBadge = (s: string | null): string => {
-    if (!s) return '—';
-    const v = s.toLowerCase();
-    if (v.includes('airbnb')) return 'Airbnb';
-    if (v.includes('booking')) return 'Booking';
-    if (v.includes('direct') || v.includes('directa')) return 'Directa';
-    return s;
-  };
-
-  return (
-    <motion.div
-      {...backdrop}
-      className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-    >
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-        onClick={e => e.stopPropagation()}
-        onMouseDown={e => e.stopPropagation()}
-        onMouseUp={e => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
-      >
-        <div className="p-6 border-b border-slate-100 flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-xl font-bold text-slate-800">🧹 {cleaner.name}</h3>
-            <p className="text-sm text-slate-500">Historial de aseos ({rows.length})</p>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 text-center text-xs items-start">
-            <div className="bg-slate-50 rounded-lg px-3 py-2 min-h-[72px] flex flex-col justify-center">
-              <div className="text-[10px] uppercase text-slate-500 font-semibold">Total facturado</div>
-              <div className="text-base font-bold text-slate-800">{formatCurrency(totalEarned)}</div>
-            </div>
-            <div className="bg-emerald-50 rounded-lg px-3 py-2 min-h-[72px] flex flex-col justify-center">
-              <div className="text-[10px] uppercase text-emerald-600 font-semibold">Pagado</div>
-              <div className="text-base font-bold text-emerald-700">{formatCurrency(totalPaid)}</div>
-            </div>
-            <div className="bg-amber-50 rounded-lg px-3 py-2 min-h-[72px] flex flex-col justify-center">
-              <div className="text-[10px] uppercase text-amber-600 font-semibold">Sin pagar</div>
-              <div className="text-base font-bold text-amber-700">{formatCurrency(totalUnpaid)}</div>
-            </div>
-            <div className="bg-indigo-50 rounded-lg px-3 py-2 min-h-[72px] flex flex-col justify-center">
-              <div className="text-[10px] uppercase text-indigo-600 font-semibold">Insumos reemb.</div>
-              <div className="text-base font-bold text-indigo-700">{formatCurrency(totalSuppliesReimb)}</div>
-            </div>
-            <div className="bg-cyan-50 rounded-lg px-3 py-2 min-h-[72px] flex flex-col justify-center" title="Insumos comprados por la persona, sin asignar a una reserva">
-              <div className="text-[10px] uppercase text-cyan-600 font-semibold">Insumos sueltos</div>
-              <div className="text-base font-bold text-cyan-700">{formatCurrency(totalLoosePending)}</div>
-              <div className="text-[10px] text-cyan-600">pend · pagado: {formatCurrency(totalLoosePaid)}</div>
-            </div>
-          </div>
-        </div>
-        <div className="p-6 space-y-6">
-          {loading ? (
-            <p className="text-sm text-slate-500 text-center py-8">Cargando historial…</p>
-          ) : (
-            <>
-              {/* Sección 1: aseos por reserva */}
-              <div>
-                <h4 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
-                  🧹 Aseos hechos por reserva
-                  <span className="text-[10px] text-slate-400 font-normal">({rows.length})</span>
-                </h4>
-                {rows.length === 0 ? (
-                  <p className="text-sm text-slate-500 py-4 bg-slate-50 rounded-lg text-center">Aún no hay aseos registrados.</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="text-[10px] uppercase text-slate-500 bg-slate-50">
-                        <tr>
-                          <th className="text-left py-2 px-2">Estado</th>
-                          <th className="text-left py-2 px-2">Propiedad</th>
-                          <th className="text-left py-2 px-2">Reserva</th>
-                          <th className="text-left py-2 px-2">Huésped</th>
-                          <th className="text-left py-2 px-2">Fecha aseo</th>
-                          <th className="text-left py-2 px-2">Pagado</th>
-                          <th className="text-right py-2 px-2">Tarifa</th>
-                          <th className="text-right py-2 px-2">Insumos</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {rows.map(r => (
-                          <tr key={r.id} className="hover:bg-slate-50">
-                            <td className="py-2 px-2">
-                              {r.status === 'paid' && <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs font-semibold">Pagado</span>}
-                              {r.status === 'done' && <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-semibold">Hecho</span>}
-                              {r.status === 'pending' && <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-semibold">Pendiente</span>}
-                            </td>
-                            <td className="py-2 px-2 text-slate-700 font-medium">{r.property_name ?? '—'}</td>
-                            <td className="py-2 px-2">
-                              {r.booking_id ? (
-                                <a
-                                  href={`/bookings?focus=${r.booking_id}`}
-                                  className="text-blue-600 hover:underline text-xs font-mono"
-                                  title="Abrir reserva"
-                                >
-                                  {r.booking_code ?? r.booking_id.slice(0, 8)}
-                                </a>
-                              ) : '—'}
-                              {r.listing_source && (
-                                <span className="ml-1.5 text-[10px] text-slate-400">· {sourceBadge(r.listing_source)}</span>
-                              )}
-                            </td>
-                            <td className="py-2 px-2 text-slate-600 truncate max-w-[180px]" title={r.guest_name ?? undefined}>
-                              {r.guest_name ?? '—'}
-                            </td>
-                            <td className="py-2 px-2 text-slate-500">{r.done_date ?? r.check_out ?? '—'}</td>
-                            <td className="py-2 px-2 text-slate-500">{r.paid_date ?? '—'}</td>
-                            <td className="py-2 px-2 text-right font-semibold">{formatCurrency(r.fee)}</td>
-                            <td className="py-2 px-2 text-right">
-                              {r.supplies_amount > 0 ? (
-                                <span
-                                  className={r.reimburse_to_cleaner ? 'text-indigo-700 font-semibold' : 'text-slate-400'}
-                                  title={r.reimburse_to_cleaner ? 'Insumos reembolsados al cleaner en la liquidación' : 'Insumos NO reembolsados al cleaner'}
-                                >
-                                  {formatCurrency(r.supplies_amount)}
-                                  {!r.reimburse_to_cleaner && <span className="ml-1 text-[10px]">(no reemb.)</span>}
-                                </span>
-                              ) : (
-                                <span className="text-slate-300">—</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* Sección 2: insumos sueltos comprados por la persona */}
-              <div>
-                <h4 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
-                  🧴 Insumos comprados por la persona
-                  <span className="text-[10px] text-slate-400 font-normal">({loose.length})</span>
-                  {totalLoosePending > 0 && (
-                    <span className="ml-auto text-[11px] font-semibold text-cyan-700 bg-cyan-50 border border-cyan-200 rounded px-2 py-0.5">
-                      Por liquidar: {formatCurrency(totalLoosePending)}
-                    </span>
-                  )}
-                </h4>
-                {loose.length === 0 ? (
-                  <p className="text-xs text-slate-500 py-3 bg-slate-50 rounded-lg text-center">
-                    No hay compras de insumos registradas a nombre de esta persona.
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="text-[10px] uppercase text-slate-500 bg-slate-50">
-                        <tr>
-                          <th className="text-left py-2 px-2">Estado</th>
-                          <th className="text-left py-2 px-2">Fecha</th>
-                          <th className="text-left py-2 px-2">Propiedad</th>
-                          <th className="text-left py-2 px-2">Detalle</th>
-                          <th className="text-left py-2 px-2">Pagado</th>
-                          <th className="text-right py-2 px-2">Monto</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {loose.map(l => (
-                          <tr key={l.id} className="hover:bg-slate-50">
-                            <td className="py-2 px-2">
-                              {l.status === 'paid'
-                                ? <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs font-semibold">Liquidado</span>
-                                : <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-semibold">Por liquidar</span>}
-                            </td>
-                            <td className="py-2 px-2 text-slate-500">{l.date}</td>
-                            <td className="py-2 px-2 text-slate-700">{l.property_name ?? <span className="text-slate-400">—</span>}</td>
-                            <td className="py-2 px-2 text-slate-600 truncate max-w-[260px]" title={l.description ?? undefined}>
-                              {l.description ?? <span className="text-slate-400">Sin detalle</span>}
-                            </td>
-                            <td className="py-2 px-2 text-slate-500">{l.paid_date ?? '—'}</td>
-                            <td className="py-2 px-2 text-right font-semibold text-cyan-700">{formatCurrency(l.amount)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-        <div className="p-4 border-t border-slate-100 flex justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cerrar</button>
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-function PayoutModal({
-  cleaner, balance, looseAmount, looseCount, banks, onClose, onConfirm,
-}: {
-  cleaner: Vendor;
-  balance: ReturnType<typeof computeCleanerBalances> extends Map<string, infer V> ? V | undefined : never;
-  looseAmount: number;
-  looseCount: number;
-  banks: BankAccountRow[];
-  onClose: () => void;
-  onConfirm: (args: { paidDate: string; bankAccountId: string | null; includePending: boolean }) => Promise<string | null>;
-}) {
-  const backdrop = useBackdropClose(onClose);
-  const [paidDate, setPaidDate] = useState(todayISO());
-  const [bankId, setBankId] = useState<string>('');
-  const [includePending, setIncludePending] = useState(false);
-  const [working, setWorking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const cleaningAmount = (balance?.done_unpaid_amount ?? 0) + (includePending ? (balance?.pending_amount ?? 0) : 0);
-  const cleaningCount = (balance?.done_unpaid_count ?? 0) + (includePending ? (balance?.pending_count ?? 0) : 0);
-  const amount = cleaningAmount + looseAmount;
-  const count = cleaningCount;
-
-  const submit = async () => {
-    setWorking(true);
-    setError(null);
-    const err = await onConfirm({ paidDate, bankAccountId: bankId || null, includePending });
-    setWorking(false);
-    if (err) setError(err);
-  };
-
-  return (
-    <motion.div
-      {...backdrop}
-      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-    >
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-        onClick={e => e.stopPropagation()}
-        onMouseDown={e => e.stopPropagation()}
-        onMouseUp={e => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto"
-      >
-        <div className="p-6 border-b">
-          <h3 className="text-xl font-bold text-slate-800">💸 Liquidar a {cleaner.name}</h3>
-          <p className="text-xs text-slate-500 mt-1">Crea un gasto por reserva (aseo + insumos por separado) y los marca como pagados.</p>
-        </div>
-
-        <div className="p-6 space-y-4">
-          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-            <div className="text-xs text-emerald-700 font-semibold uppercase tracking-wide">A pagar ahora</div>
-            <div className="text-2xl font-bold text-emerald-700 mt-1">{formatCurrency(amount)}</div>
-            <div className="text-xs text-emerald-700/80 mt-1 space-y-0.5">
-              <div>🧹 Aseos: {formatCurrency(cleaningAmount)} ({count} aseo{count === 1 ? '' : 's'})</div>
-              {looseCount > 0 && (
-                <div>🧴 Insumos sueltos: {formatCurrency(looseAmount)} ({looseCount} compra{looseCount === 1 ? '' : 's'})</div>
-              )}
-            </div>
-          </div>
-
-          <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={includePending}
-              onChange={e => setIncludePending(e.target.checked)}
-              className="mt-0.5"
-            />
-            <span>
-              Incluir aseos <strong>pendientes</strong> ({balance?.pending_count ?? 0} · {formatCurrency(balance?.pending_amount ?? 0)})
-              <div className="text-xs text-slate-500">Normalmente solo se paga lo ya hecho. Actívalo si vas a pagar por adelantado.</div>
-            </span>
-          </label>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Fecha de pago</label>
-            <input
-              type="date"
-              value={paidDate}
-              onChange={e => setPaidDate(e.target.value)}
-              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Cuenta bancaria (opcional)</label>
-            <select
-              value={bankId}
-              onChange={e => setBankId(e.target.value)}
-              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            >
-              <option value="">— Sin especificar —</option>
-              {banks.map(b => (
-                <option key={b.id} value={b.id}>{b.name}{b.bank ? ` · ${b.bank}` : ''}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
-            Por cada aseo se creará un gasto independiente <strong>"Aseo – {'{propiedad}'} · Reserva {'{código}'}"</strong>{' '}
-            con categoría <code className="bg-white px-1 rounded">cleaning</code> y status{' '}
-            <code className="bg-white px-1 rounded">paid</code>. Si el aseo tenía insumos reembolsables se generará{' '}
-            <strong>otro gasto separado</strong> <em>"Insumos de aseo – {'{propiedad}'} · Reserva {'{código}'}"</em>.
-            {looseCount > 0 && (
-              <> Las <strong>{looseCount} compras de insumos sueltas</strong> ya registradas a nombre de esta persona se marcarán como pagadas y se unirán al mismo grupo de liquidación.</>
-            )}
-          </div>
-
-          {error && <p className="text-sm text-red-600">{error}</p>}
-        </div>
-
-        <div className="flex justify-end gap-2 px-6 py-4 border-t bg-slate-50">
-          <button onClick={onClose} disabled={working} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50">
-            Cancelar
-          </button>
-          <button
-            onClick={submit}
-            disabled={working || amount === 0}
-            className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg disabled:bg-slate-300 disabled:cursor-not-allowed"
-          >
-            {working ? 'Procesando…' : `Pagar ${formatCurrency(amount)}`}
-          </button>
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Edit & Delete cleaner modals (Bloque 15A)
-// ─────────────────────────────────────────────────────────────────
-function EditCleanerModal({
-  cleaner, initialTagIds, groups, onClose, onSave,
-}: {
-  cleaner: Vendor;
-  initialTagIds: string[];
-  groups: CleanerGroup[];
-  onClose: () => void;
-  onSave: (patch: { name: string; contact: string; active: boolean; tagIds: string[] }) => Promise<string | null>;
-}) {
-  const [name, setName] = useState(cleaner.name);
-  const [contact, setContact] = useState(cleaner.contact ?? '');
-  const [active, setActive] = useState(cleaner.active);
-  const [tagIds, setTagIds] = useState<string[]>(initialTagIds);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const backdrop = useBackdropClose(onClose);
-
-  const toggle = (id: string) =>
-    setTagIds(g => g.includes(id) ? g.filter(x => x !== id) : [...g, id]);
-
-  const submit = async () => {
-    if (!name.trim()) { setErr('El nombre es obligatorio'); return; }
-    setSaving(true); setErr(null);
-    const e = await onSave({ name, contact, active, tagIds });
-    setSaving(false);
-    if (e) setErr(e);
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-      {...backdrop}
-    >
-      <motion.div
-        initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
-        onClick={e => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto"
-      >
-        <h3 className="text-xl font-bold text-slate-800 mb-4">Editar {cleaner.name}</h3>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Nombre *</label>
-            <input
-              type="text" value={name} onChange={e => setName(e.target.value)}
-              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Contacto</label>
-            <input
-              type="text" value={contact} onChange={e => setContact(e.target.value)}
-              placeholder="Teléfono / WhatsApp"
-              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-2">Etiquetas</label>
-            <div className="flex flex-wrap gap-2">
-              {groups.map(g => {
-                const on = tagIds.includes(g.id);
-                return (
-                  <button
-                    type="button" key={g.id} onClick={() => toggle(g.id)}
-                    className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${
-                      on ? 'text-white' : 'border-slate-200 text-slate-600 bg-white hover:bg-slate-50'
-                    }`}
-                    style={on ? { backgroundColor: g.color ?? '#475569', borderColor: g.color ?? '#475569' } : undefined}
-                  >
-                    {on ? '✓ ' : ''}{g.name}
-                  </button>
-                );
-              })}
-              {groups.length === 0 && <span className="text-xs text-slate-400">Sin etiquetas creadas todavía.</span>}
-            </div>
-          </div>
-          <label className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg cursor-pointer">
-            <input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} />
-            <span className="text-xs text-slate-700">Activo (desmarca para desactivar sin borrar historial)</span>
-          </label>
-          {err && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">{err}</p>}
-        </div>
-
-        <div className="flex justify-end gap-2 mt-6">
-          <button onClick={onClose} disabled={saving} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50">Cancelar</button>
-          <button onClick={submit} disabled={saving}
-            className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:bg-slate-300">
-            {saving ? 'Guardando…' : 'Guardar cambios'}
-          </button>
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-function ConfirmDeleteModal({
-  cleaner, hasCleanings, onClose, onConfirm,
-}: {
-  cleaner: Vendor;
-  hasCleanings: boolean;
-  onClose: () => void;
-  onConfirm: () => Promise<string | null>;
-}) {
-  const [working, setWorking] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const backdrop = useBackdropClose(onClose);
-  const submit = async () => {
-    setWorking(true); setErr(null);
-    const e = await onConfirm();
-    setWorking(false);
-    if (e) setErr(e);
-  };
-  return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-      {...backdrop}
-    >
-      <motion.div
-        initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
-        onClick={e => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6"
-      >
-        <h3 className="text-xl font-bold text-slate-800 mb-2">Eliminar a {cleaner.name}</h3>
-        {hasCleanings ? (
-          <p className="text-sm text-slate-600 mb-4">
-            Esta persona tiene aseos registrados y no se puede borrar para preservar el historial.
-            En su lugar la <strong>desactivaremos</strong>: dejará de aparecer en los formularios pero
-            su historial se mantiene intacto. Puedes reactivarla desde "Editar".
-          </p>
-        ) : (
-          <p className="text-sm text-slate-600 mb-4">
-            Esta persona no tiene aseos registrados. Se eliminará permanentemente.
-          </p>
-        )}
-        {err && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 mb-3">{err}</p>}
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} disabled={working} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50">Cancelar</button>
-          <button onClick={submit} disabled={working}
-            className="px-4 py-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:bg-slate-300">
-            {working ? 'Procesando…' : (hasCleanings ? 'Desactivar' : 'Eliminar')}
-          </button>
-        </div>
-      </motion.div>
-    </motion.div>
   );
 }

@@ -1,13 +1,15 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { Eye } from 'lucide-react';
 import { listBookings, type BookingWithListingRow } from '@/services/bookings';
 import { listProperties } from '@/services/properties';
 import { listBankAccounts } from '@/services/bankAccounts';
-import { getBookingStatus, statusUI, inferOperationalFlags } from '@/lib/bookingStatus';
+import { getBookingStatus, statusUI } from '@/lib/bookingStatus';
 import { formatCurrency } from '@/lib/utils';
-import BookingDetailModal from './BookingDetailModal';
 import type { PropertyRow, BankAccountRow } from '@/types/database';
+
+const BookingDetailModal = lazy(() => import('./BookingDetailModal'));
+const BookingPayoutModal = lazy(() => import('./BookingPayoutModal'));
 
 interface ActiveBooking {
   id: string;
@@ -79,6 +81,7 @@ export default function ActiveBookingsWidget({ propertyIds }: Props) {
   const [bookings, setBookings] = useState<ActiveBooking[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailTarget, setDetailTarget] = useState<ActiveBooking | null>(null);
+  const [payoutTarget, setPayoutTarget] = useState<ActiveBooking | null>(null);
   const [properties, setProperties] = useState<PropertyRow[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccountRow[]>([]);
 
@@ -158,11 +161,6 @@ export default function ActiveBookingsWidget({ propertyIds }: Props) {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {active.map((b, i) => {
-                const info = inferOperationalFlags({
-                  checkin_done: b.checkin_done,
-                  checkout_done: b.checkout_done,
-                  status: b.status,
-                });
                 const derived = getBookingStatus({
                   start_date: b.start_date,
                   end_date: b.end_date,
@@ -234,12 +232,34 @@ export default function ActiveBookingsWidget({ propertyIds }: Props) {
         </div>
       </div>
       {detailTarget && (
-        <BookingDetailModal
-          booking={detailTarget}
-          properties={properties}
-          bankAccounts={bankAccounts}
-          onClose={() => setDetailTarget(null)}
-        />
+        <Suspense fallback={null}>
+          <BookingDetailModal
+            booking={detailTarget}
+            properties={properties}
+            bankAccounts={bankAccounts}
+            onClose={() => setDetailTarget(null)}
+            onPayout={() => {
+              const target = detailTarget;
+              setDetailTarget(null);
+              setPayoutTarget(target);
+            }}
+          />
+        </Suspense>
+      )}
+      {payoutTarget && (
+        <Suspense fallback={null}>
+          <BookingPayoutModal
+            booking={{
+              ...payoutTarget,
+              channel: payoutTarget.channel ?? null,
+              start_date: payoutTarget.start_date ?? null,
+              checkin_done: payoutTarget.checkin_done ?? false,
+            }}
+            bankAccounts={bankAccounts}
+            onClose={() => setPayoutTarget(null)}
+            onSaved={() => setPayoutTarget(null)}
+          />
+        </Suspense>
       )}
     </div>
   );

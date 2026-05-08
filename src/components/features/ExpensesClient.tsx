@@ -1,23 +1,18 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ExpensesList from './ExpensesList';
-import ExpenseModal from './ExpenseModal';
 import DamageExpenseEditModal from './DamageExpenseEditModal';
 import ExpenseDetailModal from './ExpenseDetailModal';
-import BookingDetailModal from './BookingDetailModal';
 import FilterBar from './FilterBar';
-import ExpenseTypeChooser, { type ExpenseTypeChoice } from './ExpenseTypeChooser';
-import DamageFromExpensesFlow from './DamageFromExpensesFlow';
-import PropertyExpenseForm from './expense-forms/PropertyExpenseForm';
-import CleaningSuppliesForm from './expense-forms/CleaningSuppliesForm';
-import VendorExpenseForm from './expense-forms/VendorExpenseForm';
-import InventoryMaintenanceExpenseForm from './expense-forms/InventoryMaintenanceExpenseForm';
+import { type ExpenseTypeChoice } from './ExpenseTypeChooser';
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
+
+const ExpenseModal = lazy(() => import('./ExpenseModal'));
+const BookingDetailModal = lazy(() => import('./BookingDetailModal'));
 import RecurringPendingPanel from './RecurringPendingPanel';
 import SharedBillsPendingPanel from './SharedBillsPendingPanel';
 import { toast } from '@/lib/toast';
 import {
-  listExpenses,
   createExpense,
   createSharedExpense,
   updateExpense,
@@ -25,46 +20,28 @@ import {
   deleteExpense,
   type ExpenseFilters,
 } from '@/services/expenses';
-import { listBankAccounts } from '@/services/bankAccounts';
-import { listListings } from '@/services/listings';
 import { deleteBookingAdjustment } from '@/services/bookingAdjustments';
 import { getUpcomingAndOverdueSchedules, getSchedulesDoneNeedingExpense, completeMaintenanceSchedule } from '@/services/maintenanceSchedules';
 import { listInventoryItems } from '@/services/inventory';
-import { supabase } from '@/lib/supabase/client';
-import { makeBackdropHandlers } from '@/lib/useBackdropClose';
-import { cleanDamageDescription } from '@/lib/damageDescription';
+import { getBooking } from '@/services/bookings';
 import type { Expense } from '@/types';
-import type { BankAccountRow, BookingRow, ListingRow, ExpenseSection, ExpenseSubcategory, MaintenanceScheduleRow, InventoryItemRow } from '@/types/database';
-import { EXPENSE_SUBCATEGORY_META } from '@/types/database';
-import { classifyExpense } from '@/lib/expenseClassify';
-import { formatCurrency } from '@/lib/utils';
+import { type BookingRow, type ExpenseSection, type ExpenseSubcategory, type MaintenanceScheduleRow, type InventoryItemRow } from '@/types/database';
 import { useAuth } from '@/lib/useAuth';
 import { usePropertyFilter } from '@/lib/usePropertyFilter';
+import { useExpensesList } from '@/lib/hooks/useExpensesList';
+import { useReferenceData } from '@/lib/hooks/useReferenceData';
 
-// Shown while Supabase isn't connected yet
-const dispatchRecurringChange = () => {
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('recurring-period-changed'));
-  }
-};
-
-const DEMO_EXPENSES: Expense[] = [
-  { id: '1', property_id: 'demo', category: 'Limpieza', type: 'variable', amount: 150000, date: '2024-03-01', description: 'Limpieza post-huésped', status: 'paid' },
-  { id: '2', property_id: 'demo', category: 'Internet', type: 'fixed', amount: 89000, date: '2024-03-05', description: null, status: 'paid' },
-  { id: '3', property_id: 'demo', category: 'Servicios Públicos', type: 'fixed', amount: 320000, date: '2024-03-10', description: 'Agua y luz', status: 'pending' },
-  { id: '4', property_id: 'demo', category: 'Mantenimiento', type: 'variable', amount: 450000, date: '2024-03-12', description: 'Reparación de grifo', status: 'partial' },
-  { id: '5', property_id: 'demo', category: 'Lavandería', type: 'variable', amount: 80000, date: '2024-03-15', description: null, status: 'paid' },
-  { id: '6', property_id: 'demo', category: 'Administración', type: 'fixed', amount: 200000, date: '2024-03-20', description: 'Comisión plataforma', status: 'pending' },
-];
-
-const EMPTY_FILTERS: ExpenseFilters = {};
+import { EMPTY_FILTERS, DEMO_EXPENSES, dispatchRecurringChange } from './expenses/constants';
+import { useExpensesDerivedStats } from './expenses/useExpensesDerivedStats';
+import MaintenancePanels from './expenses/MaintenancePanels';
+import PendingPayablesPanel from './expenses/PendingPayablesPanel';
+import ExpensesTabsBar from './expenses/ExpensesTabsBar';
+import DeleteExpenseConfirm from './expenses/DeleteExpenseConfirm';
+import ExpensesFormsModals from './expenses/ExpensesFormsModals';
 
 export default function ExpensesClient() {
   const authStatus = useAuth();
   const { properties, propertyIds, setPropertyIds, groups, tags, tagAssigns } = usePropertyFilter();
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [dbConnected, setDbConnected] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [showChooser, setShowChooser] = useState(false);
   const [showDamageFlow, setShowDamageFlow] = useState(false);
@@ -80,8 +57,6 @@ export default function ExpensesClient() {
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
   const [filters, setFilters] = useState<ExpenseFilters>(EMPTY_FILTERS);
   const [saveError, setSaveError] = useState('');
-  const [bankAccounts, setBankAccounts] = useState<BankAccountRow[]>([]);
-  const [listings, setListings] = useState<ListingRow[]>([]);
   const [viewingBooking, setViewingBooking] = useState<BookingRow | null>(null);
   const [tab, setTab] = useState<'all' | ExpenseSection | 'others'>('all');
   const [subFilter, setSubFilter] = useState<ExpenseSubcategory | null>(null);
@@ -92,6 +67,28 @@ export default function ExpensesClient() {
   const [inventoryItemsMap, setInventoryItemsMap] = useState<Map<string, InventoryItemRow>>(new Map());
   const [linkedMaintScheduleId, setLinkedMaintScheduleId] = useState<string | null>(null);
   const [maintPrefillInfo, setMaintPrefillInfo] = useState<{ itemName: string; scheduleTitle: string } | null>(null);
+
+  const demoFallback = useCallback((f: ExpenseFilters): Expense[] => {
+    let demo = DEMO_EXPENSES;
+    if (f.category) demo = demo.filter(e => e.category === f.category);
+    if (f.type) demo = demo.filter(e => e.type === f.type);
+    if (f.status) demo = demo.filter(e => e.status === f.status);
+    if (f.dateFrom) demo = demo.filter(e => e.date >= f.dateFrom!);
+    if (f.dateTo) demo = demo.filter(e => e.date <= f.dateTo!);
+    if (f.search) {
+      const q = f.search.toLowerCase();
+      demo = demo.filter(e => e.category.toLowerCase().includes(q) || e.description?.toLowerCase().includes(q));
+    }
+    return demo;
+  }, []);
+
+  const { expenses, setExpenses, loading, dbConnected, reload: reloadExpenses } = useExpensesList({
+    filters, propertyIds, demoFallback,
+  });
+
+  const { bankAccounts, listings } = useReferenceData({
+    authStatus, withBankAccounts: true, withListings: true,
+  });
 
   const loadMaintenancePanel = useCallback(async () => {
     const [schedRes, doneRes, itemsRes] = await Promise.all([
@@ -106,43 +103,12 @@ export default function ExpensesClient() {
     }
   }, []);
 
-  const loadExpenses = useCallback(async (f: ExpenseFilters, propIds?: string[]) => {
-    setLoading(true);
-    const result = await listExpenses(propIds, f);
-    if (result.error) {
-      let demo = DEMO_EXPENSES;
-      if (f.category) demo = demo.filter(e => e.category === f.category);
-      if (f.type) demo = demo.filter(e => e.type === f.type);
-      if (f.status) demo = demo.filter(e => e.status === f.status);
-      if (f.dateFrom) demo = demo.filter(e => e.date >= f.dateFrom!);
-      if (f.dateTo) demo = demo.filter(e => e.date <= f.dateTo!);
-      if (f.search) {
-        const q = f.search.toLowerCase();
-        demo = demo.filter(e => e.category.toLowerCase().includes(q) || e.description?.toLowerCase().includes(q));
-      }
-      setExpenses(demo);
-      setDbConnected(false);
-    } else {
-      setExpenses(result.data ?? []);
-      setDbConnected(true);
-    }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { loadExpenses(filters, propertyIds); }, [filters, propertyIds, loadExpenses]);
-
   useEffect(() => {
-    if (authStatus === 'authed') {
-      listBankAccounts().then(res => {
-        if (!res.error) setBankAccounts((res.data ?? []).filter(a => a.is_active));
-      });
-      listListings().then(res => { if (!res.error) setListings(res.data ?? []); });
-      loadMaintenancePanel();
-    }
+    if (authStatus === 'authed') loadMaintenancePanel();
   }, [authStatus, loadMaintenancePanel]);
 
   const handleViewBooking = useCallback(async (bookingId: string) => {
-    const { data, error } = await supabase.from('bookings').select('*').eq('id', bookingId).single();
+    const { data, error } = await getBooking(bookingId);
     if (!error && data) {
       setViewing(null);
       setViewingBooking(data as BookingRow);
@@ -150,23 +116,18 @@ export default function ExpensesClient() {
   }, []);
 
   // ── Clasificación Fase 16: sección + subcategoría (antes de cualquier early return) ──
-  const classified = useMemo(
-    () => expenses.map(e => ({ exp: e, ...classifyExpense(e) })),
-    [expenses],
-  );
+  const {
+    visibleExpenses,
+    expenseStats,
+    maintenanceStats,
+    tabStats,
+    subCountsBySection,
+  } = useExpensesDerivedStats({ expenses, tab, subFilter, maintenanceSchedules });
 
-  const visibleExpenses = useMemo(() => {
-    if (tab === 'all') return expenses;
-    if (tab === 'others') {
-      // Fees de canal y cualquier gasto sin sección clasificable
-      return classified
-        .filter(c => c.exp.id.startsWith('fee-') || c.section === null)
-        .map(c => c.exp);
-    }
-    return classified
-      .filter(c => !c.exp.id.startsWith('fee-') && c.section === tab && (subFilter ? c.subcategory === subFilter : true))
-      .map(c => c.exp);
-  }, [tab, subFilter, expenses, classified]);
+  const onRegisterMaintenance = useCallback((s: MaintenanceScheduleRow) => {
+    setInvMaintPrefillSchedule(s);
+    setShowInventoryMaintenanceForm(true);
+  }, []);
 
   // Auth guard (after all hooks)
   if (authStatus === 'checking') {
@@ -326,64 +287,9 @@ export default function ExpensesClient() {
     toast.success('Gasto eliminado');
   };
 
-  // Fees de canal son informativos — NO cuentan en balance
-  // Fine- items (multas) SÍ son costos reales pero vienen de bookings (ya contados en financial.ts)
-  const realExpenses    = expenses.filter(e => !e.id.startsWith('fee-'));
-  const totalFixed      = realExpenses.filter(e => e.type === 'fixed').reduce((s, e) => s + e.amount, 0);
-  const totalVariable   = realExpenses.filter(e => e.type === 'variable').reduce((s, e) => s + e.amount, 0);
-  // Pending: only real editable expenses (not synthetic auto entries)
-  const pendingExpenses = realExpenses.filter(e => e.status === 'pending' && !e.id.startsWith('fine-'));
-  const totalPending    = pendingExpenses.reduce((s, e) => s + e.amount, 0);
-  const totalChannelFees = expenses.filter(e => e.id.startsWith('fee-')).reduce((s, e) => s + e.amount, 0);
-
-  // Maintenance schedules: overdue = scheduled_date <= today, upcoming = within notify_before_days
-  const today = new Date().toISOString().slice(0, 10);
-  const overdueMaintenance = maintenanceSchedules.filter(s => s.scheduled_date <= today);
-  const upcomingMaintenance = maintenanceSchedules.filter(s => {
-    if (s.scheduled_date <= today) return false;
-    const notifyFrom = new Date(s.scheduled_date);
-    notifyFrom.setDate(notifyFrom.getDate() - s.notify_before_days);
-    return today >= notifyFrom.toISOString().slice(0, 10);
-  });
-
-  // ── Clasificación Fase 16: sección + subcategoría ──
-  // (classified y visibleExpenses ya calculados arriba antes del auth guard)
-
-  // Detecta fees de canal (fee-) y multas (fine-). Fees → "Otros", fines → "Sobre reservas"
-  const isFee  = (e: Expense) => e.id.startsWith('fee-');
-  const isFine = (e: Expense) => e.id.startsWith('fine-');
-
-  const tabCounts = {
-    all:      expenses.length,
-    property: classified.filter(c => !isFee(c.exp) && !isFine(c.exp) && c.section === 'property').length,
-    booking:  classified.filter(c => !isFee(c.exp) && c.section === 'booking').length,
-    others:   classified.filter(c => isFee(c.exp) || (!isFine(c.exp) && c.section === null)).length,
-  };
-
-  const subCountsBySection = (sec: ExpenseSection) => {
-    const counts: Partial<Record<ExpenseSubcategory, number>> = {};
-    for (const c of classified) {
-      if (isFee(c.exp) || c.section !== sec || !c.subcategory) continue;
-      counts[c.subcategory] = (counts[c.subcategory] ?? 0) + 1;
-    }
-    return counts;
-  };
-
-  // visibleTotal excluye fees (informativo). Fines sí son costos reales.
-  const visibleTotal = visibleExpenses.filter(e => !isFee(e)).reduce((s, e) => s + e.amount, 0);
-  const visibleFees  = visibleExpenses.filter(e =>  isFee(e)).reduce((s, e) => s + e.amount, 0);
-
-  const kpis: Array<{ label: string; value: string; color: string; bg: string; sub?: string }> = [
-    { label: 'Gastos Fijos',     value: formatCurrency(totalFixed),    color: 'text-blue-600',   bg: 'bg-blue-50' },
-    {
-      label: 'Gastos Variables',
-      value: formatCurrency(totalVariable),
-      color: 'text-orange-600',
-      bg: 'bg-orange-50',
-      sub: totalChannelFees > 0 ? `Fees de canal: ${formatCurrency(totalChannelFees)} (informativo)` : undefined,
-    },
-    { label: 'Pendiente de Pago', value: formatCurrency(totalPending), color: 'text-red-600',    bg: 'bg-red-50' },
-  ];
+  const { pendingExpenses, totalPending, kpis } = expenseStats;
+  const { today, overdueMaintenance, upcomingMaintenance } = maintenanceStats;
+  const { tabCounts, visibleTotal, visibleFees } = tabStats;
 
   return (
     <>
@@ -437,7 +343,7 @@ export default function ExpensesClient() {
         {/* Facturas compartidas pendientes (vendors con N propiedades) */}
         <SharedBillsPendingPanel
           onChanged={() => {
-            loadExpenses(filters, propertyIds);
+            reloadExpenses();
             if (typeof window !== 'undefined') {
               window.dispatchEvent(new CustomEvent('recurring-period-changed'));
             }
@@ -448,302 +354,39 @@ export default function ExpensesClient() {
         <RecurringPendingPanel
           propertyFilter={propertyIds.length === 1 ? propertyIds[0] : null}
           onChanged={() => {
-            loadExpenses(filters, propertyIds);
+            reloadExpenses();
             if (typeof window !== 'undefined') {
               window.dispatchEvent(new CustomEvent('recurring-period-changed'));
             }
           }}
         />
 
-        {/* Mantenimientos por ejecutar */}
-        <AnimatePresence>
-          {(overdueMaintenance.length > 0 || upcomingMaintenance.length > 0) && (
-            <motion.section
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden"
-            >
-              <div className="border border-orange-200 bg-orange-50 rounded-xl p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold text-orange-900 flex items-center gap-2">
-                    <span className="inline-block w-2 h-2 rounded-full bg-orange-500"></span>
-                    🔧 Mantenimientos del inventario
-                    {overdueMaintenance.length > 0 && (
-                      <span className="text-xs font-semibold px-2 py-0.5 bg-red-200 text-red-800 rounded-full">
-                        {overdueMaintenance.length} vencido{overdueMaintenance.length > 1 ? 's' : ''}
-                      </span>
-                    )}
-                    {upcomingMaintenance.length > 0 && (
-                      <span className="text-xs font-semibold px-2 py-0.5 bg-orange-200 text-orange-800 rounded-full">
-                        {upcomingMaintenance.length} próximo{upcomingMaintenance.length > 1 ? 's' : ''}
-                      </span>
-                    )}
-                  </h3>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {[...overdueMaintenance, ...upcomingMaintenance].map((s, i) => {
-                    const item = inventoryItemsMap.get(s.item_id);
-                    const isOverdue = s.scheduled_date <= today;
-                    const prop = properties.find(p => p.id === s.property_id);
-                    return (
-                      <motion.div
-                        key={s.id}
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: i * 0.05 }}
-                        className={`bg-white rounded-lg p-4 border shadow-sm ${isOverdue ? 'border-red-200' : 'border-orange-100'}`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <p className="font-semibold text-slate-800 text-sm truncate">
-                                {item?.name ?? 'Item eliminado'}
-                              </p>
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border whitespace-nowrap ${
-                                isOverdue
-                                  ? 'bg-red-50 text-red-700 border-red-200'
-                                  : 'bg-orange-50 text-orange-700 border-orange-200'
-                              }`}>
-                                {isOverdue ? '🔴 VENCIDO' : '🟡 PRÓXIMO'}
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-600 mt-0.5 truncate">{s.title}</p>
-                            <p className="text-xs text-slate-400 mt-0.5">
-                              {prop?.name ?? ''} · Fecha: {s.scheduled_date}
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setInvMaintPrefillSchedule(s);
-                            setShowInventoryMaintenanceForm(true);
-                          }}
-                          className="mt-3 w-full text-xs font-semibold px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                        >
-                          + Registrar gasto de mantenimiento
-                        </button>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              </div>
-            </motion.section>
-          )}
-        </AnimatePresence>
+        <MaintenancePanels
+          today={today}
+          overdueMaintenance={overdueMaintenance}
+          upcomingMaintenance={upcomingMaintenance}
+          doneNeedingExpense={doneNeedingExpense}
+          inventoryItemsMap={inventoryItemsMap}
+          properties={properties}
+          onRegisterMaintenance={onRegisterMaintenance}
+        />
 
-        {/* Mantenimientos realizados sin gasto registrado */}
-        <AnimatePresence>
-          {doneNeedingExpense.length > 0 && (
-            <motion.section
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden"
-            >
-              <div className="border border-blue-200 bg-blue-50 rounded-xl p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold text-blue-900 flex items-center gap-2">
-                    <span className="inline-block w-2 h-2 rounded-full bg-blue-500"></span>
-                    📋 Mantenimientos realizados sin gasto
-                    <span className="text-xs font-semibold px-2 py-0.5 bg-blue-200 text-blue-800 rounded-full">
-                      {doneNeedingExpense.length}
-                    </span>
-                  </h3>
-                  <span className="text-xs text-blue-700">Registra el costo real del mantenimiento</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {doneNeedingExpense.map((s, i) => {
-                    const item = inventoryItemsMap.get(s.item_id);
-                    const prop = properties.find(p => p.id === s.property_id);
-                    return (
-                      <motion.div
-                        key={s.id}
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: i * 0.05 }}
-                        className="bg-white rounded-lg p-4 border border-blue-100 shadow-sm"
-                      >
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <p className="font-semibold text-slate-800 text-sm truncate">
-                              {item?.name ?? 'Item eliminado'}
-                            </p>
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-blue-50 text-blue-700 border-blue-200 whitespace-nowrap">
-                              ✅ REALIZADO
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-600 mt-0.5 truncate">{s.title}</p>
-                          <p className="text-xs text-slate-400 mt-0.5">
-                            {prop?.name ?? ''} · Completado: {s.scheduled_date}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setInvMaintPrefillSchedule(s);
-                            setShowInventoryMaintenanceForm(true);
-                          }}
-                          className="mt-3 w-full text-xs font-semibold px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                        >
-                          💰 Registrar el gasto
-                        </button>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              </div>
-            </motion.section>
-          )}
-        </AnimatePresence>
+        <PendingPayablesPanel
+          pendingExpenses={pendingExpenses}
+          totalPending={totalPending}
+          onPendingClick={handlePendingClick}
+        />
 
-        {/* Cuentas por Pagar */}
-        <AnimatePresence>
-          {pendingExpenses.length > 0 && (
-            <motion.section
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden"
-            >
-              <div className="border border-yellow-200 bg-yellow-50 rounded-xl p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold text-yellow-900 flex items-center gap-2">
-                    <span className="inline-block w-2 h-2 rounded-full bg-amber-500"></span> Cuentas por Pagar
-                    <span className="text-xs font-semibold px-2 py-0.5 bg-yellow-200 text-yellow-800 rounded-full">
-                      {pendingExpenses.length}
-                    </span>
-                  </h3>
-                  <span className="font-bold text-yellow-800">{formatCurrency(totalPending)}</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {pendingExpenses.map((e, i) => {
-                    const cat = (e.category ?? '').toLowerCase();
-                    const sub = (e.subcategory ?? '').toLowerCase();
-                    const isCleaning = sub === 'cleaning' || cat === 'aseo' || cat === 'insumos de aseo' || cat === 'cleaning';
-                    return (
-                    <motion.button
-                      key={e.id}
-                      type="button"
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: i * 0.06 }}
-                      onClick={() => handlePendingClick(e)}
-                      title={isCleaning ? 'Clic → ir a /aseo para liquidar' : 'Clic para completar, pagar o descartar este gasto pendiente'}
-                      className="bg-white rounded-lg p-4 border border-yellow-100 shadow-sm text-left hover:border-yellow-300 hover:shadow transition focus:outline-none focus:ring-2 focus:ring-yellow-400"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <p className="font-semibold text-slate-800 text-sm truncate">{e.category}</p>
-                            {isCleaning && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-cyan-50 text-cyan-700 border-cyan-200 whitespace-nowrap">
-                                🧹 ASEO
-                              </span>
-                            )}
-                            {e.adjustment_id && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-red-50 text-red-700 border-red-200 whitespace-nowrap">
-                                🔗 DAÑO
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-slate-400 mt-0.5">{e.date}</p>
-                          {(() => { const d = cleanDamageDescription(e.description); return d ? (
-                            <p className="text-xs text-slate-600 mt-1 line-clamp-2">{d}</p>
-                          ) : null; })()}
-                        </div>
-                        <p className="font-bold text-yellow-700 text-sm whitespace-nowrap">{formatCurrency(e.amount)}</p>
-                      </div>
-                      <p className="text-[10px] text-yellow-700/70 mt-2 font-medium uppercase tracking-wide">
-                        {isCleaning ? 'Liquidar en /aseo →' : 'Clic para resolver →'}
-                      </p>
-                    </motion.button>
-                    );
-                  })}
-                </div>
-              </div>
-            </motion.section>
-          )}
-        </AnimatePresence>
-
-        {/* Tabs por sección — taxonomía 4+3 */}
-        <div>
-          <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto">
-            {([
-              { key: 'all',      label: 'Todos',                 color: 'text-slate-700', hint: 'Vista consolidada de todos los gastos' },
-              { key: 'property', label: 'Sobre propiedades',     color: 'text-blue-700',  hint: 'Operación del inmueble: servicios, admin, mantenimiento, stock' },
-              { key: 'booking',  label: 'Sobre reservas',        color: 'text-rose-700',  hint: 'Atribuibles a un huésped: aseo del turn, daños, atenciones' },
-              { key: 'others',   label: 'Otros gastos',          color: 'text-slate-700', hint: 'Comisiones de canal (Booking, Airbnb), fees y gastos sin clasificar' },
-            ] as const).map(t => (
-              <button
-                key={t.key}
-                onClick={() => { setTab(t.key); setSubFilter(null); }}
-                title={t.hint}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                  tab === t.key
-                    ? `${t.color} border-current`
-                    : 'text-slate-500 border-transparent hover:text-slate-700'
-                }`}
-              >
-                {t.label} <span className="ml-1 text-xs text-slate-400">({tabCounts[t.key]})</span>
-              </button>
-            ))}
-          </div>
-
-          {/* Chips de subcategoría dentro de cada sección */}
-          {tab !== 'all' && tab !== 'others' && (
-            <div className="flex flex-wrap gap-1.5 mt-3">
-              <button
-                onClick={() => setSubFilter(null)}
-                className={`px-2.5 py-1 text-xs rounded-full border transition ${
-                  subFilter === null
-                    ? 'bg-slate-800 text-white border-slate-800'
-                    : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                Todas
-              </button>
-              {(Object.entries(EXPENSE_SUBCATEGORY_META) as [ExpenseSubcategory, typeof EXPENSE_SUBCATEGORY_META[ExpenseSubcategory]][])
-                .filter(([, meta]) => meta.section === tab)
-                .map(([sub, meta]) => {
-                  const count = subCountsBySection(tab)[sub] ?? 0;
-                  return (
-                    <button
-                      key={sub}
-                      onClick={() => setSubFilter(sub)}
-                      title={meta.description}
-                      className={`px-2.5 py-1 text-xs rounded-full border transition ${
-                        subFilter === sub
-                          ? 'bg-blue-600 text-white border-blue-600'
-                          : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      {meta.icon} {meta.label} <span className="opacity-60">({count})</span>
-                    </button>
-                  );
-                })}
-            </div>
-          )}
-
-          {/* Resumen */}
-          <div className="flex items-center justify-between mt-3 px-1 text-sm">
-            <p className="text-slate-500">
-              {tab === 'all' && 'Mostrando todas las fuentes de gasto combinadas.'}
-              {tab === 'property' && 'Operación del inmueble: existen aunque no haya huésped.'}
-              {tab === 'booking' && 'Atribuibles a un huésped específico.'}
-              {tab === 'others' && 'Comisiones de canal y gastos sin sección (Booking/Airbnb fees, etc.).'}
-            </p>
-            <p className="font-semibold text-slate-800">
-              Total: <span className="text-slate-900">{formatCurrency(visibleTotal)}</span>
-              {visibleFees > 0 && (
-                <span className="ml-2 text-xs text-slate-400 font-normal">
-                  + {formatCurrency(visibleFees)} fees
-                </span>
-              )}
-            </p>
-          </div>
-        </div>
+        <ExpensesTabsBar
+          tab={tab}
+          setTab={setTab}
+          subFilter={subFilter}
+          setSubFilter={setSubFilter}
+          tabCounts={tabCounts}
+          visibleTotal={visibleTotal}
+          visibleFees={visibleFees}
+          subCountsBySection={subCountsBySection}
+        />
 
         {/* Filters — bajo las pestañas para que el filtro aplique siempre sobre la pestaña activa */}
         <FilterBar
@@ -763,95 +406,44 @@ export default function ExpensesClient() {
         />
       </main>
 
+      <ExpensesFormsModals
+        flags={{
+          showChooser,
+          showDamageFlow,
+          showPropertyForm,
+          showSuppliesForm,
+          showVendorForm,
+          showInventoryMaintenanceForm,
+          invMaintPrefillSchedule,
+          defaultPropertyId: propertyIds.length === 1 ? propertyIds[0] : invMaintPrefillSchedule?.property_id ?? null,
+        }}
+        handlers={{
+          onChooserChoose: handleChooserChoice,
+          closeChooser: () => setShowChooser(false),
+          closeDamageFlow: () => setShowDamageFlow(false),
+          onDamageSaved: () => { setShowDamageFlow(false); reloadExpenses(); },
+          closePropertyForm: () => { setShowPropertyForm(false); setSaveError(""); },
+          closeSuppliesForm: () => { setShowSuppliesForm(false); setSaveError(""); },
+          closeVendorForm: () => { setShowVendorForm(false); setSaveError(""); },
+          closeInventoryMaintenanceForm: () => { setShowInventoryMaintenanceForm(false); setInvMaintPrefillSchedule(null); setSaveError(""); },
+          onSave: handleSave,
+          onSaveShared: handleSaveShared,
+          onSaveInventoryMaintenance: async (data) => {
+            const ok = await handleSave(data);
+            if (ok) {
+              setShowInventoryMaintenanceForm(false);
+              setInvMaintPrefillSchedule(null);
+              loadMaintenancePanel();
+            }
+            return ok;
+          },
+        }}
+        properties={properties}
+        bankAccounts={bankAccounts}
+        saveError={saveError}
+      />
+
       <AnimatePresence>
-        {showChooser && (
-          <ExpenseTypeChooser
-            onChoose={handleChooserChoice}
-            onClose={() => setShowChooser(false)}
-          />
-        )}
-
-        {showDamageFlow && (
-          <DamageFromExpensesFlow
-            properties={properties}
-            onClose={() => setShowDamageFlow(false)}
-            onSaved={() => {
-              setShowDamageFlow(false);
-              loadExpenses(filters, propertyIds);
-            }}
-          />
-        )}
-
-        {showPropertyForm && (
-          <PropertyExpenseForm
-            properties={properties}
-            bankAccounts={bankAccounts}
-            error={saveError || undefined}
-            onClose={() => { setShowPropertyForm(false); setSaveError(''); }}
-            onSave={async (data) => {
-              const ok = await handleSave(data);
-              if (ok) setShowPropertyForm(false);
-            }}
-            onSaveShared={async (rows) => {
-              const ok = await handleSaveShared(rows);
-              if (ok) setShowPropertyForm(false);
-            }}
-          />
-        )}
-
-        {showSuppliesForm && (
-          <CleaningSuppliesForm
-            properties={properties}
-            bankAccounts={bankAccounts}
-            error={saveError || undefined}
-            onClose={() => { setShowSuppliesForm(false); setSaveError(''); }}
-            onSave={async (data) => {
-              const ok = await handleSave(data);
-              if (ok) setShowSuppliesForm(false);
-            }}
-            onSaveShared={async (rows) => {
-              const ok = await handleSaveShared(rows);
-              if (ok) setShowSuppliesForm(false);
-            }}
-          />
-        )}
-
-        {showVendorForm && (
-          <VendorExpenseForm
-            properties={properties}
-            bankAccounts={bankAccounts}
-            error={saveError || undefined}
-            onClose={() => { setShowVendorForm(false); setSaveError(''); }}
-            onSave={async (data) => {
-              const ok = await handleSave(data);
-              if (ok) setShowVendorForm(false);
-            }}
-            onSaveMultiple={async (rows) => {
-              const ok = await handleSaveShared(rows);
-              if (ok) setShowVendorForm(false);
-            }}
-          />
-        )}
-
-        {showInventoryMaintenanceForm && (
-          <InventoryMaintenanceExpenseForm
-            properties={properties}
-            bankAccounts={bankAccounts}
-            linkedSchedule={invMaintPrefillSchedule}
-            defaultPropertyId={propertyIds.length === 1 ? propertyIds[0] : invMaintPrefillSchedule?.property_id ?? null}
-            error={saveError || undefined}
-            onClose={() => { setShowInventoryMaintenanceForm(false); setInvMaintPrefillSchedule(null); setSaveError(''); }}
-            onSave={async (data) => {
-              const ok = await handleSave(data);
-              if (ok) {
-                setShowInventoryMaintenanceForm(false);
-                setInvMaintPrefillSchedule(null);
-                loadMaintenancePanel();
-              }
-              return ok;
-            }}
-          />
-        )}
 
         {showModal && editing && (editing.subcategory ?? '').toLowerCase() === 'damage' ? (
           <DamageExpenseEditModal
@@ -874,7 +466,8 @@ export default function ExpensesClient() {
             onDiscard={editing.adjustment_id ? () => handleDiscardWithAdjustment(editing) : undefined}
           />
         ) : showModal && (
-          <ExpenseModal
+          <Suspense fallback={null}>
+            <ExpenseModal
             properties={properties}
             bankAccounts={bankAccounts}
             initial={editing ? {
@@ -918,6 +511,7 @@ export default function ExpensesClient() {
             onDiscardLinked={editing?.adjustment_id ? () => handleDiscardWithAdjustment(editing) : undefined}
             maintenancePrefillInfo={!editing ? maintPrefillInfo : null}
           />
+          </Suspense>
         )}
 
         {viewing && (
@@ -932,7 +526,8 @@ export default function ExpensesClient() {
         )}
 
         {viewingBooking && (
-          <BookingDetailModal
+          <Suspense fallback={null}>
+            <BookingDetailModal
             booking={{
               id: viewingBooking.id,
               confirmation_code: viewingBooking.confirmation_code,
@@ -958,45 +553,19 @@ export default function ExpensesClient() {
               return listings.find(l => l.id === lid)?.property_id ?? null;
             }}
           />
+          </Suspense>
         )}
 
         {deleteTarget && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            {...makeBackdropHandlers(() => setDeleteTarget(null))}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto"
-            >
-              <h3 className="text-xl font-bold text-slate-900 mb-2">¿Eliminar gasto?</h3>
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-                <p className="text-sm text-red-800">
-                  <span className="font-semibold">{deleteTarget.category}</span> — {formatCurrency(deleteTarget.amount)}
-                </p>
-                <p className="text-xs text-red-600 mt-1">{deleteTarget.date}{deleteTarget.description ? ` · ${deleteTarget.description}` : ''}</p>
-              </div>
-              <p className="text-sm text-slate-500 mb-5">Esta acción es irreversible.</p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setDeleteTarget(null)}
-                  className="flex-1 py-2.5 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleConfirmDelete}
-                  className="flex-1 py-2.5 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700"
-                >
-                  Eliminar
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
+          <DeleteExpenseConfirm
+            target={deleteTarget}
+            onCancel={() => setDeleteTarget(null)}
+            onConfirm={handleConfirmDelete}
+          />
         )}
       </AnimatePresence>
     </>
   );
 }
+
 

@@ -1,3 +1,5 @@
+> ⚠️ **ARCHIVO OBSOLETO** — Supersedido por `audits/`. No actualizar.
+
 # FEEDBACK & ROADMAP — STR Management Pro
 
 > Bitácora viva de feedback del usuario, estado de implementación y guía de pruebas.

@@ -5,7 +5,7 @@ import type { ServiceResult } from './expenses';
 export const listPropertyGroups = async (): Promise<ServiceResult<PropertyGroupRow[]>> => {
   const { data, error } = await supabase
     .from('property_groups')
-    .select('*')
+    .select('id, owner_id, name, color, sort_order, created_at')
     .order('sort_order')
     .order('name');
   if (error) return { data: null, error: error.message };
@@ -43,6 +43,19 @@ export const updatePropertyGroup = async (
     .single();
   if (error) return { data: null, error: error.message };
   return { data, error: null };
+};
+
+/** Fetches minimal group data (id, name, color) for specific group IDs — used by occupancy chart. */
+export const getPropertyGroupsByIds = async (
+  ids: string[],
+): Promise<ServiceResult<Array<{ id: string; name: string; color: string }>>> => {
+  if (!ids.length) return { data: [], error: null };
+  const { data, error } = await supabase
+    .from('property_groups')
+    .select('id, name, color')
+    .in('id', ids);
+  if (error) return { data: null, error: error.message };
+  return { data: data ?? [], error: null };
 };
 
 export const deletePropertyGroup = async (id: string): Promise<ServiceResult<true>> => {

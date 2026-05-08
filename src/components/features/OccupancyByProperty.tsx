@@ -15,8 +15,11 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend, ReferenceLine,
 } from 'recharts';
-import { supabase } from '@/lib/supabase/client';
 import type { ChartGranularity } from '@/services/financial';
+import { listPropertiesSlim } from '@/services/properties';
+import { getPropertyGroupsByIds } from '@/services/propertyGroups';
+import { listListingsByPropertyIds } from '@/services/listings';
+import { listBookingsForOccupancy } from '@/services/bookings';
 
 interface Props {
   granularity: ChartGranularity;
@@ -160,9 +163,7 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
 
     (async () => {
       // 1. Properties + their group_id
-      let propQ = supabase.from('properties').select('id, group_id').order('name');
-      if (propertyIds?.length) propQ = propQ.in('id', propertyIds);
-      const { data: props } = await propQ;
+      const { data: props } = await listPropertiesSlim(propertyIds);
       if (cancelled) return;
       if (!props?.length) {
         setGroups([]); setChartData([]); setTotalProps(0); setLoading(false);
@@ -175,11 +176,8 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
       const uniqueGroupIds = Array.from(new Set(propArr.map(p => p.group_id).filter(Boolean))) as string[];
       const groupMap = new Map<string, Group>(); // id → Group
       if (uniqueGroupIds.length) {
-        const { data: gRows } = await supabase
-          .from('property_groups')
-          .select('id, name, color')
-          .in('id', uniqueGroupIds);
-        for (const g of (gRows ?? []) as Array<{ id: string; name: string; color: string }>) {
+        const { data: gRows } = await getPropertyGroupsByIds(uniqueGroupIds);
+        for (const g of (gRows ?? [])) {
           groupMap.set(g.id, { id: g.id, name: g.name, color: resolveColor(g.color) });
         }
       }
@@ -203,14 +201,11 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
 
       // 3. Listings → property map
       const propIds = propArr.map(p => p.id);
-      const { data: listings } = await supabase
-        .from('listings')
-        .select('id, property_id')
-        .in('property_id', propIds);
+      const { data: listings } = await listListingsByPropertyIds(propIds);
       if (cancelled) return;
 
       const listingToProp = new Map<string, string>(); // listingId → propertyId
-      for (const l of (listings ?? []) as Array<{ id: string; property_id: string }>) {
+      for (const l of (listings ?? [])) {
         listingToProp.set(l.id, l.property_id);
       }
       const listingIds = [...listingToProp.keys()];
@@ -218,13 +213,7 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
       // 4. Bookings overlapping [from, to], exclude cancelled
       let bookings: BookingRaw[] = [];
       if (listingIds.length) {
-        const { data: bkgs } = await supabase
-          .from('bookings')
-          .select('start_date, end_date, listing_id')
-          .gte('end_date', from)
-          .lte('start_date', to)
-          .in('listing_id', listingIds)
-          .not('status', 'ilike', '%cancel%');
+        const { data: bkgs } = await listBookingsForOccupancy({ from, to, listingIds, excludeCancelled: true });
         bookings = (bkgs ?? []) as BookingRaw[];
       }
       if (cancelled) return;

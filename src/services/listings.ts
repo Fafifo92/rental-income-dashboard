@@ -3,6 +3,7 @@ import type { ServiceResult } from './expenses';
 import type { ListingRow } from '@/types/database';
 
 export const listListings = async (): Promise<ServiceResult<ListingRow[]>> => {
+  // listings has no owner_id column; RLS filters by property_id → properties.owner_id
   const { data, error } = await supabase
     .from('listings')
     .select('*')
@@ -11,7 +12,31 @@ export const listListings = async (): Promise<ServiceResult<ListingRow[]>> => {
   return { data, error: null };
 };
 
-/** Upserts a listing by (property_id, external_name) — returns existing or newly created row. */
+/** Returns listings with only id + property_id for the given property IDs — used by occupancy views. */
+export const listListingsByPropertyIds = async (
+  propertyIds: string[],
+): Promise<ServiceResult<Array<{ id: string; property_id: string }>>> => {
+  if (!propertyIds.length) return { data: [], error: null };
+  const { data, error } = await supabase
+    .from('listings')
+    .select('id, property_id')
+    .in('property_id', propertyIds);
+  if (error) return { data: null, error: error.message };
+  return { data: data ?? [], error: null };
+};
+
+/** Returns listings with id + source for given listing IDs — used for charge-target labelling. */
+export const getListingsByIds = async (
+  ids: string[],
+): Promise<ServiceResult<Array<{ id: string; source: string }>>> => {
+  if (!ids.length) return { data: [], error: null };
+  const { data, error } = await supabase
+    .from('listings')
+    .select('id, source')
+    .in('id', ids);
+  if (error) return { data: null, error: error.message };
+  return { data: data ?? [], error: null };
+};
 export const findOrCreateListing = async (
   propertyId: string,
   externalName: string,

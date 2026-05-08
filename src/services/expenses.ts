@@ -18,6 +18,10 @@ export interface ExpenseFilters {
   includeRecurring?: boolean;
   includeChannelFees?: boolean;
   includeCancelledFines?: boolean; // synthesize cancelled-booking fines as expenses
+  /** 1-indexed page number for server-side pagination. Requires `pageSize`. */
+  page?: number;
+  /** Rows per page for server-side pagination. Requires `page`. */
+  pageSize?: number;
 }
 
 export type ServiceResult<T> =
@@ -69,6 +73,14 @@ export const listExpenses = async (
   if (filters?.vendor) query = query.ilike('vendor', `%${filters.vendor}%`);
   if (filters?.personInCharge) query = query.ilike('person_in_charge', `%${filters.personInCharge}%`);
   if (filters?.bookingId) query = query.eq('booking_id', filters.bookingId);
+
+  // Pagination or safety cap (search must remain client-side as it spans synthetic entries)
+  if (filters?.page && filters?.pageSize) {
+    const from = (filters.page - 1) * filters.pageSize;
+    query = query.range(from, from + filters.pageSize - 1);
+  } else {
+    query = query.limit(1000);
+  }
 
   const { data, error } = await query;
 

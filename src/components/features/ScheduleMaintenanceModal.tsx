@@ -74,10 +74,10 @@ export default function ScheduleMaintenanceModal({
     setSaving(true);
     setErr(null);
 
-    let error: string | null = null;
+    let result: { error: string | null };
 
     if (isEdit && schedule) {
-      const res = await updateMaintenanceSchedule(schedule.id, {
+      result = await updateMaintenanceSchedule(schedule.id, {
         title:              title.trim(),
         description:        desc.trim() || null,
         scheduled_date:     date,
@@ -85,9 +85,8 @@ export default function ScheduleMaintenanceModal({
         is_recurring:       isRecurring,
         recurrence_days:    isRecurring ? recurrenceDays : null,
       });
-      error = res.error;
     } else {
-      const res = await createMaintenanceSchedule({
+      result = await createMaintenanceSchedule({
         item_id:            item.id,
         property_id:        item.property_id,
         title:              title.trim(),
@@ -97,11 +96,10 @@ export default function ScheduleMaintenanceModal({
         is_recurring:       isRecurring,
         recurrence_days:    isRecurring ? recurrenceDays : null,
       });
-      error = res.error;
     }
 
     setSaving(false);
-    if (error) { setErr(error); return; }
+    if (result.error) { setErr(result.error); return; }
     onSaved();
   };
 

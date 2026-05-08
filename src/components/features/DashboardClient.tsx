@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import DashboardSummary, { KPISkeleton } from './DashboardSummary';
 import RevenueChart from './RevenueChart';
@@ -10,21 +10,19 @@ import ExportMenu from './ExportMenu';
 import AlertsPanel from './AlertsPanel';
 import IncomeExpenseTab from './IncomeExpenseTab';
 import ActiveBookingsWidget from './ActiveBookingsWidget';
-import BookingDetailModal from './BookingDetailModal';
+const BookingDetailModal = lazy(() => import('./BookingDetailModal'));
+const BookingPayoutModal = lazy(() => import('./BookingPayoutModal'));
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
-import { computeFinancials, resolvePeriodRange } from '@/services/financial';
-import type { Period, FinancialKPIs, MonthlyPnL, PayoutBreakdown } from '@/services/financial';
-import { listTransactions } from '@/services/transactions';
-import type { FinancialTransaction } from '@/services/transactions';
+import { resolvePeriodRange, type Period, type FinancialKPIs } from '@/services/financial';
 import type { ParsedBooking } from '@/services/etl';
 import { useAuth } from '@/lib/useAuth';
 import { usePropertyFilter } from '@/lib/usePropertyFilter';
+import { useDashboardData } from '@/lib/hooks/useDashboardData';
+import { useReferenceData } from '@/lib/hooks/useReferenceData';
 import { formatCurrency } from '@/lib/utils';
 import { listInventoryItems, getDamageReconciliations, computeInventoryKpis, STATUS_LABEL, type DamageReconciliation } from '@/services/inventory';
-import type { InventoryItemRow, PropertyRow, BankAccountRow } from '@/types/database';
+import type { InventoryItemRow } from '@/types/database';
 import { getBooking, type BookingWithListingRow } from '@/services/bookings';
-import { listProperties } from '@/services/properties';
-import { listBankAccounts } from '@/services/bankAccounts';
 
 // ─── Break-even Alert ─────────────────────────────────────────────────────────
 
@@ -104,62 +102,31 @@ export default function DashboardClient() {
   const { properties, propertyIds, setPropertyIds, groups, tags, tagAssigns } = usePropertyFilter();
   const [period, setPeriod]               = useState<Period>('last-3-months');
   const [customRange, setCustomRange]     = useState<{ from: string; to: string } | undefined>(undefined);
-  const [kpis, setKpis]                   = useState<FinancialKPIs | null>(null);
-  const [monthlyPnL, setMonthlyPnL]       = useState<MonthlyPnL[]>([]);
-  const [exportMonthly, setExportMonthly] = useState<MonthlyPnL[]>([]);
-  const [payoutBreakdown, setPayoutBreakdown] = useState<PayoutBreakdown | null>(null);
-  const [granularity, setGranularity]     = useState<import('@/services/financial').ChartGranularity>('week');
-  const [transactions, setTransactions]   = useState<FinancialTransaction[]>([]);
-  const [txLoading, setTxLoading]         = useState(false);
   const [activeTab, setActiveTab]         = useState<'resumen' | 'ingresos-egresos' | 'en-curso' | 'calendario'>('resumen');
-  const [loading, setLoading]             = useState(true);
   const [showUploader, setShowUploader]   = useState(false);
   const [importedBookings, setImportedBookings] = useState<ParsedBooking[]>([]);
   const [calendarDetailBooking, setCalendarDetailBooking] = useState<BookingWithListingRow | null>(null);
   const [calendarDetailLoading, setCalendarDetailLoading] = useState(false);
-  const [allProperties, setAllProperties] = useState<PropertyRow[]>([]);
-  const [allBankAccounts, setAllBankAccounts] = useState<BankAccountRow[]>([]);
+  const [calendarPayoutBooking, setCalendarPayoutBooking] = useState<BookingWithListingRow | null>(null);
 
-  useEffect(() => {
-    if (authStatus !== 'authed') return;
-    listProperties().then(res => { if (!res.error) setAllProperties(res.data ?? []); });
-    listBankAccounts().then(res => { if (!res.error) setAllBankAccounts((res.data ?? []).filter(a => a.is_active)); });
-  }, [authStatus]);
+  const { properties: allProperties, bankAccounts: allBankAccounts } = useReferenceData({
+    authStatus, withProperties: true, withBankAccounts: true,
+  });
 
-  const handleCalendarBookingClick = async (bookingId: string) => {
+  const { kpis, monthlyPnL, exportMonthly, payoutBreakdown, granularity, transactions, loading, txLoading } =
+    useDashboardData({ period, authStatus, propertyIds, customRange });
+
+  const handleCalendarBookingClick = useCallback(async (bookingId: string) => {
     setCalendarDetailLoading(true);
     const res = await getBooking(bookingId);
     setCalendarDetailLoading(false);
     if (!res.error && res.data) setCalendarDetailBooking(res.data);
-  };
+  }, []);
 
-  useEffect(() => {
-    if (authStatus === 'checking') return;
-    // Don't fire for 'custom' until a valid range is set
-    if (period === 'custom' && (!customRange?.from || !customRange?.to)) return;
-    let cancelled = false;
-    setLoading(true);
-    computeFinancials(period, authStatus === 'authed', propertyIds, customRange).then(result => {
-      if (cancelled) return;
-      setKpis(result.kpis);
-      setMonthlyPnL(result.monthlyPnL);
-      setExportMonthly(result.exportMonthly);
-      setPayoutBreakdown(result.payoutBreakdown);
-      setGranularity(result.granularity);
-      setLoading(false);
-    });
-
-    // Load financial transaction ledger
-    setTxLoading(true);
-    const { from, to } = resolvePeriodRange(period, customRange);
-    listTransactions(from, to, propertyIds?.length ? propertyIds : undefined).then(result => {
-      if (cancelled) return;
-      setTransactions(result.data ?? []);
-      setTxLoading(false);
-    });
-
-    return () => { cancelled = true; };
-  }, [period, authStatus, propertyIds, customRange]);
+  const { from: chartFrom, to: chartTo } = useMemo(
+    () => resolvePeriodRange(period, customRange),
+    [period, customRange],
+  );
 
   if (authStatus === 'checking') {
     return (
@@ -235,12 +202,9 @@ export default function DashboardClient() {
                 </div>
               </div>
             )}
-            {(() => {
-              const { from, to } = resolvePeriodRange(period, customRange);
-              return (
-                <OccupancyGrid
-                  from={from}
-                  to={to}
+            <OccupancyGrid
+                  from={chartFrom}
+                  to={chartTo}
                   propertyIds={propertyIds}
                   totalNights={kpis?.totalNights ?? 0}
                   availableNights={kpis?.availableNights ?? 0}
@@ -248,8 +212,6 @@ export default function DashboardClient() {
                   breakEvenOccupancy={kpis?.breakEvenOccupancy ?? 0}
                   onBookingClick={handleCalendarBookingClick}
                 />
-              );
-            })()}
           </div>
         ) : (
           <>
@@ -301,18 +263,13 @@ export default function DashboardClient() {
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6 min-w-0">
             <RevenueChart data={monthlyPnL} />
-            {(() => {
-              const { from, to } = resolvePeriodRange(period, customRange);
-              return (
-                <OccupancyByProperty
+            <OccupancyByProperty
                   granularity={granularity}
-                  from={from}
-                  to={to}
+                  from={chartFrom}
+                  to={chartTo}
                   propertyIds={propertyIds}
                   breakEvenOccupancy={kpis?.breakEvenOccupancy ?? 0}
                 />
-              );
-            })()}
           </div>
 
           <motion.aside
@@ -459,16 +416,37 @@ export default function DashboardClient() {
       </AnimatePresence>
 
       {calendarDetailBooking && (
-        <BookingDetailModal
-          booking={{
-            ...calendarDetailBooking,
-            listing_id: calendarDetailBooking.listing_id,
-            property_id: calendarDetailBooking.listings?.property_id ?? null,
-          }}
-          properties={allProperties}
-          bankAccounts={allBankAccounts}
-          onClose={() => setCalendarDetailBooking(null)}
-        />
+        <Suspense fallback={null}>
+          <BookingDetailModal
+            booking={{
+              ...calendarDetailBooking,
+              listing_id: calendarDetailBooking.listing_id,
+              property_id: calendarDetailBooking.listings?.property_id ?? null,
+            }}
+            properties={allProperties}
+            bankAccounts={allBankAccounts}
+            onClose={() => setCalendarDetailBooking(null)}
+            onPayout={() => {
+              const target = calendarDetailBooking;
+              setCalendarDetailBooking(null);
+              setCalendarPayoutBooking(target);
+            }}
+          />
+        </Suspense>
+      )}
+
+      {calendarPayoutBooking && (
+        <Suspense fallback={null}>
+          <BookingPayoutModal
+            booking={{
+              ...calendarPayoutBooking,
+              guest_name: calendarPayoutBooking.guest_name ?? '—',
+            }}
+            bankAccounts={allBankAccounts}
+            onClose={() => setCalendarPayoutBooking(null)}
+            onSaved={() => setCalendarPayoutBooking(null)}
+          />
+        </Suspense>
       )}
     </>
   );

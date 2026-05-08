@@ -3,18 +3,32 @@ import type { ServiceResult } from './expenses';
 import type { PropertyRow } from '@/types/database';
 
 export const listProperties = async (): Promise<ServiceResult<PropertyRow[]>> => {
+  const { data: authData, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !authData?.user) return { data: null, error: 'No autenticado' };
   const { data, error } = await supabase
     .from('properties')
-    .select('*')
+    .select('id, owner_id, name, address, base_currency, estrato, bedrooms, max_guests, notes, created_at, default_cleaning_fee, rnt, group_id')
+    .eq('owner_id', authData.user.id)
     .order('name');
   if (error) return { data: null, error: error.message };
   return { data, error: null };
 };
 
+/** Slim projection used by occupancy charts — only id, name, group_id. */
+export const listPropertiesSlim = async (
+  propertyIds?: string[],
+): Promise<ServiceResult<Array<{ id: string; name: string; group_id: string | null }>>> => {
+  let query = supabase.from('properties').select('id, name, group_id').order('name');
+  if (propertyIds?.length) query = query.in('id', propertyIds);
+  const { data, error } = await query;
+  if (error) return { data: null, error: error.message };
+  return { data: data ?? [], error: null };
+};
+
 export const getProperty = async (id: string): Promise<ServiceResult<PropertyRow>> => {
   const { data, error } = await supabase
     .from('properties')
-    .select('*')
+    .select('id, owner_id, name, address, base_currency, estrato, bedrooms, max_guests, notes, created_at, default_cleaning_fee, rnt, group_id')
     .eq('id', id)
     .single();
   if (error) return { data: null, error: error.message };
@@ -27,8 +41,9 @@ export const createProperty = async (
   baseCurrency = 'COP',
   rnt?: string | null,
 ): Promise<ServiceResult<PropertyRow>> => {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { data: null, error: 'No autenticado — inicia sesión primero' };
+  const { data: authData, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !authData?.user) return { data: null, error: 'No autenticado — inicia sesión primero' };
+  const user = authData.user;
 
   const { data, error } = await supabase
     .from('properties')
