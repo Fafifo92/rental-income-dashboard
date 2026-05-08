@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS public.property_groups (
   name       TEXT NOT NULL,
   color      TEXT DEFAULT 'slate',   -- tailwind color name or hex
   sort_order INT  DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE (owner_id, name)
 );
@@ -140,6 +141,11 @@ ALTER TABLE public.property_groups ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "owner_full_property_groups" ON public.property_groups;
 CREATE POLICY "owner_full_property_groups" ON public.property_groups
   FOR ALL USING (auth.uid() = owner_id) WITH CHECK (auth.uid() = owner_id);
+
+DROP TRIGGER IF EXISTS trg_property_groups_updated_at ON public.property_groups;
+CREATE TRIGGER trg_property_groups_updated_at
+  BEFORE UPDATE ON public.property_groups
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 -- FK deferred (property_groups debe existir antes de la FK en properties)
 ALTER TABLE public.properties
@@ -154,6 +160,7 @@ CREATE TABLE IF NOT EXISTS public.property_tags (
   owner_id   UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name       TEXT NOT NULL,
   color      TEXT DEFAULT 'blue',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE (owner_id, name)
 );
@@ -165,6 +172,11 @@ ALTER TABLE public.property_tags ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "owner_full_property_tags" ON public.property_tags;
 CREATE POLICY "owner_full_property_tags" ON public.property_tags
   FOR ALL USING (auth.uid() = owner_id) WITH CHECK (auth.uid() = owner_id);
+
+DROP TRIGGER IF EXISTS trg_property_tags_updated_at ON public.property_tags;
+CREATE TRIGGER trg_property_tags_updated_at
+  BEFORE UPDATE ON public.property_tags
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 -- ─────────────────────────────────────────────────────────────
 -- 5. PROPERTY_TAG_ASSIGNMENTS  (mig_028)
