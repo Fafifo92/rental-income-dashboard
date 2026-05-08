@@ -11,6 +11,7 @@ import {
   registerInventoryMovement,
   computeInventoryKpis,
   createInventoryCategory,
+  autoMarkEndOfLife,
   type CreateInventoryItemInput,
 } from '@/services/inventory';
 import { listProperties } from '@/services/properties';
@@ -88,6 +89,10 @@ export default function InventoryClient(): JSX.Element {
       if (iRes.data) setItems(iRes.data);
       if (sRes.data) setSchedules(sRes.data);
       if (!allSRes.error) setAllSchedules(allSRes.data);
+      // Auto-mark items that have reached their useful life (idempotent)
+      autoMarkEndOfLife().then(count => {
+        if (count > 0) listInventoryItems().then(r => { if (r.data) setItems(r.data); });
+      });
     } finally {
       setLoading(false);
     }

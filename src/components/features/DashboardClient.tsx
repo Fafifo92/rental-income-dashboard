@@ -113,7 +113,7 @@ export default function DashboardClient() {
     authStatus, withProperties: true, withBankAccounts: true,
   });
 
-  const { kpis, monthlyPnL, exportMonthly, payoutBreakdown, granularity, transactions, loading, txLoading } =
+  const { kpis, monthlyPnL, exportMonthly, exportMonthlyByBookings, payoutBreakdown, granularity, transactions, loading, txLoading } =
     useDashboardData({ period, authStatus, propertyIds, customRange });
 
   const handleCalendarBookingClick = useCallback(async (bookingId: string) => {
@@ -162,7 +162,7 @@ export default function DashboardClient() {
             <PropertyMultiSelect properties={properties} value={propertyIds} onChange={setPropertyIds} groups={groups} tags={tags} tagAssigns={tagAssigns} />
             <PeriodSelector value={period} onChange={setPeriod} customRange={customRange} onCustomRangeChange={setCustomRange} />
             {!loading && kpis && (
-              <ExportMenu kpis={kpis} monthly={exportMonthly} period={period} customRange={customRange} propertyIds={propertyIds} />
+              <ExportMenu kpis={kpis} monthly={exportMonthly} monthlyByBookings={exportMonthlyByBookings} period={period} customRange={customRange} propertyIds={propertyIds} />
             )}
           </div>
         </motion.div>

@@ -526,7 +526,7 @@ export type CleanerGroupMemberRow = {
   cleaner_id: string;
 };
 
-export type InventoryItemStatus = 'good' | 'needs_maintenance' | 'damaged' | 'lost' | 'depleted';
+export type InventoryItemStatus = 'good' | 'needs_maintenance' | 'damaged' | 'lost' | 'depleted' | 'end_of_life';
 
 export type InventoryMovementType =
   | 'added'

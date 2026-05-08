@@ -794,6 +794,7 @@ export const STATUS_LABEL: Record<InventoryItemStatus, string> = {
   damaged:            'Dañado',
   lost:               'Perdido',
   depleted:           'Agotado',
+  end_of_life:        'Vida útil cumplida',
 };
 
 export const STATUS_STYLE: Record<InventoryItemStatus, string> = {
@@ -802,6 +803,7 @@ export const STATUS_STYLE: Record<InventoryItemStatus, string> = {
   damaged:            'bg-rose-100 text-rose-700',
   lost:               'bg-slate-200 text-slate-700',
   depleted:           'bg-orange-100 text-orange-700',
+  end_of_life:        'bg-purple-100 text-purple-700',
 };
 
 export const MOVEMENT_LABEL: Record<InventoryMovementType, string> = {
@@ -813,4 +815,105 @@ export const MOVEMENT_LABEL: Record<InventoryMovementType, string> = {
   discarded:     'Descartado',
   lost:          'Perdido',
   status_change: 'Cambio de estado',
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// Vida útil — detección y gestión
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Items que superaron su vida útil estimada y aún no tienen status end_of_life. */
+export const getEndOfLifeItems = async (): Promise<ServiceResult<InventoryItemRow[]>> => {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data, error } = await supabase
+    .from('inventory_items')
+    .select('*')
+    .in('status', ['good', 'needs_maintenance'])
+    .not('purchase_date', 'is', null)
+    .not('expected_lifetime_months', 'is', null);
+  if (error) return { data: null, error: error.message };
+  const expired = (data ?? []).filter(it => {
+    if (!it.purchase_date || !it.expected_lifetime_months) return false;
+    const expiry = new Date(it.purchase_date);
+    expiry.setMonth(expiry.getMonth() + Number(it.expected_lifetime_months));
+    return expiry.toISOString().slice(0, 10) <= today;
+  });
+  return { data: expired, error: null };
+};
+
+/**
+ * Marca un item como 'end_of_life' y registra el movimiento de bitácora.
+ * Idempotente: si ya está en end_of_life no hace nada.
+ */
+export const markEndOfLife = async (id: string): Promise<ServiceResult<true>> => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: null, error: 'No autenticado' };
+
+  const { data: item, error: ge } = await supabase
+    .from('inventory_items').select('status').eq('id', id).single();
+  if (ge || !item) return { data: null, error: ge?.message ?? 'Item no encontrado' };
+  if (item.status === 'end_of_life') return { data: true, error: null };
+
+  const { error: ue } = await supabase
+    .from('inventory_items').update({ status: 'end_of_life' }).eq('id', id);
+  if (ue) return { data: null, error: ue.message };
+
+  await supabase.from('inventory_movements').insert({
+    owner_id: user.id, item_id: id, type: 'status_change',
+    quantity_delta: 0, new_status: 'end_of_life',
+    notes: 'Vida útil estimada cumplida.',
+    related_booking_id: null, related_expense_id: null,
+  });
+  return { data: true, error: null };
+};
+
+/**
+ * Extiende la vida útil de un item sumando `extraMonths` a
+ * expected_lifetime_months. Si el item estaba en end_of_life lo
+ * devuelve a 'good'. Mínimo resultante: 1 mes.
+ */
+export const extendUsefulLife = async (
+  id: string,
+  extraMonths: number,
+): Promise<ServiceResult<InventoryItemRow>> => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: null, error: 'No autenticado' };
+  if (extraMonths <= 0) return { data: null, error: 'Meses a extender debe ser > 0' };
+
+  const { data: item, error: ge } = await supabase
+    .from('inventory_items').select('*').eq('id', id).single();
+  if (ge || !item) return { data: null, error: ge?.message ?? 'Item no encontrado' };
+
+  const currentMonths = Number(item.expected_lifetime_months) || 0;
+  const newMonths = Math.max(1, currentMonths + extraMonths);
+  const newStatus: InventoryItemStatus = item.status === 'end_of_life' ? 'good' : item.status;
+
+  const { data, error: ue } = await supabase
+    .from('inventory_items')
+    .update({ expected_lifetime_months: newMonths, status: newStatus })
+    .eq('id', id).select().single();
+  if (ue || !data) return { data: null, error: ue?.message ?? 'Error al actualizar' };
+
+  await supabase.from('inventory_movements').insert({
+    owner_id: user.id, item_id: id, type: 'status_change',
+    quantity_delta: 0, new_status: newStatus,
+    notes: `Vida útil extendida +${extraMonths} meses (total: ${newMonths} meses).`,
+    related_booking_id: null, related_expense_id: null,
+  });
+  return { data, error: null };
+};
+
+/**
+ * Detecta automáticamente los items que superaron su vida útil y los
+ * marca como end_of_life. Llamar al cargar /inventory.
+ * Devuelve el número de items actualizados.
+ */
+export const autoMarkEndOfLife = async (): Promise<number> => {
+  const res = await getEndOfLifeItems();
+  if (res.error || !res.data || res.data.length === 0) return 0;
+  let count = 0;
+  for (const item of res.data) {
+    const r = await markEndOfLife(item.id);
+    if (!r.error) count++;
+  }
+  return count;
 };

@@ -8,6 +8,7 @@ import type {
   PropertyRow,
 } from '@/types/database';
 import type { CreateInventoryItemInput } from '@/services/inventory';
+import { extendUsefulLife } from '@/services/inventory';
 import { useBackdropClose } from '@/lib/useBackdropClose';
 import MoneyInput from '@/components/MoneyInput';
 // ──────────────────────────────────────────────────────────────────────────
@@ -36,6 +37,7 @@ export function ItemFormModal({
   const [purchaseDate, setPurchaseDate] = useState(item?.purchase_date ?? '');
   const [purchasePrice, setPurchasePrice] = useState<number | null>(item?.purchase_price !== null && item?.purchase_price !== undefined ? Number(item.purchase_price) : null);
   const [lifetime, setLifetime] = useState<number | null>(item?.expected_lifetime_months ?? null);
+  const [extraMonths, setExtraMonths] = useState<number | null>(null);
   const [notes, setNotes] = useState(item?.notes ?? '');
 
   const [newCatName, setNewCatName] = useState('');
@@ -85,6 +87,9 @@ export function ItemFormModal({
       notes: notes.trim() || null,
     };
     const error = await onSave(item?.id ?? null, payload);
+    if (!error && item?.id && extraMonths && extraMonths > 0) {
+      await extendUsefulLife(item.id, extraMonths);
+    }
     setSaving(false);
     if (error) setErr(error);
     else onClose();
@@ -292,6 +297,31 @@ export function ItemFormModal({
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
+
+            {/* End-of-life extend section */}
+            {item?.status === 'end_of_life' && (
+              <div className="sm:col-span-2 bg-purple-50 border border-purple-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-start gap-2">
+                  <svg className="w-4 h-4 mt-0.5 text-purple-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  </svg>
+                  <div>
+                    <p className="text-sm font-semibold text-purple-800">Vida útil cumplida</p>
+                    <p className="text-xs text-purple-600 mt-0.5">Este ítem alcanzó su vida útil esperada. Puedes extenderla para continuar usándolo.</p>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Extender vida útil (meses adicionales)</label>
+                  <input
+                    type="number" min="1" value={extraMonths ?? ''}
+                    onChange={e => setExtraMonths(e.target.value === '' ? null : Number(e.target.value))}
+                    placeholder="Ej: 12 meses más"
+                    className="w-full px-3 py-2 text-sm border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none bg-white"
+                  />
+                  <p className="text-[11px] text-purple-500 mt-1">Al guardar, el estado cambiará a "Bueno" automáticamente.</p>
+                </div>
+              </div>
+            )}
 
             <div className="sm:col-span-2">
               <label className="block text-xs font-semibold text-slate-600 mb-1">Notas</label>

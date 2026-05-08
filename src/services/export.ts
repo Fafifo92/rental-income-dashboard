@@ -50,8 +50,9 @@ export function exportKpisToCsv(kpis: FinancialKPIs, period: string) {
   downloadUtf8Csv(rows.join('\n'), `str-kpis-${today()}.csv`);
 }
 
-export function exportMonthlyToCsv(data: MonthlyPnL[]) {
+export function exportMonthlyToCsv(data: MonthlyPnL[], modeLabel?: string) {
   const rows = [
+    ...(modeLabel ? [toCsvRow(['Modo de atribución', modeLabel])] : []),
     toCsvRow(['Mes', 'Ingresos', 'Gastos', 'Utilidad Neta', 'Noches', 'Ocupación %']),
     ...data.map(d =>
       toCsvRow([d.month, d.revenue, d.expenses, d.netProfit, d.nights, d.occupancy])
@@ -97,10 +98,11 @@ function buildSpreadsheetML(
   ].join('');
 }
 
-export function exportToExcel(kpis: FinancialKPIs, monthly: MonthlyPnL[], period: string) {
+export function exportToExcel(kpis: FinancialKPIs, monthly: MonthlyPnL[], period: string, modeLabel?: string) {
   const kpiRows: (string | number)[][] = [
     ['Métrica', 'Valor', 'Formato'],
     ['Período', period, ''],
+    ...(modeLabel ? [['Modo de atribución', modeLabel, '']] : [] as (string | number)[][]),
     ['Ingreso Bruto',       kpis.grossRevenue,          formatCurrency(kpis.grossRevenue)],
     ['Gastos Fijos',        kpis.totalFixedExpenses,    formatCurrency(kpis.totalFixedExpenses)],
     ['Gastos Variables',    kpis.totalVariableExpenses, formatCurrency(kpis.totalVariableExpenses)],

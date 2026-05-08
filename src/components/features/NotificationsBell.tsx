@@ -6,7 +6,8 @@ import { isSupabaseConfigured } from '@/services/auth';
 import { formatCurrency } from '@/lib/utils';
 import { listBookingAlerts, type BookingAlert } from '@/services/bookings';
 import { getUpcomingAndOverdueSchedules } from '@/services/maintenanceSchedules';
-import type { MaintenanceScheduleRow } from '@/types/database';
+import { getEndOfLifeItems } from '@/services/inventory';
+import type { MaintenanceScheduleRow, InventoryItemRow } from '@/types/database';
 
 const ymLabel = (ym: string): string => {
   const [y, m] = ym.split('-');
@@ -30,6 +31,7 @@ export default function NotificationsBell() {
   const [pending, setPending] = useState<PendingRecurring[]>([]);
   const [bookingAlerts, setBookingAlerts] = useState<BookingAlert[]>([]);
   const [maintAlerts, setMaintAlerts] = useState<MaintenanceScheduleRow[]>([]);
+  const [eolItems, setEolItems] = useState<InventoryItemRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [enabled, setEnabled] = useState(true);
 
@@ -45,10 +47,11 @@ export default function NotificationsBell() {
         return;
       }
       const today = new Date().toISOString().slice(0, 10);
-      const [recurringRes, alertsRes, maintRes] = await Promise.all([
+      const [recurringRes, alertsRes, maintRes, eolRes] = await Promise.all([
         listPendingRecurringForOwner(6),
         listBookingAlerts(45),
         getUpcomingAndOverdueSchedules(),
+        getEndOfLifeItems(),
       ]);
       if (cancelled) return;
       if (!recurringRes.error) setPending(recurringRes.data ?? []);
@@ -61,6 +64,7 @@ export default function NotificationsBell() {
         });
         setMaintAlerts(relevant);
       }
+      if (!eolRes.error) setEolItems(eolRes.data ?? []);
       setLoading(false);
     };
     refresh();
@@ -83,6 +87,8 @@ export default function NotificationsBell() {
   const overdueCount = pending.filter(p => !p.isCurrentMonth).length;
   const alertCount = bookingAlerts.length;
   const maintCount = maintAlerts.length;
+  const eolCount = eolItems.length;
+  const totalCount = count + alertCount + maintCount + eolCount;
   const today = new Date().toISOString().slice(0, 10);
   const maintOverdueCount = maintAlerts.filter(s => s.scheduled_date <= today).length;
 
@@ -97,11 +103,11 @@ export default function NotificationsBell() {
         <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0a3 3 0 11-6 0" />
         </svg>
-        {!loading && (count + alertCount + maintCount) > 0 && (
+        {!loading && totalCount > 0 && (
           <span className={`absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-bold text-white rounded-full ${
-            (overdueCount > 0 || maintOverdueCount > 0) ? 'bg-rose-600' : 'bg-amber-500'
+            (overdueCount > 0 || maintOverdueCount > 0 || eolCount > 0) ? 'bg-rose-600' : 'bg-amber-500'
           }`}>
-            {(count + alertCount + maintCount) > 99 ? '99+' : (count + alertCount + maintCount)}
+            {totalCount > 99 ? '99+' : totalCount}
           </span>
         )}
       </button>
@@ -121,12 +127,13 @@ export default function NotificationsBell() {
                 <div>
                   <p className="text-sm font-bold text-slate-800">Pendientes</p>
                   <p className="text-xs text-slate-500">
-                    {(count + alertCount + maintCount) === 0
+                    {totalCount === 0
                       ? 'Todo al día ✓'
                       : [
                           count > 0 && `${count} recurrente${count > 1 ? 's' : ''}${overdueCount > 0 ? ` (${overdueCount} atrasado${overdueCount > 1 ? 's' : ''})` : ''}`,
                           alertCount > 0 && `${alertCount} reserva${alertCount > 1 ? 's' : ''} por completar`,
                           maintCount > 0 && `${maintCount} mantenimiento${maintCount > 1 ? 's' : ''} pendiente${maintCount > 1 ? 's' : ''}`,
+                          eolCount > 0 && `${eolCount} ítem${eolCount > 1 ? 's' : ''} con vida útil cumplida`,
                         ].filter(Boolean).join(' · ')}
                   </p>
                 </div>
@@ -138,12 +145,44 @@ export default function NotificationsBell() {
                   <div className="h-4 bg-slate-100 rounded animate-pulse mb-2" />
                   <div className="h-4 bg-slate-100 rounded animate-pulse w-3/4" />
                 </div>
-              ) : (count + alertCount + maintCount) === 0 ? (
+              ) : totalCount === 0 ? (
                 <div className="px-4 py-6 text-center text-sm text-slate-500">
                   Sin pendientes. ¡Todo al día! 🎉
                 </div>
               ) : (
                 <>
+                  {/* ── Vida útil cumplida ── */}
+                  {eolCount > 0 && (
+                    <>
+                      <div className="px-4 pt-3 pb-1">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-purple-500">Vida útil cumplida</p>
+                      </div>
+                      <ul>
+                        {eolItems.slice(0, 6).map(item => (
+                          <li key={item.id} className="border-b border-slate-50 last:border-0">
+                            <a href="/inventory" className="block px-4 py-2.5 hover:bg-slate-50">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-medium text-slate-800 truncate">{item.name}</div>
+                                  <div className="text-xs text-slate-500">
+                                    {item.expected_lifetime_months ? `${item.expected_lifetime_months} meses de vida útil` : 'Vida útil agotada'}
+                                  </div>
+                                </div>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap bg-purple-100 text-purple-700">
+                                  reemplazar
+                                </span>
+                              </div>
+                            </a>
+                          </li>
+                        ))}
+                        {eolCount > 6 && (
+                          <li className="px-4 py-2 text-xs text-slate-400 text-center">
+                            +{eolCount - 6} más… revisa en inventario.
+                          </li>
+                        )}
+                      </ul>
+                    </>
+                  )}
                   {/* ── Alertas de reservas ── */}
                   {alertCount > 0 && (
                     <>

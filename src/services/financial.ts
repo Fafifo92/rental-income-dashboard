@@ -10,6 +10,9 @@ import type { PropertyRecurringExpenseRow } from '@/types/database';
 
 export type Period = 'current-month' | 'last-3-months' | 'this-year' | 'all' | 'custom';
 
+/** How revenue is attributed in exports */
+export type ReportMode = 'by-days' | 'by-bookings';
+
 /** Granularity of the chart X-axis */
 export type ChartGranularity = 'day' | 'week' | 'month';
 
@@ -324,7 +327,6 @@ const computeCore = (
 // ─── Chart data builders ─────────────────────────────────────────────────────
 
 const MONTHS_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
-
 /** Monday of the ISO week containing `d` */
 const weekStart = (d: Date): Date => {
   const dt = new Date(d);
@@ -439,8 +441,63 @@ const buildMonthlyPnL = (
   return result;
 };
 
-// ─── Payout Breakdown (confirmed vs expected) ─────────────────────────────────
+/**
+ * Monthly P&L where booking revenue is attributed in full to the check-in
+ * date's bucket (month/week/day), rather than being pro-rated night-by-night.
+ * A booking that starts Dec 28 and ends Jan 3 → all revenue counted in December.
+ */
+const buildMonthlyPnLByBookings = (
+  bookings: BookingData[],
+  expenses: Expense[],
+  adjustments: AdjData[],
+  range: DateRange,
+  propertyCount = 1,
+): MonthlyPnL[] => {
+  const revMap    = new Map<string, number>();
+  const nightsMap = new Map<string, number>();
+  const expMap    = new Map<string, number>();
 
+  const add = (map: Map<string, number>, key: string, val: number) =>
+    map.set(key, (map.get(key) ?? 0) + val);
+
+  // Revenue attributed to check-in month in full (no pro-rating)
+  for (const b of bookings) {
+    if (b.status.toLowerCase().includes('cancel') || !b.start_date || b.num_nights === 0) continue;
+    const k = monthFmt(new Date(b.start_date + 'T12:00:00'));
+    add(revMap, k, b.revenue);
+    add(nightsMap, k, b.num_nights);
+  }
+
+  for (const a of adjustments) {
+    if (!a.date) continue;
+    const sign = a.kind === 'discount' ? -1 : 1;
+    add(revMap, monthFmt(new Date(a.date + 'T12:00:00')), sign * Number(a.amount));
+  }
+
+  for (const e of expenses) {
+    if (!e.date) continue;
+    add(expMap, monthFmt(new Date(e.date + 'T12:00:00')), e.amount);
+  }
+
+  const pc = Math.max(1, propertyCount);
+  const result: MonthlyPnL[] = [];
+  const cur = new Date(range.from.getFullYear(), range.from.getMonth(), 1);
+  const end = new Date(range.to.getFullYear(), range.to.getMonth() + 1, 1);
+  while (cur < end) {
+    const k              = monthFmt(cur);
+    const yr2            = String(cur.getFullYear() % 100).padStart(2, '0');
+    const revenue        = Math.round(revMap.get(k) ?? 0);
+    const expense        = Math.round(expMap.get(k) ?? 0);
+    const nights         = nightsMap.get(k) ?? 0;
+    const daysInMo       = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate();
+    const availableNights = daysInMo * pc;
+    result.push({ month: `${MONTHS_ES[cur.getMonth()]} ${yr2}`, revenue, expenses: expense, netProfit: revenue - expense, nights, availableNights, occupancy: Math.round(nights / availableNights * 100) });
+    cur.setMonth(cur.getMonth() + 1);
+  }
+  return result;
+};
+
+// ─── Payout Breakdown (confirmed vs expected) ─────────────────────────────────
 const buildPayoutBreakdown = (
   bookings: BookingData[],
   expenses: Expense[],
@@ -577,7 +634,7 @@ export const computeFinancials = async (
   isAuthenticated = false,
   propertyIdOrIds?: string | string[],
   customDateRange?: { from: string; to: string },
-): Promise<{ kpis: FinancialKPIs; monthlyPnL: MonthlyPnL[]; exportMonthly: MonthlyPnL[]; payoutBreakdown: PayoutBreakdown; granularity: ChartGranularity }> => {
+): Promise<{ kpis: FinancialKPIs; monthlyPnL: MonthlyPnL[]; exportMonthly: MonthlyPnL[]; exportMonthlyByBookings: MonthlyPnL[]; payoutBreakdown: PayoutBreakdown; granularity: ChartGranularity }> => {
   const propertyIds: string[] | undefined = Array.isArray(propertyIdOrIds)
     ? (propertyIdOrIds.length > 0 ? propertyIdOrIds : undefined)
     : (propertyIdOrIds ? [propertyIdOrIds] : undefined);
@@ -774,7 +831,8 @@ export const computeFinancials = async (
     return range;
   })();
   const exportMonthly   = buildMonthlyPnL(bookings, expenses, adjustments, exportRange, 'month', propertyCount);
+  const exportMonthlyByBookings = buildMonthlyPnLByBookings(bookings, expenses, adjustments, exportRange, propertyCount);
   const payoutBreakdown = buildPayoutBreakdown(bookings, expenses, chartRange, granularity);
 
-  return { kpis, monthlyPnL, exportMonthly, payoutBreakdown, granularity };
+  return { kpis, monthlyPnL, exportMonthly, exportMonthlyByBookings, payoutBreakdown, granularity };
 };

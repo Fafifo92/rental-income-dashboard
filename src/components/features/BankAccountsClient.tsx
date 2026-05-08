@@ -9,6 +9,7 @@ import {
   computeBalances,
   listUnassignedMoney,
   getBankAccountTransactions,
+  createAccountDeposit,
   BANK_TX_KIND_META,
   type BankAccountBalance,
   type UnassignedMoney,
@@ -57,6 +58,7 @@ export default function BankAccountsClient() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [historyAccount, setHistoryAccount] = useState<BankAccountRow | null>(null);
+  const [depositAccount, setDepositAccount] = useState<BankAccountRow | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -331,6 +333,12 @@ export default function BankAccountsClient() {
                   >
                     Historial
                   </button>
+                  <button
+                    onClick={() => setDepositAccount(account)}
+                    className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  >
+                    + Fondos
+                  </button>
                   {!account.is_cash && (
                     <>
                       <button
@@ -534,6 +542,16 @@ export default function BankAccountsClient() {
           />
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {depositAccount && (
+          <DepositModal
+            account={depositAccount}
+            onClose={() => setDepositAccount(null)}
+            onSaved={load}
+          />
+        )}
+      </AnimatePresence>
     </>
   );
 }
@@ -673,6 +691,102 @@ function BankHistoryModal({
             </ul>
           )}
         </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─── Deposit Modal ────────────────────────────────────────────────────────────
+
+function DepositModal({
+  account, onClose, onSaved,
+}: { account: BankAccountRow; onClose: () => void; onSaved: () => void }): JSX.Element {
+  const today = new Date().toISOString().slice(0, 10);
+  const [amount, setAmount]   = useState<number | null>(null);
+  const [date, setDate]       = useState(today);
+  const [notes, setNotes]     = useState('');
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+  const backdrop = makeBackdropHandlers(onClose);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!amount || amount <= 0) { setError('Ingresa un monto válido'); return; }
+    setSaving(true);
+    setError(null);
+    const res = await createAccountDeposit({ account_id: account.id, amount, deposit_date: date, notes: notes || null });
+    setSaving(false);
+    if (res.error) { setError(res.error); return; }
+    toast.success(`+${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(amount)} agregado a ${account.name}`);
+    onSaved();
+    onClose();
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      {...backdrop}
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+        onClick={e => e.stopPropagation()}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6"
+      >
+        <h3 className="text-lg font-bold text-slate-800 mb-1">Agregar fondos</h3>
+        <p className="text-xs text-slate-500 mb-4">
+          {account.name} · {account.bank ?? 'Sin banco'}<br />
+          <span className="text-amber-600 font-medium">No afecta la contabilidad de rentas. Solo actualiza el saldo de la cuenta.</span>
+        </p>
+
+        <form onSubmit={handleSave} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Monto *</label>
+            <MoneyInput value={amount} onChange={setAmount} placeholder="500.000" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Fecha</label>
+            <input
+              type="date"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              required
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Nota (opcional)</label>
+            <input
+              type="text"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="Ej: Transferencia de cuenta personal"
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+            />
+          </div>
+
+          {error && (
+            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>
+          )}
+
+          <div className="flex gap-3 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="flex-1 py-2.5 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !amount || amount <= 0}
+              className="flex-1 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {saving ? 'Guardando…' : 'Agregar fondos'}
+            </button>
+          </div>
+        </form>
       </motion.div>
     </motion.div>
   );

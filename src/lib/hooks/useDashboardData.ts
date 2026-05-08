@@ -21,6 +21,7 @@ export function useDashboardData({ period, authStatus, propertyIds, customRange 
   const [kpis, setKpis] = useState<FinancialKPIs | null>(null);
   const [monthlyPnL, setMonthlyPnL] = useState<MonthlyPnL[]>([]);
   const [exportMonthly, setExportMonthly] = useState<MonthlyPnL[]>([]);
+  const [exportMonthlyByBookings, setExportMonthlyByBookings] = useState<MonthlyPnL[]>([]);
   const [payoutBreakdown, setPayoutBreakdown] = useState<PayoutBreakdown | null>(null);
   const [granularity, setGranularity] = useState<ChartGranularity>('week');
   const [transactions, setTransactions] = useState<FinancialTransaction[]>([]);
@@ -38,6 +39,7 @@ export function useDashboardData({ period, authStatus, propertyIds, customRange 
       setKpis(result.kpis);
       setMonthlyPnL(result.monthlyPnL);
       setExportMonthly(result.exportMonthly);
+      setExportMonthlyByBookings(result.exportMonthlyByBookings);
       setPayoutBreakdown(result.payoutBreakdown);
       setGranularity(result.granularity);
       setLoading(false);
@@ -54,5 +56,5 @@ export function useDashboardData({ period, authStatus, propertyIds, customRange 
     return () => { cancelled = true; };
   }, [period, authStatus, propertyIds, customRange]);
 
-  return { kpis, monthlyPnL, exportMonthly, payoutBreakdown, granularity, transactions, loading, txLoading };
+  return { kpis, monthlyPnL, exportMonthly, exportMonthlyByBookings, payoutBreakdown, granularity, transactions, loading, txLoading };
 }

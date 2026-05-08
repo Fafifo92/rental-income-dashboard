@@ -139,7 +139,7 @@ export const computeBalances = async (): Promise<ServiceResult<BankAccountBalanc
   if (accounts.length === 0) return { data: [], error: null };
 
   // ── Single batch fetch of all data needed ───────────────────────────────────
-  const [paymentsRes, bookingsRes, adjRes, expensesRes] = await Promise.all([
+  const [paymentsRes, bookingsRes, adjRes, expensesRes, depositsRes] = await Promise.all([
     supabase
       .from('booking_payments')
       .select('bank_account_id, amount, booking_id'),
@@ -156,6 +156,9 @@ export const computeBalances = async (): Promise<ServiceResult<BankAccountBalanc
       .select('bank_account_id, amount')
       .not('bank_account_id', 'is', null)
       .eq('status', 'paid'),
+    supabase
+      .from('account_deposits')
+      .select('account_id, amount'),
   ]);
 
   // ── Pre-process into Maps keyed by account.id ────────────────────────────────
@@ -163,6 +166,7 @@ export const computeBalances = async (): Promise<ServiceResult<BankAccountBalanc
   const allBookings = bookingsRes.data ?? [];
   const allAdj      = adjRes.data ?? [];
   const allExpenses = expensesRes.data ?? [];
+  const allDeposits = depositsRes.data ?? [];
 
   const bookingsWithPayments = new Set(allPayments.map(p => p.booking_id as string));
 
@@ -204,10 +208,17 @@ export const computeBalances = async (): Promise<ServiceResult<BankAccountBalanc
     expOutflowByAcc.set(e.bank_account_id, (expOutflowByAcc.get(e.bank_account_id) ?? 0) + Number(e.amount));
   }
 
+  // deposit inflows per account
+  type DepRow = { account_id: string; amount: number };
+  const depositInflowByAcc = new Map<string, number>();
+  for (const d of allDeposits as DepRow[]) {
+    depositInflowByAcc.set(d.account_id, (depositInflowByAcc.get(d.account_id) ?? 0) + Number(d.amount));
+  }
+
   // ── Assemble balances (pure JS, zero extra queries) ──────────────────────────
   const balances: BankAccountBalance[] = accounts.map(account => {
     const id = account.id;
-    const inflows  = (paymentInflowByAcc.get(id) ?? 0) + (legacyInflowByAcc.get(id) ?? 0) + (adjInflowByAcc.get(id) ?? 0);
+    const inflows  = (paymentInflowByAcc.get(id) ?? 0) + (legacyInflowByAcc.get(id) ?? 0) + (adjInflowByAcc.get(id) ?? 0) + (depositInflowByAcc.get(id) ?? 0);
     const outflows = (expOutflowByAcc.get(id) ?? 0)    + (legacyFineByAcc.get(id) ?? 0);
     return {
       account,
@@ -327,6 +338,7 @@ export const validateAccountSpend = async (
 // ---------- Bloque 18 — Historial de transacciones por cuenta ----------
 export type BankTxKind =
   | 'opening'             // saldo de apertura
+  | 'deposit'             // depósito manual (fuera de contabilidad de rentas)
   | 'booking_payout'      // ingreso por payout de reserva
   | 'cancellation_fine'   // egreso por multa de cancelación (net_payout negativo)
   | 'damage_recovery'     // ingreso por recuperación de daño (booking_adjustment)
@@ -513,6 +525,26 @@ export const getBankAccountTransactions = async (
     });
   }
 
+  // Deposits (manual top-ups outside rental accounting)
+  const { data: deps } = await supabase
+    .from('account_deposits')
+    .select('id, amount, deposit_date, notes')
+    .eq('account_id', accountId);
+  for (const d of (deps ?? []) as Array<{ id: string; amount: number; deposit_date: string; notes: string | null }>) {
+    txs.push({
+      id: `dep-${d.id}`,
+      date: d.deposit_date,
+      kind: 'deposit',
+      amount: Number(d.amount),
+      description: d.notes ?? 'Depósito manual',
+      reference_id: d.id,
+      reference_type: null,
+      booking_code: null,
+      property_name: null,
+      category: null,
+    });
+  }
+
   // Orden cronológico descendente, opening al final si misma fecha
   txs.sort((a, b) => {
     if (a.date !== b.date) return b.date.localeCompare(a.date);
@@ -536,6 +568,7 @@ const labelForAdjKind = (kind: string): string => {
 
 export const BANK_TX_KIND_META: Record<BankTxKind, { label: string; tone: 'in' | 'out' | 'neutral' }> = {
   opening:           { label: 'Apertura',                tone: 'neutral' },
+  deposit:           { label: 'Depósito manual',         tone: 'in' },
   booking_payout:    { label: 'Payout reserva',           tone: 'in' },
   cancellation_fine: { label: 'Multa por cancelación',    tone: 'out' },
   damage_recovery:   { label: 'Recuperación por daño',    tone: 'in' },
@@ -543,4 +576,52 @@ export const BANK_TX_KIND_META: Record<BankTxKind, { label: string; tone: 'in' |
   extra_income:      { label: 'Ingreso extra',            tone: 'in' },
   extra_guest_fee:   { label: 'Huésped adicional',        tone: 'in' },
   expense:           { label: 'Gasto',                    tone: 'out' },
+};
+
+// ─── Depósitos manuales ───────────────────────────────────────────────────────
+
+export interface AccountDepositRow {
+  id: string;
+  owner_id: string;
+  account_id: string;
+  amount: number;
+  deposit_date: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export const createAccountDeposit = async (input: {
+  account_id: string;
+  amount: number;
+  deposit_date: string;
+  notes?: string | null;
+}): Promise<ServiceResult<AccountDepositRow>> => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: null, error: 'No autenticado' };
+  if (input.amount <= 0) return { data: null, error: 'El monto debe ser mayor a 0' };
+  const { data, error } = await supabase
+    .from('account_deposits')
+    .insert({ ...input, notes: input.notes ?? null, owner_id: user.id })
+    .select()
+    .single();
+  if (error) return { data: null, error: error.message };
+  return { data: data as AccountDepositRow, error: null };
+};
+
+export const listAccountDeposits = async (
+  accountId: string,
+): Promise<ServiceResult<AccountDepositRow[]>> => {
+  const { data, error } = await supabase
+    .from('account_deposits')
+    .select('*')
+    .eq('account_id', accountId)
+    .order('deposit_date', { ascending: false });
+  if (error) return { data: null, error: error.message };
+  return { data: (data ?? []) as AccountDepositRow[], error: null };
+};
+
+export const deleteAccountDeposit = async (id: string): Promise<ServiceResult<true>> => {
+  const { error } = await supabase.from('account_deposits').delete().eq('id', id);
+  if (error) return { data: null, error: error.message };
+  return { data: true, error: null };
 };
