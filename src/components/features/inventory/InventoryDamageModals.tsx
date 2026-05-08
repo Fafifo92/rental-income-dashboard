@@ -19,6 +19,7 @@ import { useBackdropClose, makeBackdropHandlers } from '@/lib/useBackdropClose';
 import { formatCurrency } from '@/lib/utils';
 import { todayISO } from '@/lib/dateUtils';
 import MoneyInput from '@/components/MoneyInput';
+import { AlertTriangle, DollarSign, CheckCircle2, TrendingUp, Info } from 'lucide-react';
 // ──────────────────────────────────────────────────────────────────────────
 // DamageReportModal
 // Reporta daño + (opcional) atribuir a reserva + (opcional) cobrar al huésped.
@@ -114,7 +115,9 @@ export function DamageReportModal({
         className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <div className="px-6 py-4 border-b border-slate-100">
-          <h3 className="text-lg font-bold text-slate-800">⚠ Reportar daño</h3>
+          <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-amber-500" /> Reportar daño
+          </h3>
           <p className="text-xs text-slate-500 mt-0.5">
             <strong>{item.name}</strong> · {propertyName}{item.location ? ` · ${item.location}` : ''}
           </p>
@@ -265,7 +268,7 @@ export function DamageReconciliationSection(): JSX.Element | null {
       <header className="flex items-start justify-between gap-3 mb-3">
         <div>
           <h2 className="text-lg font-bold text-amber-800 flex items-center gap-2">
-            ⚠️ Daños sin reconciliar ({open.length})
+            <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" /> Daños sin reconciliar ({open.length})
           </h2>
           <p className="text-xs text-amber-700/80 mt-0.5">
             Diferencias entre lo que cobraste al huésped/plataforma y lo que costó realmente reparar.
@@ -377,9 +380,9 @@ export function DamageReconciliationSection(): JSX.Element | null {
                       {(r.status === 'pending_recovery' || r.status === 'no_charge') && r.booking_id && r.expense_id ? (
                         <button
                           onClick={() => setRecovering(r)}
-                          className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+                          className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1"
                         >
-                          💰 Registrar recuperación
+                          <DollarSign className="w-3 h-3" /> Registrar recuperación
                         </button>
                       ) : (
                         <span className="text-[10px] text-slate-300">—</span>
@@ -391,11 +394,11 @@ export function DamageReconciliationSection(): JSX.Element | null {
             </table>
           </div>
           <div className="text-[11px] text-slate-500 mt-3 space-y-1">
-            <p>
-              💡 <strong>¿Cómo cierro una diferencia?</strong>
+            <p className="flex items-center gap-1">
+              <Info className="w-3.5 h-3.5 shrink-0" /> <strong>¿Cómo cierro una diferencia?</strong>
             </p>
             <ul className="list-disc pl-5 space-y-0.5">
-              <li><strong>Falta recuperar:</strong> usa "💰 Registrar recuperación" para indicar cuánto te dio la plataforma/huésped y a qué cuenta cayó.</li>
+              <li><strong>Falta recuperar:</strong> usa "Registrar recuperación" para indicar cuánto te dio la plataforma/huésped y a qué cuenta cayó.</li>
               <li><strong>Sobrante:</strong> recibiste más de lo que costó — la diferencia queda como ingreso adicional para el negocio.</li>
               <li><strong>Sin cobro:</strong> registra una recuperación cuando recibas la plata, o asume el costo como gasto del negocio.</li>
             </ul>
@@ -473,7 +476,9 @@ export function RecoverDamageModal({
         className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
-        <h3 className="text-lg font-bold text-slate-800">💰 Registrar recuperación de daño</h3>
+        <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+          <DollarSign className="w-5 h-5 text-emerald-600" /> Registrar recuperación de daño
+        </h3>
         <p className="text-xs text-slate-500 mt-1">
           {row.item_name} · {row.property_name ?? 'Sin propiedad'}
         </p>
@@ -539,9 +544,9 @@ export function RecoverDamageModal({
               profit < 0 ? 'bg-amber-50 text-amber-800 border border-amber-200' :
               'bg-slate-50 text-slate-700 border border-slate-200'
             }`}>
-              {profit > 0 && <>✨ <strong>Ganancia:</strong> +{formatCurrency(profit)} (recibiste más de lo que costó)</>}
-              {profit < 0 && <>⚠️ Aún faltan {formatCurrency(Math.abs(profit))} por recuperar.</>}
-              {profit === 0 && <>✅ Quedará balanceado exactamente.</>}
+              {profit > 0 && <span className="flex items-center gap-1"><TrendingUp className="w-3.5 h-3.5 shrink-0" /> <strong>Ganancia:</strong> +{formatCurrency(profit)} (recibiste más de lo que costó)</span>}
+              {profit < 0 && <span className="flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Aún faltan {formatCurrency(Math.abs(profit))} por recuperar.</span>}
+              {profit === 0 && <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> Quedará balanceado exactamente.</span>}
             </div>
           )}
 

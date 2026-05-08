@@ -1,5 +1,6 @@
 'use client';
 import { useMemo, useState } from 'react';
+import { Wrench, Trash2, RotateCcw } from 'lucide-react';
 import type {
   InventoryItemRow,
   MaintenanceScheduleRow,
@@ -62,7 +63,7 @@ export function MaintenanceHistoryView({
   if (schedules.length === 0) {
     return (
       <div className="text-center py-16 text-slate-400">
-        <div className="text-4xl mb-3">🔧</div>
+        <Wrench className="w-10 h-10 mx-auto mb-3 text-slate-300" />
         <p className="font-medium text-slate-600">Sin historial de mantenimiento</p>
         <p className="text-sm mt-1">Los mantenimientos agendados y realizados apareceran aqui.</p>
       </div>
@@ -170,18 +171,18 @@ export function MaintenanceHistoryView({
                               type="button"
                               title="Quitar marca de gasto registrado"
                               onClick={() => onResetExpense(s.id)}
-                              className="text-[10px] font-semibold text-blue-600 hover:bg-blue-50 px-2 py-0.5 rounded border border-blue-200"
+                              className="text-[10px] font-semibold text-blue-600 hover:bg-blue-50 px-2 py-0.5 rounded border border-blue-200 flex items-center gap-1"
                             >
-                              ↩ Quitar gasto
+                              <RotateCcw className="w-3 h-3" /> Quitar gasto
                             </button>
                           )}
                           <button
                             type="button"
                             title="Eliminar registro"
                             onClick={() => onDeleteSchedule(s.id)}
-                            className="text-[10px] font-semibold text-red-600 hover:bg-red-50 px-1.5 py-0.5 rounded border border-red-200"
+                            className="text-[10px] font-semibold text-red-600 hover:bg-red-50 px-1.5 py-0.5 rounded border border-red-200 flex items-center"
                           >
-                            🗑
+                            <Trash2 className="w-3 h-3" />
                           </button>
                         </div>
                       </td>
