@@ -38,14 +38,43 @@ interface Props {
   handlers: ExpenseFormHandlers;
   properties: PropertyRow[];
   bankAccounts: BankAccountRow[];
+  vendorSuggestions?: string[];
   saveError: string;
+  /** When set, renders the appropriate specialized edit form for this expense. */
+  editingExpense?: Expense | null;
+  onEditSave?: (data: Omit<Expense, 'id' | 'owner_id'>) => Promise<boolean>;
+  onEditClose?: () => void;
 }
+
+const PROPERTY_SUBS = new Set(['utilities', 'administration', 'maintenance', 'stock']);
+/** Legacy category strings used before subcategory was introduced. */
+const PROPERTY_CATS = new Set([
+  'servicios públicos', 'administración', 'mantenimiento', 'stock / inventario', 'stock',
+  'servicios publicos', 'insumos', 'otros gastos',
+]);
 
 /**
  * Pila de modales de creación de gastos: chooser + 5 formularios dedicados.
+ * También gestiona la edición de gastos especializados mediante `editingExpense`.
  * Stateless — recibe flags y handlers; no toca contexto de gasto en edición.
  */
-export default function ExpensesFormsModals({ flags, handlers, properties, bankAccounts, saveError }: Props) {
+export default function ExpensesFormsModals({
+  flags, handlers, properties, bankAccounts, vendorSuggestions = [], saveError,
+  editingExpense = null, onEditSave, onEditClose,
+}: Props) {
+  const editSub = editingExpense?.subcategory ?? '';
+  const editCat = (editingExpense?.category ?? '').toLowerCase();
+
+  const isCleaningEdit = editSub === 'cleaning' || editCat.includes('aseo');
+  const isVendorEdit = !!editingExpense?.vendor_id && !isCleaningEdit;
+  // PropertyExpenseForm handles: known property subcategories, matching legacy categories, AND the fallback for everything else
+  const isPropertyEdit = !!editingExpense && !isCleaningEdit && !isVendorEdit;
+
+  const handleEditSave = async (data: Omit<Expense, 'id' | 'owner_id'>) => {
+    const ok = await onEditSave!(data);
+    if (ok) onEditClose!();
+  };
+
   return (
     <AnimatePresence>
       {flags.showChooser && (
@@ -64,6 +93,7 @@ export default function ExpensesFormsModals({ flags, handlers, properties, bankA
         <PropertyExpenseForm
           properties={properties}
           bankAccounts={bankAccounts}
+          vendorSuggestions={vendorSuggestions}
           error={saveError || undefined}
           onClose={handlers.closePropertyForm}
           onSave={async (data) => { const ok = await handlers.onSave(data); if (ok) handlers.closePropertyForm(); }}
@@ -102,6 +132,49 @@ export default function ExpensesFormsModals({ flags, handlers, properties, bankA
           error={saveError || undefined}
           onClose={handlers.closeInventoryMaintenanceForm}
           onSave={handlers.onSaveInventoryMaintenance}
+        />
+      )}
+
+      {/* Edit forms — routing based on subcategory/category/vendor_id */}
+
+      {editingExpense && isCleaningEdit && (
+        <CleaningSuppliesForm
+          key={editingExpense.id}
+          properties={properties}
+          bankAccounts={bankAccounts}
+          initial={editingExpense}
+          error={saveError || undefined}
+          onClose={onEditClose!}
+          onSave={handleEditSave}
+          onSaveShared={async () => {}}
+        />
+      )}
+
+      {editingExpense && isVendorEdit && (
+        <VendorExpenseForm
+          key={editingExpense.id}
+          properties={properties}
+          bankAccounts={bankAccounts}
+          initial={editingExpense}
+          error={saveError || undefined}
+          onClose={onEditClose!}
+          onSave={handleEditSave}
+        />
+      )}
+
+      {/* PropertyExpenseForm is the catch-all for all non-cleaning, non-vendor edits
+          (property subs, legacy category strings, booking-related, unclassified, etc.) */}
+      {editingExpense && isPropertyEdit && (
+        <PropertyExpenseForm
+          key={editingExpense.id}
+          properties={properties}
+          bankAccounts={bankAccounts}
+          vendorSuggestions={vendorSuggestions}
+          initial={editingExpense}
+          error={saveError || undefined}
+          onClose={onEditClose!}
+          onSave={handleEditSave}
+          onSaveShared={async () => {}}
         />
       )}
     </AnimatePresence>

@@ -15,7 +15,7 @@
  *
  * Categoría persistida: 'Insumos de aseo'  ·  subcategory: 'cleaning'
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Expense } from '@/types';
 import type { PropertyRow, BankAccountRow } from '@/types/database';
 import { listVendors, type Vendor } from '@/services/vendors';
@@ -30,6 +30,8 @@ import { todayISO } from '@/lib/dateUtils';
 interface Props {
   properties: PropertyRow[];
   bankAccounts: BankAccountRow[];
+  /** Expense being edited; when set, form runs in edit mode. */
+  initial?: Expense | null;
   onClose: () => void;
   onSave: (expense: Omit<Expense, 'id' | 'owner_id'>) => Promise<boolean | void> | void;
   onSaveShared: (rows: Omit<Expense, 'id' | 'owner_id'>[]) => Promise<boolean | void> | void;
@@ -39,33 +41,43 @@ interface Props {
 type WhoBought = 'me' | 'cleaner';
 
 export default function CleaningSuppliesForm({
-  properties, bankAccounts, onClose, onSave, onSaveShared, error,
+  properties, bankAccounts, initial = null, onClose, onSave, onSaveShared, error,
 }: Props) {
+  const isEditMode = !!initial;
   const [cleaners, setCleaners] = useState<Vendor[]>([]);
-  const [who, setWho] = useState<WhoBought>('me');
-  const [cleanerId, setCleanerId] = useState<string | null>(null);
+  const [who, setWho] = useState<WhoBought>(initial?.vendor_id ? 'cleaner' : 'me');
+  const [cleanerId, setCleanerId] = useState<string | null>(initial?.vendor_id ?? null);
 
   const [shared, setShared] = useState(false);
-  const [propertyId, setPropertyId] = useState<string | null>(properties.length === 1 ? properties[0].id : null);
+  const [propertyId, setPropertyId] = useState<string | null>(
+    initial?.property_id ?? (properties.length === 1 ? properties[0].id : null),
+  );
   const [sharedIds, setSharedIds] = useState<string[]>([]);
   const [splitMode, setSplitMode] = useState<'equal' | 'manual'>('equal');
   const [manual, setManual] = useState<Record<string, number | null>>({});
 
-  const [amount, setAmount] = useState<number | null>(null);
-  const [date, setDate] = useState(todayISO());
-  const [status, setStatus] = useState<ExpenseStatus>('paid');
-  const [bankId, setBankId] = useState<string | null>(null);
-  const [desc, setDesc] = useState('');
+  const [amount, setAmount] = useState<number | null>(initial ? Number(initial.amount) : null);
+  const [date, setDate] = useState(initial?.date ?? todayISO());
+  const [status, setStatus] = useState<ExpenseStatus>(initial?.status ?? 'paid');
+  const [bankId, setBankId] = useState<string | null>(initial?.bank_account_id ?? null);
+  const [desc, setDesc] = useState(initial?.description ?? '');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    const currentVendorId = initial?.vendor_id ?? null;
     listVendors('cleaner').then(res => {
-      if (!res.error) setCleaners((res.data ?? []).filter(c => c.active));
+      if (!res.error) {
+        // In edit mode include the current cleaner even if inactive
+        setCleaners((res.data ?? []).filter(c => c.active || c.id === currentVendorId));
+      }
     });
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Don't reset status on initial render — only when user explicitly changes who.
+  const isFirstWhoRender = useRef(true);
   useEffect(() => {
+    if (isFirstWhoRender.current) { isFirstWhoRender.current = false; return; }
     if (who === 'cleaner') setStatus('pending');
     else setStatus('paid');
   }, [who]);
@@ -150,7 +162,7 @@ export default function CleaningSuppliesForm({
       onSubmit={submit}
       saving={saving}
       error={error ?? null}
-      submitLabel={shared ? `Guardar en ${sharedIds.length || 0} propiedades` : 'Guardar gasto'}
+      submitLabel={isEditMode ? 'Guardar cambios' : (shared ? `Guardar en ${sharedIds.length || 0} propiedades` : 'Guardar gasto')}
     >
       {/* ¿Quién pagó? */}
       <div>
@@ -216,8 +228,8 @@ export default function CleaningSuppliesForm({
         </div>
       )}
 
-      {/* Propiedad simple o compartido */}
-      {!shared && (
+      {/* Propiedad simple o compartido (solo en creación) */}
+      {!isEditMode && !shared && (
         <PropertyPicker
           properties={properties}
           value={propertyId}
@@ -228,7 +240,17 @@ export default function CleaningSuppliesForm({
         />
       )}
 
-      {properties.length >= 2 && (
+      {/* En edición: mostrar propiedad como solo lectura */}
+      {isEditMode && (
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Propiedad</label>
+          <div className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-700">
+            {properties.find(p => p.id === propertyId)?.name ?? '—'}
+          </div>
+        </div>
+      )}
+
+      {!isEditMode && properties.length >= 2 && (
         <div className="border border-violet-100 bg-violet-50/40 rounded-lg p-3 space-y-2">
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <input

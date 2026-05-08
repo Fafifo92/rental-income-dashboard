@@ -21,7 +21,7 @@ import { addMoney, splitMoney } from '@/lib/money';
 import MoneyInput from '@/components/MoneyInput';
 import {
   FormShell, PropertyPicker, BankPicker, MoneyField, DateField,
-  StatusPicker, DescField, type ExpenseStatus,
+  StatusPicker, DescField, VendorAutocompleteField, type ExpenseStatus,
 } from './Shared';
 import { todayISO } from '@/lib/dateUtils';
 
@@ -44,11 +44,39 @@ const DETAIL_OPTIONS: Record<SubKind, string[]> = {
 interface Props {
   properties: PropertyRow[];
   bankAccounts: BankAccountRow[];
+  vendorSuggestions?: string[];
   defaultSubcategory?: SubKind;
+  /** Expense being edited; when set, form runs in edit mode (no shared split). */
+  initial?: Expense | null;
   onClose: () => void;
   onSave: (expense: Omit<Expense, 'id' | 'owner_id'>) => Promise<boolean | void> | void;
   onSaveShared: (rows: Omit<Expense, 'id' | 'owner_id'>[]) => Promise<boolean | void> | void;
   error?: string | null;
+}
+
+/** Parse the structured description back into its components. */
+function parsePropDesc(raw: string | null) {
+  let s = (raw ?? '').trim();
+  let detail = '';
+  let periodStart = '';
+  let periodEnd = '';
+
+  const detailMatch = s.match(/^\[([^\]]+)\]/);
+  if (detailMatch && !detailMatch[1].startsWith('Período:')) {
+    detail = detailMatch[1];
+    s = s.slice(detailMatch[0].length).trimStart();
+  }
+  const twoDateMatch = s.match(/^\[Período:\s*([\d-]+)\s*→\s*([\d-]+)\]/);
+  if (twoDateMatch) {
+    periodStart = twoDateMatch[1]; periodEnd = twoDateMatch[2];
+    s = s.slice(twoDateMatch[0].length).trimStart();
+  } else {
+    const fromMatch = s.match(/^\[Período: desde ([\d-]+)\]/);
+    if (fromMatch) { periodStart = fromMatch[1]; s = s.slice(fromMatch[0].length).trimStart(); }
+    const toMatch = s.match(/^\[Período: hasta ([\d-]+)\]/);
+    if (toMatch) { periodEnd = toMatch[1]; s = s.slice(toMatch[0].length).trimStart(); }
+  }
+  return { detail, periodStart, periodEnd, rest: s };
 }
 
 const composePeriodPrefix = (start: string | null, end: string | null) => {
@@ -59,32 +87,41 @@ const composePeriodPrefix = (start: string | null, end: string | null) => {
 };
 
 export default function PropertyExpenseForm({
-  properties, bankAccounts, defaultSubcategory = 'utilities', onClose, onSave, onSaveShared, error,
+  properties, bankAccounts, vendorSuggestions = [], defaultSubcategory = 'utilities',
+  initial = null, onClose, onSave, onSaveShared, error,
 }: Props) {
-  const [sub, setSub] = useState<SubKind>(defaultSubcategory);
-  const [detail, setDetail] = useState<string>('');
+  const isEditMode = !!initial;
+  const _ip = parsePropDesc(initial?.description ?? null);
 
-  // Single vs compartido entre varias propiedades
+  const today = new Date();
+  const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+  const lastOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+
+  const [sub, setSub] = useState<SubKind>(
+    (initial?.subcategory as SubKind | undefined) ?? defaultSubcategory,
+  );
+  const [detail, setDetail] = useState<string>(_ip.detail);
+
+  // Single vs compartido entre varias propiedades (creación únicamente)
   const [shared, setShared] = useState(false);
-  const [propertyId, setPropertyId] = useState<string | null>(properties.length === 1 ? properties[0].id : null);
+  const [propertyId, setPropertyId] = useState<string | null>(
+    initial?.property_id ?? (properties.length === 1 ? properties[0].id : null),
+  );
   const [sharedIds, setSharedIds] = useState<string[]>([]);
   const [splitMode, setSplitMode] = useState<'equal' | 'manual'>('equal');
   const [manual, setManual] = useState<Record<string, number | null>>({});
 
-  const [amount, setAmount] = useState<number | null>(null);
-  const [date, setDate] = useState(todayISO());
-  const [type, setType] = useState<'fixed' | 'variable'>('variable');
-  const [status, setStatus] = useState<ExpenseStatus>('pending');
-  const [bankId, setBankId] = useState<string | null>(null);
-  const [vendor, setVendor] = useState('');
-  const [desc, setDesc] = useState('');
+  const [amount, setAmount] = useState<number | null>(initial ? Number(initial.amount) : null);
+  const [date, setDate] = useState(initial?.date ?? todayISO());
+  const [type, setType] = useState<'fixed' | 'variable'>(initial?.type ?? 'variable');
+  const [status, setStatus] = useState<ExpenseStatus>(initial?.status ?? 'pending');
+  const [bankId, setBankId] = useState<string | null>(initial?.bank_account_id ?? null);
+  const [vendor, setVendor] = useState(initial?.vendor ?? '');
+  const [desc, setDesc] = useState(_ip.rest);
 
   // Período cubierto (sólo relevante para 'fixed').
-  const today = new Date();
-  const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-  const lastOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
-  const [periodStart, setPeriodStart] = useState<string>(firstOfMonth);
-  const [periodEnd, setPeriodEnd] = useState<string>(lastOfMonth);
+  const [periodStart, setPeriodStart] = useState<string>(_ip.periodStart || firstOfMonth);
+  const [periodEnd, setPeriodEnd] = useState<string>(_ip.periodEnd || lastOfMonth);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -177,7 +214,7 @@ export default function PropertyExpenseForm({
       onSubmit={submit}
       saving={saving}
       error={error ?? null}
-      submitLabel={shared ? `Guardar gasto en ${sharedIds.length || 0} propiedades` : 'Guardar gasto'}
+      submitLabel={isEditMode ? 'Guardar cambios' : (shared ? `Guardar gasto en ${sharedIds.length || 0} propiedades` : 'Guardar gasto')}
     >
       {/* Selector de subcategoría como chips */}
       <div>
@@ -261,8 +298,8 @@ export default function PropertyExpenseForm({
         </div>
       )}
 
-      {/* Compartido entre varias propiedades */}
-      {properties.length >= 2 && (
+      {/* Compartido entre varias propiedades (solo en creación) */}
+      {!isEditMode && properties.length >= 2 && (
         <div className="border border-violet-100 bg-violet-50/40 rounded-lg p-3 space-y-2">
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <input
@@ -401,16 +438,11 @@ export default function PropertyExpenseForm({
         <DateField label="Fecha del gasto" value={date} onChange={setDate} required />
       </div>
 
-      <div>
-        <label className="block text-xs font-semibold text-slate-600 mb-1">
-          Proveedor / vendedor <span className="text-slate-400 font-normal">(opcional)</span>
-        </label>
-        <input
-          type="text" value={vendor} onChange={e => setVendor(e.target.value)}
-          placeholder="Nombre o razón social"
-          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-        />
-      </div>
+      <VendorAutocompleteField
+        value={vendor}
+        onChange={setVendor}
+        suggestions={vendorSuggestions}
+      />
 
       <StatusPicker value={status} onChange={setStatus} />
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ExpensesList from './ExpensesList';
 import DamageExpenseEditModal from './DamageExpenseEditModal';
@@ -7,7 +7,6 @@ import FilterBar from './FilterBar';
 import { type ExpenseTypeChoice } from './ExpenseTypeChooser';
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
 
-const ExpenseModal = lazy(() => import('./ExpenseModal'));
 const BookingDetailModal = lazy(() => import('./BookingDetailModal'));
 import RecurringPendingPanel from './RecurringPendingPanel';
 import SharedBillsPendingPanel from './SharedBillsPendingPanel';
@@ -50,8 +49,6 @@ export default function ExpensesClient() {
   const [showVendorForm, setShowVendorForm] = useState(false);
   const [showInventoryMaintenanceForm, setShowInventoryMaintenanceForm] = useState(false);
   const [invMaintPrefillSchedule, setInvMaintPrefillSchedule] = useState<MaintenanceScheduleRow | null>(null);
-  // Prefill que arrastra el chooser al ExpenseModal según el tipo elegido.
-  const [chooserPrefill, setChooserPrefill] = useState<Partial<Expense> | null>(null);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [viewing, setViewing] = useState<Expense | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
@@ -66,7 +63,6 @@ export default function ExpensesClient() {
   const [doneNeedingExpense, setDoneNeedingExpense] = useState<MaintenanceScheduleRow[]>([]);
   const [inventoryItemsMap, setInventoryItemsMap] = useState<Map<string, InventoryItemRow>>(new Map());
   const [linkedMaintScheduleId, setLinkedMaintScheduleId] = useState<string | null>(null);
-  const [maintPrefillInfo, setMaintPrefillInfo] = useState<{ itemName: string; scheduleTitle: string } | null>(null);
 
   const demoFallback = useCallback((f: ExpenseFilters): Expense[] => {
     let demo = DEMO_EXPENSES;
@@ -89,6 +85,17 @@ export default function ExpensesClient() {
   const { bankAccounts, listings } = useReferenceData({
     authStatus, withBankAccounts: true, withListings: true,
   });
+
+  const vendorSuggestions = useMemo(() => {
+    const seen = new Set<string>();
+    const PROP_SUBS = new Set(['utilities', 'administration', 'maintenance', 'stock']);
+    for (const e of expenses) {
+      if (e.vendor?.trim() && e.subcategory && PROP_SUBS.has(e.subcategory)) {
+        seen.add(e.vendor.trim());
+      }
+    }
+    return Array.from(seen).sort((a, b) => a.localeCompare(b, 'es'));
+  }, [expenses]);
 
   const loadMaintenancePanel = useCallback(async () => {
     const [schedRes, doneRes, itemsRes] = await Promise.all([
@@ -167,7 +174,6 @@ export default function ExpensesClient() {
     if (linkedMaintScheduleId) {
       await completeMaintenanceSchedule(linkedMaintScheduleId, { expenseRegistered: true });
       setLinkedMaintScheduleId(null);
-      setMaintPrefillInfo(null);
       loadMaintenancePanel();
     }
     setShowModal(false);
@@ -201,7 +207,10 @@ export default function ExpensesClient() {
   const handleEdit = (expense: Expense) => {
     setViewing(null);
     setEditing(expense);
-    setShowModal(true);
+    // Damage uses DamageExpenseEditModal (via showModal); all others go through ExpensesFormsModals
+    if ((expense.subcategory ?? '') === 'damage') {
+      setShowModal(true);
+    }
   };
 
   /**
@@ -440,12 +449,16 @@ export default function ExpensesClient() {
         }}
         properties={properties}
         bankAccounts={bankAccounts}
+        vendorSuggestions={vendorSuggestions}
         saveError={saveError}
+        editingExpense={editing && !showModal ? editing : null}
+        onEditSave={handleSave}
+        onEditClose={() => { setEditing(null); setSaveError(''); }}
       />
 
       <AnimatePresence>
 
-        {showModal && editing && (editing.subcategory ?? '').toLowerCase() === 'damage' ? (
+        {showModal && editing && (editing.subcategory ?? '').toLowerCase() === 'damage' && (
           <DamageExpenseEditModal
             expense={editing}
             properties={properties}
@@ -465,53 +478,6 @@ export default function ExpensesClient() {
             }}
             onDiscard={editing.adjustment_id ? () => handleDiscardWithAdjustment(editing) : undefined}
           />
-        ) : showModal && (
-          <Suspense fallback={null}>
-            <ExpenseModal
-            properties={properties}
-            bankAccounts={bankAccounts}
-            initial={editing ? {
-              category: editing.category,
-              type: editing.type,
-              amount: editing.amount,
-              date: editing.date,
-              description: editing.description,
-              status: editing.status,
-              property_id: editing.property_id,
-              bank_account_id: editing.bank_account_id ?? null,
-              vendor: editing.vendor ?? null,
-              person_in_charge: editing.person_in_charge ?? null,
-              booking_id: editing.booking_id ?? null,
-              adjustment_id: editing.adjustment_id ?? null,
-            } : null}
-            prefill={!editing ? chooserPrefill : null}
-            onClose={() => {
-              setShowModal(false);
-              setEditing(null);
-              setChooserPrefill(null);
-              setSaveError('');
-              setLinkedMaintScheduleId(null);
-              setMaintPrefillInfo(null);
-            }}
-            onSave={handleSave}
-            onSaveShared={handleSaveShared}
-            onSaveGroup={editing?.expense_group_id ? async (patch) => {
-              if (!editing.expense_group_id) return;
-              const res = await updateExpenseGroup(editing.expense_group_id, patch);
-              if (res.error || !res.data) { setSaveError(res.error ?? 'Error al actualizar el grupo'); toast.error(res.error ?? 'Error al actualizar el grupo'); return; }
-              const byId = new Map(res.data.map(r => [r.id, r]));
-              setExpenses(prev => prev.map(e => byId.get(e.id) ?? e));
-              toast.success('Grupo de gastos actualizado');
-            } : undefined}
-            editingGroupId={editing?.expense_group_id ?? null}
-            editingGroupSize={editing?.expense_group_id
-              ? expenses.filter(e => e.expense_group_id === editing.expense_group_id).length
-              : 0}
-            error={saveError}
-            onDiscardLinked={editing?.adjustment_id ? () => handleDiscardWithAdjustment(editing) : undefined}
-            maintenancePrefillInfo={!editing ? maintPrefillInfo : null}
-          />
-          </Suspense>
         )}
 
         {viewing && (

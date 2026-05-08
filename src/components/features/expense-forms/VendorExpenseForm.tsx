@@ -24,6 +24,8 @@ import { todayISO } from '@/lib/dateUtils';
 interface Props {
   properties: PropertyRow[];
   bankAccounts: BankAccountRow[];
+  /** Expense being edited; when set, form runs in edit mode (single property, no split). */
+  initial?: Expense | null;
   onClose: () => void;
   onSave: (expense: Omit<Expense, 'id' | 'owner_id'>) => Promise<void> | void;
   onSaveMultiple?: (expenses: Omit<Expense, 'id' | 'owner_id'>[]) => Promise<void> | void;
@@ -51,20 +53,22 @@ const KIND_TO_CATEGORY: Record<Exclude<VendorKind, 'cleaner'>, string> = {
 };
 
 export default function VendorExpenseForm({
-  properties, bankAccounts, onClose, onSave, onSaveMultiple, error,
+  properties, bankAccounts, initial = null, onClose, onSave, onSaveMultiple, error,
 }: Props) {
+  const isEditMode = !!initial;
   const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [vendorId, setVendorId] = useState<string | null>(null);
+  const [vendorId, setVendorId] = useState<string | null>(initial?.vendor_id ?? null);
   const [selectedPropertyIds, setSelectedPropertyIds] = useState<string[]>(
-    properties.length === 1 ? [properties[0].id] : []
+    initial?.property_id ? [initial.property_id]
+      : (properties.length === 1 ? [properties[0].id] : [])
   );
   const [splitMode, setSplitMode] = useState<'equal' | 'manual'>('equal');
   const [manualAmounts, setManualAmounts] = useState<Record<string, string>>({});
-  const [amount, setAmount] = useState<number | null>(null);
-  const [date, setDate] = useState(todayISO());
-  const [status, setStatus] = useState<ExpenseStatus>('pending');
-  const [bankId, setBankId] = useState<string | null>(null);
-  const [desc, setDesc] = useState('');
+  const [amount, setAmount] = useState<number | null>(initial ? Number(initial.amount) : null);
+  const [date, setDate] = useState(initial?.date ?? todayISO());
+  const [status, setStatus] = useState<ExpenseStatus>(initial?.status ?? 'pending');
+  const [bankId, setBankId] = useState<string | null>(initial?.bank_account_id ?? null);
+  const [desc, setDesc] = useState(initial?.description ?? '');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [groups, setGroups] = useState<PropertyGroupRow[]>([]);
@@ -72,22 +76,26 @@ export default function VendorExpenseForm({
   const [tagAssigns, setTagAssigns] = useState<PropertyTagAssignmentRow[]>([]);
 
   useEffect(() => {
+    const currentVendorId = initial?.vendor_id ?? null;
     listVendors().then(res => {
-      if (!res.error) setVendors((res.data ?? []).filter(v => v.active && v.kind !== 'cleaner'));
+      if (!res.error) {
+        // In edit mode include the current vendor even if inactive
+        setVendors((res.data ?? []).filter(v => v.kind !== 'cleaner' && (v.active || v.id === currentVendorId)));
+      }
     });
     listPropertyGroups().then(r => { if (r.data) setGroups(r.data); });
     listPropertyTags().then(r => { if (r.data) setTags(r.data); });
     listAllTagAssignments().then(r => { if (r.data) setTagAssigns(r.data); });
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedVendor = useMemo(
     () => vendors.find(v => v.id === vendorId) ?? null,
     [vendors, vendorId],
   );
 
-  // Sugerir monto por defecto del vendor cuando se elige uno fijo.
+  // Sugerir monto por defecto del vendor cuando se elige uno fijo (solo en creación).
   useEffect(() => {
-    if (!selectedVendor) return;
+    if (isEditMode || !selectedVendor) return;
     if (selectedVendor.default_amount && amount === null) {
       setAmount(selectedVendor.default_amount);
     }
@@ -168,7 +176,7 @@ export default function VendorExpenseForm({
       onSubmit={submit}
       saving={saving}
       error={error ?? null}
-      submitLabel="Guardar pago"
+      submitLabel={isEditMode ? 'Guardar cambios' : 'Guardar pago'}
     >
       <div>
         <div className="flex items-center justify-between mb-1">
@@ -214,6 +222,14 @@ export default function VendorExpenseForm({
         )}
       </div>
 
+      {isEditMode ? (
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Propiedad</label>
+          <div className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-700">
+            {properties.find(p => p.id === selectedPropertyIds[0])?.name ?? '—'}
+          </div>
+        </div>
+      ) : (
       <div>
         <label className="block text-xs font-semibold text-slate-600 mb-1">
           Propiedad(es) * {selectedPropertyIds.length > 1 && <span className="text-violet-600 font-normal">(factura compartida)</span>}
@@ -267,6 +283,7 @@ export default function VendorExpenseForm({
           </div>
         )}
       </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <MoneyField label="Monto" value={amount} onChange={setAmount} required error={errors.amount} />

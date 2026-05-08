@@ -2,6 +2,7 @@
 /**
  * Campos compartidos entre los formularios dedicados de gasto.
  */
+import { useRef, useState } from 'react';
 import type { PropertyRow, BankAccountRow, PropertyGroupRow } from '@/types/database';
 import MoneyInput from '@/components/MoneyInput';
 
@@ -80,7 +81,11 @@ export function BankPicker({
         className={`w-full px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none ${error ? 'border-red-400' : 'border-slate-200'}`}
       >
         <option value="">— No especificada —</option>
-        {banks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        {banks.map(b => (
+          <option key={b.id} value={b.id}>
+            {b.name}{b.bank ? ` — ${b.bank}` : ''}
+          </option>
+        ))}
       </select>
       {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
     </div>
@@ -186,6 +191,56 @@ export function DescField({
         placeholder={placeholder}
         className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
       />
+    </div>
+  );
+}
+
+export function VendorAutocompleteField({
+  value,
+  onChange,
+  suggestions = [],
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  suggestions?: string[];
+}) {
+  const [open, setOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const filtered = suggestions.filter(s =>
+    s.toLowerCase().includes(value.trim().toLowerCase()),
+  );
+
+  return (
+    <div className="relative">
+      <label className="block text-xs font-semibold text-slate-600 mb-1">
+        Proveedor / vendedor <span className="text-slate-400 font-normal">(opcional)</span>
+      </label>
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        onChange={e => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="Nombre o razón social"
+        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+      />
+      {open && filtered.length > 0 && (
+        <ul className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-44 overflow-y-auto">
+          {filtered.map(s => (
+            <li key={s}>
+              <button
+                type="button"
+                onMouseDown={() => { onChange(s); setOpen(false); }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 hover:text-blue-700"
+              >
+                {s}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
