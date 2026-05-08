@@ -51,6 +51,7 @@ export function exportKpisToCsv(kpis: FinancialKPIs, period: string) {
 }
 
 export function exportMonthlyToCsv(data: MonthlyPnL[], modeLabel?: string) {
+  const modeSlug = modeLabel?.includes('reservas') ? 'por-reservas' : 'por-dias';
   const rows = [
     ...(modeLabel ? [toCsvRow(['Modo de atribución', modeLabel])] : []),
     toCsvRow(['Mes', 'Ingresos', 'Gastos', 'Utilidad Neta', 'Noches', 'Ocupación %']),
@@ -58,7 +59,7 @@ export function exportMonthlyToCsv(data: MonthlyPnL[], modeLabel?: string) {
       toCsvRow([d.month, d.revenue, d.expenses, d.netProfit, d.nights, d.occupancy])
     ),
   ];
-  downloadUtf8Csv(rows.join('\n'), `str-pnl-mensual-${today()}.csv`);
+  downloadUtf8Csv(rows.join('\n'), `str-pnl-mensual-${modeSlug}-${today()}.csv`);
 }
 
 // ─── Excel Export (SpreadsheetML XML — no external deps, zero vulnerabilities) ─
@@ -129,7 +130,8 @@ export function exportToExcel(kpis: FinancialKPIs, monthly: MonthlyPnL[], period
     { name: 'P&L Mensual', rows: monthRows },
   ]);
 
-  downloadFile(xml, `str-reporte-${today()}.xls`, 'application/vnd.ms-excel;charset=utf-8');
+  const modeSlug = modeLabel?.includes('reservas') ? 'por-reservas' : 'por-dias';
+  downloadFile(xml, `str-reporte-${modeSlug}-${today()}.xls`, 'application/vnd.ms-excel;charset=utf-8');
 }
 
 // ─── Utility ──────────────────────────────────────────────────────────────────

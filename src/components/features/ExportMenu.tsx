@@ -199,7 +199,10 @@ export default function ExportMenu({ kpis, monthly, monthlyByBookings, period, c
               className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6"
             >
               <h3 className="text-lg font-bold text-slate-800 mb-1">¿Cómo atribuir los ingresos?</h3>
-              <p className="text-xs text-slate-500 mb-4">Solo afecta la exportación — el dashboard no cambia.</p>
+              <p className="text-xs text-slate-500 mb-1">Solo afecta la exportación — el dashboard no cambia.</p>
+              <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2 mb-4">
+                💡 La diferencia se nota en reservas que <strong>cruzan el límite del mes</strong> (ej: check-in 28 mayo, check-out 2 junio). Para reservas dentro del mismo mes, ambos modos dan el mismo resultado.
+              </p>
               <div className="space-y-3">
                 {MODE_OPTIONS.map(m => (
                   <button
