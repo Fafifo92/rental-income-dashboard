@@ -12,9 +12,10 @@ interface ColumnHandlers {
   onEdit: (b: DisplayBooking) => void;
   onPayout: (b: DisplayBooking) => void;
   onDelete: (b: DisplayBooking) => void;
+  pendingCleaningIds?: Set<string>;
 }
 
-export function useBookingsColumns({ onView, onEdit, onPayout, onDelete }: ColumnHandlers) {
+export function useBookingsColumns({ onView, onEdit, onPayout, onDelete, pendingCleaningIds }: ColumnHandlers) {
   return useMemo<ColumnDef<DisplayBooking, any>[]>(() => [
     helper.accessor('status', {
       header: 'Estado',
@@ -42,12 +43,20 @@ export function useBookingsColumns({ onView, onEdit, onPayout, onDelete }: Colum
       header: 'Huésped',
       cell: info => {
         const b = info.row.original;
+        const hasPendingCleaning = pendingCleaningIds?.has(b.id) ?? false;
         return (
           <div className="flex flex-col min-w-0 max-w-[180px] sm:max-w-[220px]">
             <span className="font-medium text-slate-800 truncate" title={b.guest_name}>{b.guest_name}</span>
-            <span className="font-mono text-[10px] text-slate-400 truncate">
-              {b.confirmation_code}{(b.property_name ?? b.listing_name) ? ` · ${b.property_name ?? b.listing_name}` : ''}
-            </span>
+            <div className="flex items-center gap-1 flex-wrap mt-0.5">
+              <span className="font-mono text-[10px] text-slate-400 truncate">
+                {b.confirmation_code}{(b.property_name ?? b.listing_name) ? ` · ${b.property_name ?? b.listing_name}` : ''}
+              </span>
+              {hasPendingCleaning && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-cyan-100 text-cyan-700 whitespace-nowrap shrink-0">
+                  🧹 Aseo pendiente
+                </span>
+              )}
+            </div>
           </div>
         );
       },
@@ -173,5 +182,5 @@ export function useBookingsColumns({ onView, onEdit, onPayout, onDelete }: Colum
         );
       },
     }),
-  ], [onView, onEdit, onPayout, onDelete]);
+  ], [onView, onEdit, onPayout, onDelete, pendingCleaningIds]);
 }

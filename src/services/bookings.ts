@@ -263,7 +263,7 @@ export const getBookingKPIs = async (): Promise<ServiceResult<BookingKPIs>> => {
 
 // ─── Booking alerts ──────────────────────────────────────────────────────────
 
-export type BookingAlertIssue = 'checkout' | 'inventory' | 'payout';
+export type BookingAlertIssue = 'checkout' | 'inventory' | 'payout' | 'cleaning';
 
 export interface BookingAlert {
   id: string;
@@ -274,45 +274,124 @@ export interface BookingAlert {
 }
 
 /**
- * Devuelve reservas finalizadas (end_date <= hoy) con tareas operativas pendientes:
- * checkout no confirmado, inventario no revisado, o pago sin registrar.
+ * Devuelve reservas finalizadas (end_date <= hoy) con tareas operativas pendientes.
  *
- * Mira los últimos `daysBack` días para no acumular alertas históricas eternas.
+ * Issues checkout / inventory / payout → cualquier reserva dentro de la ventana `daysBack`.
+ *
+ * Issue "cleaning" → SOLO la última reserva completada por propiedad que no tenga
+ * ningún booking_cleaning con status 'done' o 'paid'.
+ * Máximo 1 alerta de aseo por propiedad, independientemente de cuántas reservas
+ * hayan ocurrido en el período.
  */
 export const listBookingAlerts = async (
   daysBack = 45,
 ): Promise<ServiceResult<BookingAlert[]>> => {
   const today = todayISO();
-  // Compute lower bound: today minus daysBack days using local-safe arithmetic
   const [ty, tm, td] = today.split('-').map(Number);
   const fromDate = new Date(ty, tm - 1, td - daysBack);
   const from = `${fromDate.getFullYear()}-${String(fromDate.getMonth() + 1).padStart(2, '0')}-${String(fromDate.getDate()).padStart(2, '0')}`;
 
-  const { data, error } = await supabase
+  // ── A. Bookings en la ventana (para checkout / inventory / payout) ──────────
+  const [windowRes, listingsRes] = await Promise.all([
+    supabase
+      .from('bookings')
+      .select('id, confirmation_code, guest_name, end_date, checkout_done, inventory_checked, payout_bank_account_id, status, listing_id')
+      .lte('end_date', today)
+      .gte('end_date', from)
+      .order('end_date', { ascending: false }),
+    supabase
+      .from('listings')
+      .select('id, property_id'),
+  ]);
+
+  if (windowRes.error) return { data: null, error: windowRes.error.message };
+
+  const windowRows = (windowRes.data ?? []).filter(b => !isCancelled(b));
+  const listingToProperty = new Map(
+    (listingsRes.data ?? []).map((l: { id: string; property_id: string }) => [l.id, l.property_id]),
+  );
+
+  // ── B. Última reserva completada por propiedad (para cleaning) ──────────────
+  // Busca en los últimos 2 años para cubrir propiedades con baja rotación.
+  const twoYearsAgo = `${ty - 2}-${String(tm).padStart(2, '0')}-${String(td).padStart(2, '0')}`;
+  const { data: allCompleted } = await supabase
     .from('bookings')
-    .select('id, confirmation_code, guest_name, end_date, checkout_done, inventory_checked, payout_bank_account_id, status')
+    .select('id, listing_id, end_date, status')
     .lte('end_date', today)
-    .gte('end_date', from)
-    .order('end_date', { ascending: false });
+    .gte('end_date', twoYearsAgo)
+    .order('end_date', { ascending: false })
+    .limit(2000);
 
-  if (error) return { data: null, error: error.message };
+  // Por propiedad: la primera que aparezca (ordenado DESC) = la más reciente
+  const lastBookingIdByProperty = new Map<string, string>();
+  for (const b of (allCompleted ?? [])) {
+    if (isCancelled(b)) continue;
+    const propId = listingToProperty.get(b.listing_id);
+    if (propId && !lastBookingIdByProperty.has(propId)) {
+      lastBookingIdByProperty.set(propId, b.id);
+    }
+  }
 
-  const alerts: BookingAlert[] = (data ?? [])
-    .filter(b => !isCancelled(b))
-    .map(b => ({
-      id: b.id,
-      confirmation_code: b.confirmation_code,
-      guest_name: b.guest_name,
-      end_date: b.end_date,
-      issues: [
-        ...(b.checkout_done ? [] : ['checkout' as const]),
-        ...(b.inventory_checked ? [] : ['inventory' as const]),
-        ...(b.payout_bank_account_id ? [] : ['payout' as const]),
-      ],
-    }))
-    .filter(a => a.issues.length > 0);
+  const lastBookingIds = new Set(lastBookingIdByProperty.values());
 
-  return { data: alerts, error: null };
+  // ── C. Qué "últimas reservas" ya tienen cleaning done/paid ──────────────────
+  let cleanedIds = new Set<string>();
+  if (lastBookingIds.size > 0) {
+    const { data: cleaningsData } = await supabase
+      .from('booking_cleanings')
+      .select('booking_id')
+      .in('booking_id', [...lastBookingIds])
+      .in('status', ['done', 'paid']);
+    cleanedIds = new Set((cleaningsData ?? []).map((c: { booking_id: string }) => c.booking_id));
+  }
+
+  // IDs de reservas con aseo pendiente (última de su propiedad, sin cleaning registrado)
+  const pendingCleaningIds = new Set(
+    [...lastBookingIds].filter(id => !cleanedIds.has(id)),
+  );
+
+  // ── D. Construir alertas ────────────────────────────────────────────────────
+  const alertMap = new Map<string, BookingAlert>();
+
+  // Procesar reservas en la ventana (checkout / inventory / payout + cleaning si aplica)
+  for (const b of windowRows) {
+    const issues: BookingAlertIssue[] = [
+      ...(b.checkout_done ? [] : ['checkout' as const]),
+      ...(b.inventory_checked ? [] : ['inventory' as const]),
+      ...(b.payout_bank_account_id ? [] : ['payout' as const]),
+      ...(pendingCleaningIds.has(b.id) ? ['cleaning' as const] : []),
+    ];
+    if (issues.length > 0) {
+      alertMap.set(b.id, {
+        id: b.id,
+        confirmation_code: b.confirmation_code,
+        guest_name: b.guest_name,
+        end_date: b.end_date,
+        issues,
+      });
+    }
+  }
+
+  // Si la última reserva con cleaning pendiente está FUERA de la ventana,
+  // igual la mostramos (solo como cleaning, sin los otros flags).
+  const outsideWindow = [...pendingCleaningIds].filter(id => !alertMap.has(id));
+  if (outsideWindow.length > 0) {
+    const { data: extraRows } = await supabase
+      .from('bookings')
+      .select('id, confirmation_code, guest_name, end_date')
+      .in('id', outsideWindow);
+    for (const b of (extraRows ?? [])) {
+      alertMap.set(b.id, {
+        id: b.id,
+        confirmation_code: b.confirmation_code,
+        guest_name: b.guest_name,
+        end_date: b.end_date,
+        issues: ['cleaning'],
+      });
+    }
+  }
+
+  return { data: [...alertMap.values()].sort((a, b) => b.end_date.localeCompare(a.end_date)), error: null };
 };
 
 // ─── Import conflict detection ────────────────────────────────────────────────

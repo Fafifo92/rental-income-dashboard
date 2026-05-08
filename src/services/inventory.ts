@@ -284,8 +284,7 @@ export interface ReportDamageInput {
   /** Nombre del item. Cuando `item_id=null` es el texto libre (ej. "Pared sala", "Estufa"). */
   item_name: string;
   property_id: string;
-  /** **Obligatorio**: todo daño debe estar atado a una reserva. */
-  booking_id: string;
+  booking_id: string | null;
   repair_cost: number;
   description: string | null;
   charge_to_guest: boolean;
@@ -311,7 +310,6 @@ export const reportItemDamage = async (
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
   if (input.repair_cost < 0) return { data: null, error: 'Costo de reparación inválido' };
-  if (!input.booking_id) return { data: null, error: 'El daño debe asociarse a una reserva.' };
   if (!input.item_id && !input.item_name?.trim()) {
     return { data: null, error: 'Especifica el item del inventario o describe qué se dañó (pared, estufa, etc.).' };
   }
@@ -319,23 +317,24 @@ export const reportItemDamage = async (
   const today = input.date ?? todayISO();
 
   // 0. Guard de idempotencia: ¿ya existe un expense de daño pendiente para
-  //    esta misma combinación (booking + item|sujeto)?
+  //    esta misma combinación (item|sujeto)?
   //    Evita duplicados cuando el usuario clickea dos veces o entra por dos vías.
   {
     const subjectKey = input.item_id ? `__item:${input.item_id}` : `__subject:${input.item_name.trim().toLowerCase()}`;
-    const { data: existing } = await supabase
+    let idempCheck = supabase
       .from('expenses')
       .select('id, description, status, adjustment_id')
-      .eq('booking_id', input.booking_id)
       .eq('subcategory', 'damage')
       .in('status', ['pending', 'partial']);
+    if (input.booking_id) idempCheck = idempCheck.eq('booking_id', input.booking_id);
+    const { data: existing } = await idempCheck;
     const dup = (existing ?? []).find(e =>
       typeof e.description === 'string' && e.description.includes(subjectKey),
     );
     if (dup) {
       return {
         data: null,
-        error: `Ya existe un gasto pendiente de daño para este ${input.item_id ? 'item' : 'sujeto'} en esta reserva. Edítalo en /expenses en lugar de crear uno nuevo.`,
+        error: `Ya existe un gasto pendiente de daño para este item. Edítalo en /expenses.`,
       };
     }
   }
@@ -344,7 +343,7 @@ export const reportItemDamage = async (
   //    por separado. `charge_amount` legacy sigue funcionando como suma única.
   let adjustmentId: string | null = null;
   const adjustments: { id: string; source: 'guest' | 'platform' | 'combined' }[] = [];
-  if (input.charge_to_guest) {
+  if (input.charge_to_guest && input.booking_id) {
     const fromGuest = Number(input.charge_from_guest ?? 0);
     const fromPlatform = Number(input.charge_from_platform ?? 0);
     const splitProvided = (input.charge_from_guest != null) || (input.charge_from_platform != null);

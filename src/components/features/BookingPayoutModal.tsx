@@ -87,8 +87,9 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
     const res = await listBookingPayments(booking.id);
     const data = res.data ?? [];
     setPayments(data);
-    // If payments already exist, default to parcial mode
-    if (data.length > 0) setPayType('parcial');
+    // Only switch to parcial if there are payments that are NOT a single total payment
+    const isTotalPayment = data.length === 1 && data[0].notes === 'Pago total';
+    if (data.length > 0 && !isTotalPayment) setPayType('parcial');
     setLoadingPay(false);
   }, [booking.id]);
 

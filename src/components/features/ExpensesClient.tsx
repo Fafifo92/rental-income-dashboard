@@ -22,6 +22,7 @@ import {
 import { deleteBookingAdjustment } from '@/services/bookingAdjustments';
 import { getUpcomingAndOverdueSchedules, getSchedulesDoneNeedingExpense, completeMaintenanceSchedule } from '@/services/maintenanceSchedules';
 import { listInventoryItems } from '@/services/inventory';
+import { listProperties } from '@/services/properties';
 import { getBooking } from '@/services/bookings';
 import type { Expense } from '@/types';
 import { type BookingRow, type ExpenseSection, type ExpenseSubcategory, type MaintenanceScheduleRow, type InventoryItemRow } from '@/types/database';
@@ -74,11 +75,26 @@ export default function ExpensesClient() {
     return null;
   });
 
+  // Deep-link: capture ?damage_expense=<id> at mount and clear from URL immediately
+  const [deepLinkDamageExpenseId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('damage_expense');
+    if (id) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('damage_expense');
+      window.history.replaceState({}, '', url.toString());
+      return id;
+    }
+    return null;
+  });
+
   // Maintenance due panel
   const [maintenanceSchedules, setMaintenanceSchedules] = useState<MaintenanceScheduleRow[]>([]);
   const [doneNeedingExpense, setDoneNeedingExpense] = useState<MaintenanceScheduleRow[]>([]);
   const [inventoryItemsMap, setInventoryItemsMap] = useState<Map<string, InventoryItemRow>>(new Map());
   const [linkedMaintScheduleId, setLinkedMaintScheduleId] = useState<string | null>(null);
+  const [unreportedDamageItems, setUnreportedDamageItems] = useState<Array<{ id: string; name: string; propertyName: string }>>([]);
 
   const demoFallback = useCallback((f: ExpenseFilters): Expense[] => {
     let demo = DEMO_EXPENSES;
@@ -129,6 +145,39 @@ export default function ExpensesClient() {
   useEffect(() => {
     if (authStatus === 'authed') loadMaintenancePanel();
   }, [authStatus, loadMaintenancePanel]);
+
+  // Deep-link: auto-open DamageExpenseEditModal when ?damage_expense=<id> is in URL
+  useEffect(() => {
+    if (!deepLinkDamageExpenseId || loading) return;
+    const expense = expenses.find(e => e.id === deepLinkDamageExpenseId);
+    if (expense) {
+      setEditing(expense);
+      setShowModal(true);
+    }
+  }, [deepLinkDamageExpenseId, loading, expenses]);
+
+  // Compute unreported damage items (damaged inventory with no linked pending expense)
+  useEffect(() => {
+    if (authStatus !== 'authed') return;
+    Promise.all([
+      listInventoryItems({ status: 'damaged' }),
+      listProperties(),
+    ]).then(([itemsRes, propsRes]) => {
+      const damagedItems = itemsRes.data ?? [];
+      const propNameMap = new Map((propsRes.data ?? []).map(p => [p.id, p.name]));
+      const linkedItemIds = new Set<string>();
+      for (const e of expenses) {
+        if ((e.subcategory ?? '') === 'damage' && e.status === 'pending' && e.description) {
+          const m = e.description.match(/__item:([a-zA-Z0-9-]+)/);
+          if (m) linkedItemIds.add(m[1]);
+        }
+      }
+      const unlinked = damagedItems
+        .filter(it => !linkedItemIds.has(it.id))
+        .map(it => ({ id: it.id, name: it.name, propertyName: propNameMap.get(it.property_id) ?? 'Propiedad' }));
+      setUnreportedDamageItems(unlinked);
+    });
+  }, [authStatus, expenses]);
 
   const handleViewBooking = useCallback(async (bookingId: string) => {
     const { data, error } = await getBooking(bookingId);
@@ -402,6 +451,7 @@ export default function ExpensesClient() {
           pendingExpenses={pendingExpenses}
           totalPending={totalPending}
           onPendingClick={handlePendingClick}
+          unreportedDamageItems={unreportedDamageItems}
         />
 
         <ExpensesTabsBar

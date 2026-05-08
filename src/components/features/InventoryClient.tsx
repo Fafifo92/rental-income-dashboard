@@ -39,6 +39,7 @@ import { ItemFormModal } from './inventory/ItemFormModal';
 import { QuickMovementModal, MovementsModal } from './inventory/InventoryMovementModals';
 import {
   DamageReportModal,
+  ItemRepairModal,
   DamageReconciliationSection,
 } from './inventory/InventoryDamageModals';
 import { MaintenanceHistoryView } from './inventory/MaintenanceHistoryView';
@@ -63,6 +64,7 @@ export default function InventoryClient(): JSX.Element {
   const [movementsTarget, setMovementsTarget] = useState<InventoryItemRow | null>(null);
   const [quickAction, setQuickAction] = useState<{ item: InventoryItemRow; type: InventoryMovementType } | null>(null);
   const [damageTarget, setDamageTarget] = useState<InventoryItemRow | null>(null);
+  const [repairTarget, setRepairTarget] = useState<InventoryItemRow | null>(null);
   const [showExport, setShowExport] = useState(false);
 
   // mantenimiento
@@ -74,12 +76,13 @@ export default function InventoryClient(): JSX.Element {
     schedule: MaintenanceScheduleRow | null;
   } | null>(null);
 
-  // Deep-link: capture ?schedule=<id> or ?item=<id> at mount and clear from URL immediately
-  const [deepLink] = useState<{ type: 'schedule' | 'item'; id: string } | null>(() => {
+  // Deep-link: capture ?schedule=<id>, ?item=<id>, or ?item_damage=<id> at mount and clear from URL immediately
+  const [deepLink] = useState<{ type: 'schedule' | 'item' | 'item_damage'; id: string } | null>(() => {
     if (typeof window === 'undefined') return null;
     const params = new URLSearchParams(window.location.search);
     const scheduleId = params.get('schedule');
     const itemId = params.get('item');
+    const itemDamageId = params.get('item_damage');
     const url = new URL(window.location.href);
     if (scheduleId) {
       url.searchParams.delete('schedule');
@@ -90,6 +93,11 @@ export default function InventoryClient(): JSX.Element {
       url.searchParams.delete('item');
       window.history.replaceState({}, '', url.toString());
       return { type: 'item', id: itemId };
+    }
+    if (itemDamageId) {
+      url.searchParams.delete('item_damage');
+      window.history.replaceState({}, '', url.toString());
+      return { type: 'item_damage', id: itemDamageId };
     }
     return null;
   });
@@ -121,7 +129,7 @@ export default function InventoryClient(): JSX.Element {
 
   useEffect(() => { load(); }, [load]);
 
-  // Deep-link: open maintenance schedule modal or item edit modal after data loads
+  // Deep-link: open maintenance schedule modal, item edit modal, or damage modal after data loads
   useEffect(() => {
     if (!deepLink || loading || deepLinkHandled.current) return;
     if (deepLink.type === 'schedule') {
@@ -138,6 +146,12 @@ export default function InventoryClient(): JSX.Element {
       if (item) {
         deepLinkHandled.current = true;
         setEditTarget(item);
+      }
+    } else if (deepLink.type === 'item_damage') {
+      const item = items.find(i => i.id === deepLink.id);
+      if (item) {
+        deepLinkHandled.current = true;
+        setRepairTarget(item);
       }
     }
   }, [deepLink, loading, items, schedules, allSchedules]);
@@ -510,6 +524,17 @@ export default function InventoryClient(): JSX.Element {
             propertyName={propMap.get(damageTarget.property_id)?.name ?? ''}
             onClose={() => setDamageTarget(null)}
             onSaved={async () => { setDamageTarget(null); await load(); }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {repairTarget && (
+          <ItemRepairModal
+            item={repairTarget}
+            propertyName={propMap.get(repairTarget.property_id)?.name ?? ''}
+            onClose={() => setRepairTarget(null)}
+            onSaved={async () => { setRepairTarget(null); await load(); }}
           />
         )}
       </AnimatePresence>

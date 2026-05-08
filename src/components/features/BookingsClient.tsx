@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   getDemoBookings, saveDemoBookings, insertBooking,
   updateBooking, deleteBooking, checkBookingOverlap,
-  generateDirectBookingCode, getBooking, type BookingFilters,
+  generateDirectBookingCode, getBooking, listBookingAlerts, type BookingFilters,
 } from '@/services/bookings';
 import { findOrCreateListing } from '@/services/listings';
 import { runAutoCheckins } from '@/services/creditPools';
@@ -52,6 +52,7 @@ export default function BookingsClient() {
   const [payoutTarget, setPayoutTarget] = useState<DisplayBooking | null>(null);
   const [detailTarget, setDetailTarget] = useState<DisplayBooking | null>(null);
   const [statusFilter, setStatusFilter] = useState<DerivedBookingStatus | 'all'>('all');
+  const [pendingCleaningIds, setPendingCleaningIds] = useState<Set<string>>(new Set());
 
   // Deep-link: capture ?booking=<id> at mount and clear from URL immediately
   const [deepLinkBookingId] = useState<string | null>(() => {
@@ -110,6 +111,19 @@ export default function BookingsClient() {
       }).catch(() => { /* silent */ });
     }
   }, [authStatus, reload]);
+
+  // Fetch booking IDs with pending cleaning to highlight them in the table
+  useEffect(() => {
+    if (authStatus !== 'authed') return;
+    listBookingAlerts(60).then(res => {
+      if (!res.error && res.data) {
+        const ids = new Set(
+          res.data.filter(a => a.issues.includes('cleaning')).map(a => a.id),
+        );
+        setPendingCleaningIds(ids);
+      }
+    }).catch(() => { /* silent */ });
+  }, [authStatus]);
 
   // Deep-link: open BookingDetailModal when ?booking=<id> was in the URL
   useEffect(() => {
@@ -441,6 +455,7 @@ export default function BookingsClient() {
     onEdit: handleEdit,
     onPayout: handlePayout,
     onDelete: handleDelete,
+    pendingCleaningIds,
   });
 
   // ── Derived values (must be before any early returns) ────────────────────

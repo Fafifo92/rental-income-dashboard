@@ -19,6 +19,7 @@ const ISSUE_LABEL: Record<string, string> = {
   checkout:  'Checkout por confirmar',
   inventory: 'Inventario por revisar',
   payout:    'Liquidación pendiente',
+  cleaning:  'Aseo pendiente',
 };
 
 const fmtDate = (iso: string): string => {
@@ -86,6 +87,7 @@ export default function NotificationsBell() {
   const count = pending.length;
   const overdueCount = pending.filter(p => !p.isCurrentMonth).length;
   const alertCount = bookingAlerts.length;
+  const cleaningCount = bookingAlerts.filter(a => a.issues.includes('cleaning')).length;
   const maintCount = maintAlerts.length;
   const eolCount = eolItems.length;
   const totalCount = count + alertCount + maintCount + eolCount;
@@ -132,6 +134,7 @@ export default function NotificationsBell() {
                       : [
                           count > 0 && `${count} recurrente${count > 1 ? 's' : ''}${overdueCount > 0 ? ` (${overdueCount} atrasado${overdueCount > 1 ? 's' : ''})` : ''}`,
                           alertCount > 0 && `${alertCount} reserva${alertCount > 1 ? 's' : ''} por completar`,
+                          cleaningCount > 0 && `${cleaningCount} aseo${cleaningCount > 1 ? 's' : ''} pendiente${cleaningCount > 1 ? 's' : ''}`,
                           maintCount > 0 && `${maintCount} mantenimiento${maintCount > 1 ? 's' : ''} pendiente${maintCount > 1 ? 's' : ''}`,
                           eolCount > 0 && `${eolCount} ítem${eolCount > 1 ? 's' : ''} con vida útil cumplida`,
                         ].filter(Boolean).join(' · ')}
@@ -203,7 +206,7 @@ export default function NotificationsBell() {
                                   </div>
                                   <div className="flex flex-wrap gap-1 mt-1">
                                     {a.issues.map(issue => (
-                                      <span key={issue} className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700">
+                                      <span key={issue} className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${issue === "cleaning" ? "bg-cyan-100 text-cyan-700" : "bg-rose-100 text-rose-700"}`}>
                                         {ISSUE_LABEL[issue]}
                                       </span>
                                     ))}

@@ -21,8 +21,9 @@ import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { useReferenceData } from '@/lib/hooks/useReferenceData';
 import { formatCurrency } from '@/lib/utils';
 import { listInventoryItems, getDamageReconciliations, computeInventoryKpis, STATUS_LABEL, type DamageReconciliation } from '@/services/inventory';
-import type { InventoryItemRow } from '@/types/database';
-import { getBooking, type BookingWithListingRow } from '@/services/bookings';
+import type { InventoryItemRow, PropertyRow } from '@/types/database';
+import { getBooking, type BookingWithListingRow, listBookingAlerts, type BookingAlert } from '@/services/bookings';
+import { listProperties } from '@/services/properties';
 
 // ─── Break-even Alert ─────────────────────────────────────────────────────────
 
@@ -222,6 +223,9 @@ export default function DashboardClient() {
 
         {/* Alerts */}
         {!loading && kpis && <AlertsPanel kpis={kpis} monthly={monthlyPnL} />}
+
+        {/* Aseos pendientes */}
+        {!loading && <PendingCleaningsWidget />}
 
         {/* Bloque 16 — Items con problemas */}
         {!loading && <InventoryProblemsWidget />}
@@ -452,18 +456,128 @@ export default function DashboardClient() {
   );
 }
 
-// ---------- Bloque 16 — Widget "Items con problemas" ----------
-function InventoryProblemsWidget(): JSX.Element | null {
-  const [items, setItems] = useState<InventoryItemRow[]>([]);
-  const [recon, setRecon] = useState<DamageReconciliation[]>([]);
+// ---------- Widget "Aseos pendientes" ----------
+function PendingCleaningsWidget(): JSX.Element | null {
+  const [alerts, setAlerts] = useState<BookingAlert[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
-    Promise.all([listInventoryItems({}), getDamageReconciliations()]).then(([i, r]) => {
+    listBookingAlerts(60).then(res => {
+      if (!mounted) return;
+      if (!res.error) {
+        setAlerts((res.data ?? []).filter(a => a.issues.includes('cleaning')));
+      }
+      setLoading(false);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  if (loading || alerts.length === 0) return null;
+
+  const fmt = (iso: string) => {
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}/${y.slice(2)}`;
+  };
+
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white rounded-2xl border border-cyan-200 p-5 sm:p-6"
+    >
+      <header className="flex items-start justify-between gap-3 mb-4">
+        <div>
+          <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+            🧹 Aseos pendientes
+            <span className="text-sm font-semibold px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700">
+              {alerts.length}
+            </span>
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Reservas finalizadas sin aseo registrado como hecho o pagado.
+          </p>
+        </div>
+        <a href="/bookings" className="text-xs text-blue-600 hover:underline whitespace-nowrap">
+          Ver reservas →
+        </a>
+      </header>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-[10px] uppercase text-slate-500 bg-slate-50">
+            <tr>
+              <th className="text-left py-1.5 px-2">Huésped</th>
+              <th className="text-left py-1.5 px-2">Checkout</th>
+              <th className="text-left py-1.5 px-2">Otros pendientes</th>
+              <th className="text-left py-1.5 px-2">Acción</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {alerts.slice(0, 10).map(a => {
+              const otherIssues = a.issues.filter(i => i !== 'cleaning');
+              return (
+                <tr key={a.id}>
+                  <td className="py-1.5 px-2 font-medium text-slate-800">
+                    {a.guest_name ?? a.confirmation_code}
+                  </td>
+                  <td className="py-1.5 px-2 text-slate-500 whitespace-nowrap">{fmt(a.end_date)}</td>
+                  <td className="py-1.5 px-2">
+                    {otherIssues.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {otherIssues.map(issue => {
+                          const labels: Record<string, string> = {
+                            checkout: 'Checkout', inventory: 'Inventario', payout: 'Liquidación',
+                          };
+                          return (
+                            <span key={issue} className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 text-[10px] font-semibold">
+                              {labels[issue] ?? issue}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
+                  </td>
+                  <td className="py-1.5 px-2">
+                    <a
+                      href={`/bookings?booking=${a.id}`}
+                      className="text-blue-600 hover:underline font-medium whitespace-nowrap"
+                    >
+                      Registrar aseo →
+                    </a>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {alerts.length > 10 && (
+          <p className="text-xs text-slate-400 text-center mt-3">
+            +{alerts.length - 10} más — ve a{' '}
+            <a href="/bookings" className="text-blue-600 hover:underline">reservas</a> para verlos todos.
+          </p>
+        )}
+      </div>
+    </motion.section>
+  );
+}
+
+// ---------- Bloque 16 — Widget "Items con problemas" ----------
+function InventoryProblemsWidget(): JSX.Element | null {
+  const [items, setItems] = useState<InventoryItemRow[]>([]);
+  const [recon, setRecon] = useState<DamageReconciliation[]>([]);
+  const [propMap, setPropMap] = useState<Map<string, string>>(new Map());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    Promise.all([listInventoryItems({}), getDamageReconciliations(), listProperties()]).then(([i, r, p]) => {
       if (!mounted) return;
       setItems(i.data ?? []);
       setRecon(r.data ?? []);
+      if (p.data) setPropMap(new Map(p.data.map((pr: PropertyRow) => [pr.id, pr.name])));
       setLoading(false);
     });
     return () => { mounted = false; };
@@ -481,10 +595,23 @@ function InventoryProblemsWidget(): JSX.Element | null {
 
   const problemItems = items
     .filter(it => it.status === 'damaged' || it.status === 'needs_maintenance' || it.status === 'depleted')
-    .slice(0, 6);
+    .slice(0, 12);
   const totalUnreconciled = openRecon
     .filter(r => r.status === 'pending_recovery')
     .reduce((s, r) => s + Math.abs(r.diff), 0);
+
+  const reconMap = new Map(recon.map(r => [r.item_id, r]));
+
+  function getResolveHref(it: InventoryItemRow): string {
+    if (it.status === 'damaged') {
+      const r = reconMap.get(it.id);
+      if (r?.expense_id && r.expense_status === 'pending') {
+        return `/expenses?damage_expense=${r.expense_id}`;
+      }
+      return `/inventory?item_damage=${it.id}`;
+    }
+    return `/inventory?item=${it.id}`;
+  }
 
   return (
     <motion.section
@@ -520,18 +647,18 @@ function InventoryProblemsWidget(): JSX.Element | null {
             <thead className="text-[10px] uppercase text-slate-500 bg-slate-50">
               <tr>
                 <th className="text-left py-1.5 px-2">Item</th>
-                <th className="text-left py-1.5 px-2">Categoría</th>
-                <th className="text-right py-1.5 px-2">Cantidad</th>
+                <th className="text-left py-1.5 px-2">Propiedad</th>
                 <th className="text-left py-1.5 px-2">Estado</th>
+                <th className="text-left py-1.5 px-2">Acción</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {problemItems.map(it => (
                 <tr key={it.id}>
                   <td className="py-1.5 px-2 font-medium text-slate-800">{it.name}</td>
-                  <td className="py-1.5 px-2 text-slate-500">{it.location ?? '—'}</td>
-                  <td className="py-1.5 px-2 text-right tabular-nums">{Number(it.quantity)}</td>
+                  <td className="py-1.5 px-2 text-slate-500">{propMap.get(it.property_id) ?? '—'}</td>
                   <td className="py-1.5 px-2 text-slate-600">{STATUS_LABEL[it.status]}</td>
+                  <td className="py-1.5 px-2"><a href={getResolveHref(it)} className="text-blue-600 hover:underline font-medium whitespace-nowrap text-xs">Resolver →</a></td>
                 </tr>
               ))}
             </tbody>
