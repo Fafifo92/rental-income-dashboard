@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase/client';
 import type { ServiceResult } from './expenses';
-import type { BankAccountRow, BookingPaymentRow } from '@/types/database';
+import type { AccountDepositRow, BankAccountRow, BookingPaymentRow } from '@/types/database';
 
 export interface BankAccountBalance {
   account: BankAccountRow;
@@ -580,17 +580,7 @@ export const BANK_TX_KIND_META: Record<BankTxKind, { label: string; tone: 'in' |
 
 // ─── Depósitos manuales ───────────────────────────────────────────────────────
 
-export interface AccountDepositRow {
-  id: string;
-  owner_id: string;
-  account_id: string;
-  amount: number;
-  deposit_date: string;
-  notes: string | null;
-  created_at: string;
-}
-
-export const createAccountDeposit = async (input: {
+export const createAccountDeposit= async (input: {
   account_id: string;
   amount: number;
   deposit_date: string;

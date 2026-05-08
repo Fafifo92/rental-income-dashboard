@@ -176,6 +176,12 @@ export type Database = {
         Update: Partial<PropertyTagAssignmentRow>;
         Relationships: [];
       };
+      account_deposits: {
+        Row: AccountDepositRow;
+        Insert: Omit<AccountDepositRow, 'id' | 'created_at'>;
+        Update: Partial<Omit<AccountDepositRow, 'id' | 'created_at'>>;
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -274,6 +280,17 @@ export type BankAccountRow = {
   credit_limit: number | null;
   /** Cuenta especial de efectivo: existe siempre, no se puede crear ni eliminar. */
   is_cash: boolean;
+};
+
+/** Depósito manual en una cuenta bancaria (fuera de la contabilidad de reservas). */
+export type AccountDepositRow = {
+  id: string;
+  owner_id: string;
+  account_id: string;
+  amount: number;
+  deposit_date: string;
+  notes: string | null;
+  created_at: string;
 };
 
 /** Pago parcial o total registrado contra una reserva. */
