@@ -7,8 +7,7 @@ import type {
   InventoryItemStatus,
   PropertyRow,
 } from '@/types/database';
-import type { CreateInventoryItemInput } from '@/services/inventory';
-import { extendUsefulLife } from '@/services/inventory';
+import { extendUsefulLife, type CreateInventoryItemInput } from '@/services/inventory';
 import { useBackdropClose } from '@/lib/useBackdropClose';
 import MoneyInput from '@/components/MoneyInput';
 // ──────────────────────────────────────────────────────────────────────────
