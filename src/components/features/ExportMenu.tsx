@@ -1,11 +1,9 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { exportKpisToCsv, exportMonthlyToCsv, exportToExcel, type BookingExportRow } from '@/services/export';
-import type { FinancialKPIs, MonthlyPnL, Period } from '@/services/financial';
-import { resolvePeriodRange } from '@/services/financial';
-import { listBookings } from '@/services/bookings';
+import { resolvePeriodRange, type FinancialKPIs, type MonthlyPnL, type Period } from '@/services/financial';
+import { listBookings, type BookingWithListingRow } from '@/services/bookings';
 import { listAllBookingAdjustmentsForExport } from '@/services/bookingAdjustments';
-import type { BookingWithListingRow } from '@/services/bookings';
 
 const PERIOD_LABELS: Record<Exclude<Period, 'custom'>, string> = {
   'current-month':  'Este mes',
