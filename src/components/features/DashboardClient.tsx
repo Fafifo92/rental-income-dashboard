@@ -101,7 +101,7 @@ function PLPanel({ kpis }: { kpis: FinancialKPIs }) {
 export default function DashboardClient() {
   const authStatus = useAuth();
   const { properties, propertyIds, setPropertyIds, groups, tags, tagAssigns } = usePropertyFilter();
-  const [period, setPeriod]               = useState<Period>('last-3-months');
+  const [period, setPeriod]               = useState<Period>('current-month');
   const [customRange, setCustomRange]     = useState<{ from: string; to: string } | undefined>(undefined);
   const [activeTab, setActiveTab]         = useState<'resumen' | 'ingresos-egresos' | 'en-curso' | 'calendario'>('resumen');
   const [showUploader, setShowUploader]   = useState(false);
