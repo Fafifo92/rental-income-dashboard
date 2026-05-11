@@ -234,10 +234,12 @@ const getPriorRange = (period: Period): DateRange => {
   const now = new Date();
   const y = now.getFullYear();
   const m = now.getMonth();
+  const d = now.getDate();
   switch (period) {
     case 'current-month':  return { from: new Date(y, m - 1, 1),     to: new Date(y, m, 0) };
     case 'last-3-months':  return { from: new Date(y, m - 5, 1),     to: new Date(y, m - 2, 0) };
-    case 'this-year':      return { from: new Date(y - 1, 0, 1),     to: new Date(y - 1, 11, 31) };
+    // YTD comparison: compare Jan 1 – today vs Jan 1 – same day last year (apples-to-apples)
+    case 'this-year':      return { from: new Date(y - 1, 0, 1),     to: new Date(y - 1, m, d) };
     case 'all':            return { from: new Date(2000, 0, 1),       to: new Date(2099, 11, 31) };
     case 'custom':         return { from: new Date(y, m - 1, 1),     to: new Date(y, m, 0) }; // fallback; overridden in computeFinancials
   }
@@ -588,8 +590,20 @@ const buildPayoutBreakdown = (
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-const delta = (cur: number, prior: number): number | null =>
-  prior === 0 ? null : (cur - prior) / Math.abs(prior);
+/**
+ * Calculates period-over-period change ratio.
+ * Returns null when prior data is zero or too sparse to produce a meaningful
+ * comparison (prior < 5% of current absolute value). Caps at ±5.0 (±500%)
+ * so isolated early-stage data doesn't produce absurd figures.
+ */
+const delta = (cur: number, prior: number): number | null => {
+  if (prior === 0) return null;
+  // If prior period had negligible data relative to current, comparison is not meaningful
+  if (Math.abs(prior) < Math.abs(cur) * 0.05 && Math.abs(cur) > 0) return null;
+  const ratio = (cur - prior) / Math.abs(prior);
+  // Cap at ±500% to avoid misleading badges when early-stage data is used as baseline
+  return Math.max(-5, Math.min(5, ratio));
+};
 
 /**
  * Expand active recurring expenses into synthetic monthly Expense entries

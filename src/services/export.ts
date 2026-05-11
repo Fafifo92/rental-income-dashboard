@@ -3,6 +3,31 @@ import { todayISO } from '@/lib/dateUtils';
 import type { FinancialKPIs, MonthlyPnL } from './financial';
 import type { InventoryItemRow } from '@/types/database';
 
+// ─── Booking Export Row ───────────────────────────────────────────────────────
+
+export interface BookingExportRow {
+  confirmation_code: string;
+  guest_name: string | null;
+  check_in: string;
+  check_out: string;
+  nights: number;
+  revenue: number;
+  net_payout: number | null;
+  status: string;
+  channel: string | null;
+  property_name: string | null;
+  /** Net of adjustments (damages, extras, discounts). null = not included */
+  net_adjustment: number | null;
+}
+
+const BOOKING_STATUS_LABEL = (s: string): string => {
+  const l = s.toLowerCase();
+  if (l.includes('cancel')) return 'Cancelada';
+  if (l.includes('complet') || l.includes('done')) return 'Completada';
+  if (l.includes('reserv') || l.includes('confirm') || l.includes('upcoming')) return 'Reservada';
+  return s;
+};
+
 // ─── CSV Export ───────────────────────────────────────────────────────────────
 
 function downloadFile(content: string, filename: string, mimeType: string) {
@@ -50,16 +75,42 @@ export function exportKpisToCsv(kpis: FinancialKPIs, period: string) {
   downloadUtf8Csv(rows.join('\n'), `str-kpis-${today()}.csv`);
 }
 
-export function exportMonthlyToCsv(data: MonthlyPnL[], modeLabel?: string) {
-  const modeSlug = modeLabel?.includes('reservas') ? 'por-reservas' : 'por-dias';
+export function exportMonthlyToCsv(data: MonthlyPnL[], bookings?: BookingExportRow[]) {
   const rows = [
-    ...(modeLabel ? [toCsvRow(['Modo de atribución', modeLabel])] : []),
     toCsvRow(['Mes', 'Ingresos', 'Gastos', 'Utilidad Neta', 'Noches', 'Ocupación %']),
     ...data.map(d =>
       toCsvRow([d.month, d.revenue, d.expenses, d.netProfit, d.nights, d.occupancy])
     ),
   ];
-  downloadUtf8Csv(rows.join('\n'), `str-pnl-mensual-${modeSlug}-${today()}.csv`);
+
+  if (bookings && bookings.length > 0) {
+    const hasAdj = bookings.some(b => b.net_adjustment !== null);
+    rows.push('');
+    rows.push(toCsvRow(['--- DETALLE DE RESERVAS ---']));
+    const header = [
+      'Código', 'Huésped', 'Check-in', 'Check-out', 'Noches',
+      'Ingresos', 'Neto Pago', 'Estado', 'Canal', 'Propiedad',
+      ...(hasAdj ? ['Ajustes Neto'] : []),
+    ];
+    rows.push(toCsvRow(header));
+    for (const b of bookings) {
+      rows.push(toCsvRow([
+        b.confirmation_code,
+        b.guest_name ?? '',
+        b.check_in,
+        b.check_out,
+        b.nights,
+        b.revenue,
+        b.net_payout ?? '',
+        BOOKING_STATUS_LABEL(b.status),
+        b.channel ?? '',
+        b.property_name ?? '',
+        ...(hasAdj ? [b.net_adjustment ?? 0] : []),
+      ]));
+    }
+  }
+
+  downloadUtf8Csv(rows.join('\n'), `str-pnl-mensual-${today()}.csv`);
 }
 
 // ─── Excel Export (SpreadsheetML XML — no external deps, zero vulnerabilities) ─
@@ -99,11 +150,10 @@ function buildSpreadsheetML(
   ].join('');
 }
 
-export function exportToExcel(kpis: FinancialKPIs, monthly: MonthlyPnL[], period: string, modeLabel?: string) {
+export function exportToExcel(kpis: FinancialKPIs, monthly: MonthlyPnL[], period: string, bookings?: BookingExportRow[]) {
   const kpiRows: (string | number)[][] = [
     ['Métrica', 'Valor', 'Formato'],
     ['Período', period, ''],
-    ...(modeLabel ? [['Modo de atribución', modeLabel, '']] : [] as (string | number)[][]),
     ['Ingreso Bruto',       kpis.grossRevenue,          formatCurrency(kpis.grossRevenue)],
     ['Gastos Fijos',        kpis.totalFixedExpenses,    formatCurrency(kpis.totalFixedExpenses)],
     ['Gastos Variables',    kpis.totalVariableExpenses, formatCurrency(kpis.totalVariableExpenses)],
@@ -125,13 +175,36 @@ export function exportToExcel(kpis: FinancialKPIs, monthly: MonthlyPnL[], period
     ...monthly.map(d => [d.month, d.revenue, d.expenses, d.netProfit, d.nights, d.occupancy]),
   ];
 
-  const xml = buildSpreadsheetML([
-    { name: 'KPIs',        rows: kpiRows },
-    { name: 'P&L Mensual', rows: monthRows },
-  ]);
+  const sheets: Array<{ name: string; rows: (string | number | null | undefined)[][] }> = [];
 
-  const modeSlug = modeLabel?.includes('reservas') ? 'por-reservas' : 'por-dias';
-  downloadFile(xml, `str-reporte-${modeSlug}-${today()}.xls`, 'application/vnd.ms-excel;charset=utf-8');
+  if (bookings && bookings.length > 0) {
+    const hasAdj = bookings.some(b => b.net_adjustment !== null);
+    const bookingHeader = [
+      'Código', 'Huésped', 'Check-in', 'Check-out', 'Noches',
+      'Ingresos (COP)', 'Neto Pago (COP)', 'Estado', 'Canal', 'Propiedad',
+      ...(hasAdj ? ['Ajustes Neto (COP)'] : []),
+    ];
+    const bookingDataRows: (string | number | null)[][] = bookings.map(b => [
+      b.confirmation_code,
+      b.guest_name ?? '',
+      b.check_in,
+      b.check_out,
+      b.nights,
+      b.revenue,
+      b.net_payout ?? null,
+      BOOKING_STATUS_LABEL(b.status),
+      b.channel ?? '',
+      b.property_name ?? '',
+      ...(hasAdj ? [b.net_adjustment ?? 0] : []),
+    ]);
+    sheets.push({ name: 'Reservas', rows: [bookingHeader, ...bookingDataRows] });
+  }
+
+  sheets.push({ name: 'P&L Mensual', rows: monthRows });
+  sheets.push({ name: 'KPIs',        rows: kpiRows });
+
+  const xml = buildSpreadsheetML(sheets);
+  downloadFile(xml, `str-reporte-${today()}.xls`, 'application/vnd.ms-excel;charset=utf-8');
 }
 
 // ─── Utility ──────────────────────────────────────────────────────────────────

@@ -1,6 +1,8 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { computeFinancials, resolvePeriodRange, type FinancialKPIs, type MonthlyPnL, type PayoutBreakdown, type Period } from '@/services/financial';
 import { listProperties } from '@/services/properties';
+import { listBookings, type BookingWithListingRow } from '@/services/bookings';
+import { listAllBookingAdjustmentsForExport } from '@/services/bookingAdjustments';
 import type { PropertyRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 
@@ -17,6 +19,248 @@ const MONTHS_ES = [
 ];
 
 const MONTHS_SHORT = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+
+// ─── Booking types for report ──────────────────────────────────────────────────
+
+interface BookingForReport {
+  id: string;
+  confirmation_code: string;
+  guest_name: string | null;
+  start_date: string;
+  end_date: string;
+  num_nights: number;
+  total_revenue: number;
+  net_payout: number | null;
+  status: string;
+  channel: string | null;
+  property_name: string | null;
+}
+
+interface AdjForReport {
+  booking_id: string;
+  kind: string;
+  amount: number;
+  date: string;
+  description: string | null;
+}
+
+// ─── Calendar colors (inline styles — safe for Tailwind purging) ───────────────
+
+const BOOKING_PALETTE = [
+  { bg: '#dbeafe', color: '#1e40af', dot: '#2563eb', border: '#93c5fd' }, // blue
+  { bg: '#d1fae5', color: '#065f46', dot: '#059669', border: '#6ee7b7' }, // emerald
+  { bg: '#ede9fe', color: '#4c1d95', dot: '#7c3aed', border: '#c4b5fd' }, // violet
+  { bg: '#fef3c7', color: '#78350f', dot: '#d97706', border: '#fcd34d' }, // amber
+  { bg: '#ccfbf1', color: '#134e4a', dot: '#0d9488', border: '#5eead4' }, // teal
+  { bg: '#ffe4e6', color: '#9f1239', dot: '#e11d48', border: '#fda4af' }, // rose
+  { bg: '#e0e7ff', color: '#312e81', dot: '#4f46e5', border: '#a5b4fc' }, // indigo
+  { bg: '#fce7f3', color: '#831843', dot: '#db2777', border: '#f9a8d4' }, // pink
+];
+
+const CANCELLED_STYLE = { bg: '#f1f5f9', color: '#94a3b8', dot: '#cbd5e1', border: '#e2e8f0' };
+
+function getBookingStatusLabel(s: string): string {
+  const l = s.toLowerCase();
+  if (l.includes('cancel')) return 'Cancelada';
+  if (l.includes('complet') || l.includes('done')) return 'Completada';
+  if (l.includes('reserv') || l.includes('confirm') || l.includes('upcoming')) return 'Reservada';
+  return s;
+}
+
+function isCancelledStatus(s: string) { return s.toLowerCase().includes('cancel'); }
+
+// ─── Month calendar ─────────────────────────────────────────────────────────────
+
+interface CalBooking {
+  id: string;
+  confirmationCode: string;
+  start: string;  // YYYY-MM-DD
+  end: string;    // YYYY-MM-DD exclusive (check-out date)
+  cancelled: boolean;
+  colorIndex: number;
+  guest: string | null;
+  nights: number;
+  revenue: number;
+  propertyName: string | null;
+}
+
+function MonthTimeline({ year, month, bookings }: { year: number; month: number; bookings: CalBooking[] }) {
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const pad2        = (n: number) => String(n).padStart(2, '0');
+  const isoDay      = (d: number) => `${year}-${pad2(month)}-${pad2(d)}`;
+  const DOW_LETTER  = ['D', 'L', 'M', 'X', 'J', 'V', 'S']; // Sun=0
+
+  const days   = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const LABEL_W = 168; // px
+
+  // Active first (by start date), then cancelled
+  const sorted = [...bookings].sort((a, b) => {
+    if (a.cancelled !== b.cancelled) return a.cancelled ? 1 : -1;
+    return a.start.localeCompare(b.start);
+  });
+
+  return (
+    <div style={{
+      border: '1.5px solid #cbd5e1', borderRadius: 12, overflow: 'hidden',
+      background: 'white', breakInside: 'avoid', marginBottom: 16,
+    }}>
+      {/* Month header */}
+      <div style={{
+        background: 'linear-gradient(135deg, #1e40af 0%, #3b82f6 100%)',
+        color: 'white', padding: '9px 14px',
+        fontWeight: 800, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em',
+        display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+        {MONTHS_ES[month - 1]} {year}
+        <span style={{ fontSize: 10, fontWeight: 400, opacity: 0.75, marginLeft: 'auto' }}>
+          {sorted.filter(b => !b.cancelled).length} reserva{sorted.filter(b => !b.cancelled).length !== 1 ? 's' : ''} activa{sorted.filter(b => !b.cancelled).length !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      {/* Column headers */}
+      <div style={{ display: 'flex', background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+        <div style={{
+          width: LABEL_W, flexShrink: 0, padding: '5px 8px',
+          fontSize: 8, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em',
+          borderRight: '2px solid #e2e8f0',
+        }}>
+          Huésped · Propiedad
+        </div>
+        {days.map(d => {
+          const dow       = new Date(year, month - 1, d).getDay();
+          const isWeekend = dow === 0 || dow === 6;
+          return (
+            <div key={d} style={{
+              flex: 1, textAlign: 'center', padding: '3px 0',
+              borderRight: d < daysInMonth ? '1px solid #e8edf2' : 'none',
+              background: isWeekend ? '#f1f5f9' : 'transparent',
+            }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: isWeekend ? '#94a3b8' : '#374151', lineHeight: 1 }}>{d}</div>
+              <div style={{ fontSize: 7, color: '#cbd5e1', lineHeight: 1, marginTop: 1 }}>{DOW_LETTER[dow]}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* One row per booking */}
+      {sorted.length === 0 && (
+        <div style={{ padding: '14px 16px', textAlign: 'center', color: '#94a3b8', fontSize: 10 }}>
+          Sin reservas este mes
+        </div>
+      )}
+      {sorted.map((bk, rowIdx) => {
+        const palette = bk.cancelled
+          ? CANCELLED_STYLE
+          : BOOKING_PALETTE[bk.colorIndex % BOOKING_PALETTE.length];
+        const isLast = rowIdx === sorted.length - 1;
+
+        return (
+          <div key={bk.id} style={{
+            display: 'flex',
+            borderBottom: isLast ? 'none' : '1px solid #f1f5f9',
+            minHeight: 36,
+          }}>
+            {/* ── Label column ── */}
+            <div style={{
+              width: LABEL_W, flexShrink: 0, padding: '4px 8px',
+              background: bk.cancelled ? '#f8fafc' : palette.bg,
+              borderRight: `3px solid ${palette.dot}`,
+              display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1,
+              opacity: bk.cancelled ? 0.6 : 1,
+            }}>
+              {/* Guest name */}
+              <div style={{
+                fontSize: 10, fontWeight: 700, color: palette.color, lineHeight: 1.2,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                textDecoration: bk.cancelled ? 'line-through' : 'none',
+              }}>
+                {bk.guest ?? '—'}
+              </div>
+              {/* Property name badge */}
+              {bk.propertyName && (
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 3,
+                  fontSize: 8, fontWeight: 600, color: palette.dot,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  <span style={{
+                    width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                    background: palette.dot, display: 'inline-block',
+                  }} />
+                  {bk.propertyName}
+                </div>
+              )}
+              {/* Code · nights · revenue */}
+              <div style={{
+                fontSize: 8, fontFamily: 'monospace', color: palette.color, opacity: 0.75,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1,
+              }}>
+                {bk.cancelled ? '✕ ' : ''}{bk.confirmationCode}
+                {!bk.cancelled && bk.nights > 0 && ` · ${bk.nights}n`}
+              </div>
+              {/* Revenue — always shown in label (never cut off by bar width) */}
+              {!bk.cancelled && bk.revenue > 0 && (
+                <div style={{
+                  fontSize: 9, fontWeight: 800, color: palette.dot, lineHeight: 1,
+                }}>
+                  {formatCurrency(bk.revenue)}
+                </div>
+              )}
+            </div>
+
+            {/* ── Day cells ── */}
+            {days.map(d => {
+              const iso       = isoDay(d);
+              const inStay    = iso >= bk.start && iso < bk.end;
+              const isCheckIn = iso === bk.start;
+              const nextIso   = isoDay(d + 1);
+              const isLastOcc = inStay && nextIso === bk.end;
+              const isCheckOutDay = iso === bk.end; // checkout day itself (empty)
+              const dow       = new Date(year, month - 1, d).getDay();
+              const isWeekend = dow === 0 || dow === 6;
+
+              if (!inStay) {
+                return (
+                  <div key={d} style={{
+                    flex: 1,
+                    background: isWeekend ? '#f8fafc' : 'white',
+                    borderRight: d < daysInMonth ? '1px solid #f1f5f9' : 'none',
+                    borderLeft: isCheckOutDay ? `2px solid ${palette.dot}33` : 'none',
+                  }} />
+                );
+              }
+
+              return (
+                <div key={d} style={{
+                  flex: 1,
+                  background: bk.cancelled ? palette.bg + 'aa' : palette.bg,
+                  borderRight: d < daysInMonth ? `1px solid ${palette.border}44` : 'none',
+                  borderLeft: isCheckIn ? `3px solid ${palette.dot}` : 'none',
+                  position: 'relative',
+                }}>
+                  {/* Check-in dot (top-center) */}
+                  {isCheckIn && (
+                    <div style={{
+                      position: 'absolute', top: 3, left: '50%', transform: 'translateX(-50%)',
+                      width: 5, height: 5, borderRadius: '50%', background: palette.dot,
+                    }} />
+                  )}
+                  {/* Check-out dot (bottom-right of last occupied day) */}
+                  {isLastOcc && (
+                    <div style={{
+                      position: 'absolute', bottom: 3, right: 3,
+                      width: 4, height: 4, borderRadius: '50%', background: palette.dot, opacity: 0.55,
+                    }} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function now() {
   const d = new Date();
@@ -53,11 +297,16 @@ interface PropertyKPIs {
 
 function DeltaBadge({ value }: { value: number | null }) {
   if (value === null) return null;
-  const pct = (value * 100).toFixed(1);
-  const up  = value >= 0;
+  const absPercent = Math.abs(value * 100);
+  const isCapped = absPercent >= 499.9;
+  const displayVal = isCapped ? '>500' : absPercent.toFixed(1);
+  const up = value >= 0;
   return (
-    <span className={`text-xs font-semibold ${up ? 'text-green-600' : 'text-red-600'}`}>
-      {up ? '▲' : '▼'} {Math.abs(Number(pct))}%
+    <span
+      title={isCapped ? 'Variación muy alta: período anterior con datos insuficientes.' : undefined}
+      className={`text-xs font-semibold ${up ? 'text-green-600' : 'text-red-600'}`}
+    >
+      {up ? '▲' : '▼'} {displayVal}%
     </span>
   );
 }
@@ -79,7 +328,6 @@ function Section({ num, title, children }: { num: number; title: string; childre
 export default function PrintReport() {
   const [kpis, setKpis]                   = useState<FinancialKPIs | null>(null);
   const [monthly, setMonthly]             = useState<MonthlyPnL[]>([]);
-  const [reportMode, setReportMode]       = useState<'by-days' | 'by-bookings'>('by-days');
   const [payout, setPayout]               = useState<PayoutBreakdown | null>(null);
   const [propertyKPIs, setPropertyKPIs]   = useState<PropertyKPIs[]>([]);
   const [propertyNames, setPropertyNames] = useState<string[]>([]);
@@ -87,14 +335,24 @@ export default function PrintReport() {
   const [dateRangeLabel, setDateRangeLabel] = useState('');
   const [periodShortLabel, setPeriodShortLabel] = useState('');
 
+  // Booking detail state
+  const [includeBookings, setIncludeBookings]       = useState(false);
+  const [includeAdjustments, setIncludeAdjustments] = useState(false);
+  const [reportBookings, setReportBookings]         = useState<BookingForReport[]>([]);
+  const [reportAdjustments, setReportAdjustments]   = useState<AdjForReport[]>([]);
+  const [periodFrom, setPeriodFrom]                 = useState('');
+  const [periodTo, setPeriodTo]                     = useState('');
+
   useEffect(() => {
     const params    = new URLSearchParams(window.location.search);
     const period    = (params.get('period') as Period) || 'last-3-months';
     const fromParam = params.get('from');
     const toParam   = params.get('to');
     const idsParam  = params.get('propertyIds');
-    const modeParam = (params.get('mode') ?? 'by-days') as 'by-days' | 'by-bookings';
-    setReportMode(modeParam);
+    const inclBk    = params.get('includeBookings') === 'true';
+    const inclAdj   = params.get('includeAdjustments') === 'true';
+    setIncludeBookings(inclBk);
+    setIncludeAdjustments(inclAdj);
 
     const customRange = (period === 'custom' && fromParam && toParam)
       ? { from: fromParam, to: toParam }
@@ -104,18 +362,22 @@ export default function PrintReport() {
     // Resolve actual date range (always real dates, regardless of period type)
     const { from, to } = resolvePeriodRange(period, customRange);
     setDateRangeLabel(buildDateRangeLabel(from, to));
+    setPeriodFrom(from);
+    setPeriodTo(to);
 
     // Short label only for non-custom periods (used as subtitle)
     if (period !== 'custom') {
       setPeriodShortLabel(PERIOD_LABELS[period as Exclude<Period, 'custom'>]);
     }
 
-    Promise.all([
-      computeFinancials(period, true, propertyIds, customRange),
-      listProperties(),
-    ]).then(async ([main, propsRes]) => {
+    const loadAll = async () => {
+      const [main, propsRes] = await Promise.all([
+        computeFinancials(period, true, propertyIds, customRange),
+        listProperties(),
+      ]);
+
       setKpis(main.kpis);
-      setMonthly(modeParam === 'by-bookings' ? main.exportMonthlyByBookings : main.exportMonthly);
+      setMonthly(main.exportMonthly);
       setPayout(main.payoutBreakdown);
 
       const allProps    = propsRes.data ?? [];
@@ -135,8 +397,45 @@ export default function PrintReport() {
         setPropertyKPIs(perProp.filter(p => p.kpis.totalBookings > 0 || p.kpis.grossRevenue > 0));
       }
 
+      // Load booking detail if requested
+      if (inclBk) {
+        const bRes = await listBookings({
+          propertyIds: propertyIds?.length ? propertyIds : undefined,
+          dateFrom: from,
+          dateTo: to,
+        });
+        if (!bRes.error && bRes.data) {
+          const mapped: BookingForReport[] = bRes.data.map((b: BookingWithListingRow) => ({
+            id: b.id,
+            confirmation_code: b.confirmation_code,
+            guest_name: b.guest_name,
+            start_date: b.start_date,
+            end_date: b.end_date,
+            num_nights: b.num_nights,
+            total_revenue: Number(b.total_revenue),
+            net_payout: b.net_payout !== null ? Number(b.net_payout) : null,
+            status: b.status ?? '',
+            channel: b.channel,
+            property_name: (b.listings?.properties as { name: string } | null | undefined)?.name ?? null,
+          }));
+          setReportBookings(mapped);
+
+          if (inclAdj) {
+            const adjRes = await listAllBookingAdjustmentsForExport();
+            if (!adjRes.error && adjRes.data) {
+              const bookingIdSet = new Set(mapped.map(b => b.id));
+              setReportAdjustments(
+                adjRes.data.filter(a => bookingIdSet.has(a.booking_id)),
+              );
+            }
+          }
+        }
+      }
+
       setLoading(false);
-    });
+    };
+
+    loadAll();
   }, []);
 
   if (loading || !kpis) {
@@ -211,12 +510,8 @@ export default function PrintReport() {
               Generado: {now()}{kpis.isDemo && ' · Modo demo'}
             </p>
             <p className="text-xs mt-1">
-              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium ${
-                reportMode === 'by-bookings'
-                  ? 'bg-indigo-100 text-indigo-700'
-                  : 'bg-slate-100 text-slate-500'
-              }`}>
-                {reportMode === 'by-bookings' ? 'Por reservas (check-in)' : 'Por días (prorrateo)'}
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-500">
+                {includeBookings ? '📅 Con detalle de reservas' : 'Resumen financiero'}
               </span>
             </p>
           </div>
@@ -577,6 +872,294 @@ export default function PrintReport() {
             )}
           </Section>
         )}
+
+        {/* ── RESERVAS: CALENDARIO + TABLA ──────────────────────────────── */}
+        {includeBookings && reportBookings.length > 0 && (() => {
+          const active = reportBookings
+            .filter(b => !isCancelledStatus(b.status))
+            .sort((a, b) => a.start_date.localeCompare(b.start_date));
+          const cancelled = reportBookings.filter(b => isCancelledStatus(b.status));
+
+          // ── Color by property (not by booking order) ──────────────────────
+          const propertyColorMap = new Map<string, number>();
+          let nextPropColor = 0;
+          for (const b of [...active, ...cancelled]) {
+            const key = b.property_name ?? '';
+            if (!propertyColorMap.has(key)) {
+              propertyColorMap.set(key, nextPropColor % BOOKING_PALETTE.length);
+              nextPropColor++;
+            }
+          }
+
+          const calBookings: CalBooking[] = [
+            ...active.map(b => ({
+              id: b.id,
+              confirmationCode: b.confirmation_code,
+              start: b.start_date,
+              end: b.end_date,
+              cancelled: false,
+              colorIndex: propertyColorMap.get(b.property_name ?? '') ?? 0,
+              guest: b.guest_name,
+              nights: b.num_nights,
+              revenue: b.total_revenue,
+              propertyName: b.property_name,
+            })),
+            ...cancelled.map(b => ({
+              id: b.id,
+              confirmationCode: b.confirmation_code,
+              start: b.start_date,
+              end: b.end_date,
+              cancelled: true,
+              colorIndex: propertyColorMap.get(b.property_name ?? '') ?? 0,
+              guest: b.guest_name,
+              nights: b.num_nights,
+              revenue: 0,
+              propertyName: b.property_name,
+            })),
+          ];
+
+          // Generate ALL months in the selected period range (not just months with check-ins)
+          const months: { year: number; month: number }[] = [];
+          if (periodFrom && periodTo) {
+            const cur = new Date(periodFrom + 'T12:00:00');
+            const end = new Date(periodTo   + 'T12:00:00');
+            while (cur <= end) {
+              months.push({ year: cur.getFullYear(), month: cur.getMonth() + 1 });
+              cur.setMonth(cur.getMonth() + 1);
+            }
+          } else {
+            // Fallback: derive from booking start dates
+            const seen = new Set<string>();
+            for (const b of reportBookings) {
+              const d = new Date(b.start_date + 'T12:00:00');
+              const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
+              if (!seen.has(key)) { seen.add(key); months.push({ year: d.getFullYear(), month: d.getMonth() + 1 }); }
+            }
+            months.sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+          }
+
+          // Build adj map per booking
+          const adjMap = new Map<string, number>();
+          for (const a of reportAdjustments) {
+            const delta = a.kind === 'discount' ? -Number(a.amount) : Number(a.amount);
+            adjMap.set(a.booking_id, (adjMap.get(a.booking_id) ?? 0) + delta);
+          }
+
+          // ── Property legend (one entry per unique property) ───────────────
+          const propertyLegend = Array.from(propertyColorMap.entries()).map(([name, colorIndex]) => ({
+            name: name || 'Sin propiedad',
+            colorIndex,
+          }));
+
+          const totalRevenue = active.reduce((s, b) => s + b.total_revenue, 0);
+          const totalNights  = active.reduce((s, b) => s + b.num_nights, 0);
+
+          return (
+            <Section num={S()} title="Cronograma de Reservas">
+
+              {/* KPI summary row */}
+              <div className="grid grid-cols-4 gap-3 mb-4">
+                {[
+                  { label: 'Reservas activas',   value: String(active.length),          color: 'bg-blue-50 border-blue-200',    tc: 'text-blue-700' },
+                  { label: 'Noches totales',      value: String(totalNights),            color: 'bg-slate-50 border-slate-200',  tc: 'text-slate-700' },
+                  { label: 'Ingresos reservas',   value: formatCurrency(totalRevenue),   color: 'bg-green-50 border-green-200',  tc: 'text-green-700' },
+                  { label: 'Canceladas',          value: String(cancelled.length),       color: cancelled.length > 0 ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200', tc: cancelled.length > 0 ? 'text-red-600' : 'text-slate-500' },
+                ].map(item => (
+                  <div key={item.label} className={`p-3 rounded-xl border ${item.color}`}>
+                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider leading-tight">{item.label}</p>
+                    <p className={`text-sm font-extrabold mt-1 ${item.tc}`}>{item.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Property color legend */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', alignSelf: 'center' }}>
+                  Propiedades:
+                </span>
+                {propertyLegend.map(p => {
+                  const c = BOOKING_PALETTE[p.colorIndex % BOOKING_PALETTE.length];
+                  return (
+                    <div key={p.name} style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      padding: '3px 10px', borderRadius: 999,
+                      background: c.bg, color: c.color,
+                      border: `1.5px solid ${c.border}`,
+                      fontSize: 10, fontWeight: 700,
+                    }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: c.dot, display: 'inline-block', flexShrink: 0 }} />
+                      {p.name}
+                    </div>
+                  );
+                })}
+                {cancelled.length > 0 && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '3px 10px', borderRadius: 999,
+                    background: CANCELLED_STYLE.bg, color: CANCELLED_STYLE.color,
+                    border: `1.5px solid ${CANCELLED_STYLE.border}`,
+                    fontSize: 10, fontWeight: 600,
+                  }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: CANCELLED_STYLE.dot, display: 'inline-block', flexShrink: 0 }} />
+                    {cancelled.length} cancelada{cancelled.length !== 1 ? 's' : ''}
+                  </div>
+                )}
+              </div>
+
+              {/* Swimlane timelines — one full-width per month */}
+              {months.map(({ year, month }) => (
+                <MonthTimeline
+                  key={`${year}-${month}`}
+                  year={year}
+                  month={month}
+                  bookings={calBookings.filter(b => {
+                    const mStart = new Date(year, month - 1, 1);
+                    const mEnd   = new Date(year, month, 0);
+                    const st     = new Date(b.start + 'T12:00:00');
+                    const en     = new Date(b.end   + 'T12:00:00');
+                    return st <= mEnd && en >= mStart;
+                  })}
+                />
+              ))}
+
+              {/* Bookings detail table */}
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 mt-5">Detalle de reservas</p>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b-2 border-slate-200">
+                    {[
+                      '#', 'Código', 'Huésped', 'Propiedad',
+                      'Check-in', 'Check-out', 'Noches',
+                      'Ingresos', 'Neto pago', 'Estado',
+                      ...(includeAdjustments ? ['Ajustes'] : []),
+                    ].map(h => (
+                      <th key={h} className="pb-2 pr-1 text-left font-semibold text-slate-500 text-[10px] uppercase tracking-wider">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportBookings
+                    .sort((a, b) => a.start_date.localeCompare(b.start_date))
+                    .map((b, i) => {
+                      const cancelled = isCancelledStatus(b.status);
+                      const statusLabel = getBookingStatusLabel(b.status);
+                      const netAdj = adjMap.get(b.id) ?? 0;
+                      const propColorIdx = propertyColorMap.get(b.property_name ?? '') ?? 0;
+                      const dot = cancelled
+                        ? CANCELLED_STYLE.dot
+                        : BOOKING_PALETTE[propColorIdx % BOOKING_PALETTE.length].dot;
+                      return (
+                        <tr key={b.id} className={`border-b border-slate-100 ${cancelled ? 'opacity-60' : ''}`}>
+                          <td className="py-1.5 pr-1 text-slate-400">{i + 1}</td>
+                          <td className="py-1.5 pr-1 font-mono text-[10px]">
+                            <span className="flex items-center gap-1">
+                              <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: dot }} />
+                              {b.confirmation_code}
+                            </span>
+                          </td>
+                          <td className="py-1.5 pr-1 text-slate-700 max-w-[80px]">
+                            <span className="block truncate">{b.guest_name ?? '—'}</span>
+                          </td>
+                          <td className="py-1.5 pr-1 text-slate-500 max-w-[70px]">
+                            <span className="block truncate">{b.property_name ?? '—'}</span>
+                          </td>
+                          <td className="py-1.5 pr-1 font-mono text-slate-700 whitespace-nowrap">
+                            {fmtDate(b.start_date)}
+                          </td>
+                          <td className="py-1.5 pr-1 font-mono text-slate-700 whitespace-nowrap">
+                            {fmtDate(b.end_date)}
+                          </td>
+                          <td className="py-1.5 pr-1 text-right text-slate-600">{b.num_nights}</td>
+                          <td className="py-1.5 pr-1 text-right font-mono text-blue-700 font-semibold">
+                            {cancelled ? '—' : formatCurrency(b.total_revenue)}
+                          </td>
+                          <td className="py-1.5 pr-1 text-right font-mono text-slate-600">
+                            {b.net_payout !== null ? formatCurrency(b.net_payout) : '—'}
+                          </td>
+                          <td className="py-1.5 pr-1">
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold ${
+                              cancelled
+                                ? 'bg-red-100 text-red-700'
+                                : statusLabel === 'Completada'
+                                  ? 'bg-green-100 text-green-700'
+                                  : 'bg-blue-100 text-blue-700'
+                            }`}>
+                              {statusLabel}
+                            </span>
+                          </td>
+                          {includeAdjustments && (
+                            <td className={`py-1.5 text-right font-mono text-[10px] font-semibold ${netAdj > 0 ? 'text-emerald-600' : netAdj < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                              {netAdj !== 0 ? formatCurrency(netAdj) : '—'}
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })
+                  }
+                  {/* Totals */}
+                  <tr className="font-bold bg-slate-50 border-t-2 border-slate-300">
+                    <td colSpan={6} className="py-2 text-slate-700 text-[10px]">TOTAL ({active.length} activas)</td>
+                    <td className="py-2 text-right text-slate-700">{totalNights}</td>
+                    <td className="py-2 text-right font-mono text-blue-800">{formatCurrency(totalRevenue)}</td>
+                    <td className="py-2 text-right font-mono text-slate-600">
+                      {formatCurrency(active.reduce((s, b) => s + (b.net_payout ?? b.total_revenue), 0))}
+                    </td>
+                    <td />
+                    {includeAdjustments && (
+                      <td className="py-2 text-right font-mono text-emerald-700">
+                        {formatCurrency(active.reduce((s, b) => s + (adjMap.get(b.id) ?? 0), 0))}
+                      </td>
+                    )}
+                  </tr>
+                </tbody>
+              </table>
+
+              {/* Adjustments detail — only if enabled and there are any */}
+              {includeAdjustments && reportAdjustments.length > 0 && (
+                <div className="mt-5">
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Detalle de ajustes por reserva</p>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b-2 border-slate-200">
+                        {['Reserva', 'Tipo', 'Descripción', 'Fecha', 'Monto'].map(h => (
+                          <th key={h} className="pb-2 pr-2 text-left font-semibold text-slate-500 text-[10px] uppercase tracking-wider">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportAdjustments.map((a, i) => {
+                        const bk = reportBookings.find(b => b.id === a.booking_id);
+                        const sign = a.kind === 'discount' ? -1 : 1;
+                        const val = sign * Number(a.amount);
+                        const kindLabel: Record<string, string> = {
+                          damage: 'Daño', extra: 'Extra', discount: 'Descuento', other: 'Otro',
+                        };
+                        return (
+                          <tr key={i} className="border-b border-slate-100">
+                            <td className="py-1.5 pr-2 font-mono text-[10px] text-slate-600">{bk?.confirmation_code ?? '—'}</td>
+                            <td className="py-1.5 pr-2">
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold ${
+                                a.kind === 'discount' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
+                              }`}>
+                                {kindLabel[a.kind] ?? a.kind}
+                              </span>
+                            </td>
+                            <td className="py-1.5 pr-2 text-slate-600">{a.description ?? '—'}</td>
+                            <td className="py-1.5 pr-2 font-mono text-slate-500 whitespace-nowrap">{fmtDate(a.date)}</td>
+                            <td className={`py-1.5 text-right font-mono font-semibold ${val >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                              {formatCurrency(Math.abs(val))}
+                              {val < 0 && ' (−)'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Section>
+          );
+        })()}
 
         {/* ── FOOTER ─────────────────────────────────────────────────────── */}
         <div className="border-t pt-4 text-xs text-slate-400 flex justify-between items-center">

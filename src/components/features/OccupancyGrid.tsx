@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ListingRow } from '@/types/database';
 import { listPropertiesSlim } from '@/services/properties';
 import { listListingsByPropertyIds } from '@/services/listings';
 import { listBookingsForOccupancy, type OccupancyBooking } from '@/services/bookings';
+import { supabase } from '@/lib/supabase/client';
 
 interface Props {
   from: string;
@@ -82,6 +83,28 @@ const LEGEND_ITEMS = [
   { label: 'Cancelada', color: '#94a3b8' },
 ];
 
+type PropertySlim = { id: string; name: string };
+
+function DragHandle() {
+  return (
+    <svg
+      width="10"
+      height="14"
+      viewBox="0 0 10 14"
+      fill="currentColor"
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      <circle cx="2.5" cy="2"   r="1.4" />
+      <circle cx="7.5" cy="2"   r="1.4" />
+      <circle cx="2.5" cy="7"   r="1.4" />
+      <circle cx="7.5" cy="7"   r="1.4" />
+      <circle cx="2.5" cy="12"  r="1.4" />
+      <circle cx="7.5" cy="12"  r="1.4" />
+    </svg>
+  );
+}
+
 export default function OccupancyGrid({
   from,
   to,
@@ -92,11 +115,67 @@ export default function OccupancyGrid({
   breakEvenOccupancy,
   onBookingClick,
 }: Props) {
-  const [properties, setProperties] = useState<Array<{ id: string; name: string }>>([]);
+  const [properties, setProperties] = useState<PropertySlim[]>([]);
+  const [orderedProperties, setOrderedProperties] = useState<PropertySlim[]>([]);
   const [bookingsByProp, setBookingsByProp] = useState<Map<string, GanttBooking[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // ── Drag state ────────────────────────────────────────────────────────────
+  const [draggedId, setDraggedId]   = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [userId, setUserId]         = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+  }, []);
+
+  const storageKey = userId ? `calendar_prop_order_${userId}` : null;
+
+  // Apply saved order when properties change
+  useEffect(() => {
+    if (!properties.length) return;
+    if (!storageKey) { setOrderedProperties(properties); return; }
+    try {
+      const saved: string[] = JSON.parse(localStorage.getItem(storageKey) ?? '[]');
+      if (!saved.length) { setOrderedProperties(properties); return; }
+      const propMap = new Map(properties.map(p => [p.id, p]));
+      const sorted = saved.filter(id => propMap.has(id)).map(id => propMap.get(id)!);
+      // Append any new properties not yet in saved order
+      const savedSet = new Set(saved);
+      properties.filter(p => !savedSet.has(p.id)).forEach(p => sorted.push(p));
+      setOrderedProperties(sorted);
+    } catch {
+      setOrderedProperties(properties);
+    }
+  }, [properties, storageKey]);
+
+  const saveOrder = useCallback((ordered: PropertySlim[]) => {
+    if (!storageKey) return;
+    localStorage.setItem(storageKey, JSON.stringify(ordered.map(p => p.id)));
+  }, [storageKey]);
+
+  const handleDrop = useCallback((targetId: string) => {
+    if (!draggedId || draggedId === targetId) return;
+    setOrderedProperties(prev => {
+      const fromIdx = prev.findIndex(p => p.id === draggedId);
+      const toIdx   = prev.findIndex(p => p.id === targetId);
+      if (fromIdx === -1 || toIdx === -1) return prev;
+      const next = [...prev];
+      const [removed] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, removed);
+      saveOrder(next);
+      return next;
+    });
+    setDraggedId(null);
+    setDragOverId(null);
+  }, [draggedId, saveOrder]);
+
+  const handleDragEnd = useCallback(() => {
+    setDraggedId(null);
+    setDragOverId(null);
+  }, []);
 
   const propIdsKey = propertyIds?.join(',') ?? '';
 
@@ -322,6 +401,7 @@ export default function OccupancyGrid({
                 borderRight: '1px solid #e2e8f0',
                 display: 'flex',
                 alignItems: 'center',
+                gap: 4,
                 paddingLeft: 10,
                 fontSize: 10,
                 color: '#94a3b8',
@@ -329,6 +409,7 @@ export default function OccupancyGrid({
                 letterSpacing: '0.05em',
                 textTransform: 'uppercase',
               }}>
+                <DragHandle />
                 Propiedad
               </div>
               {days.map((day, i) => (
@@ -365,47 +446,79 @@ export default function OccupancyGrid({
           )}
 
           {/* Empty */}
-          {!loading && properties.length === 0 && (
+          {!loading && orderedProperties.length === 0 && (
             <div style={{ padding: '40px 16px', textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
               No hay propiedades para mostrar en este periodo.
             </div>
           )}
 
           {/* Property rows */}
-          {!loading && properties.map((prop, ri) => {
+          {!loading && orderedProperties.map((prop, ri) => {
+            const isDragging = draggedId === prop.id;
+            const isDropTarget = dragOverId === prop.id;
             const rowBg = ri % 2 === 0 ? '#f8fafc' : '#ffffff';
             const propBookings = bookingsByProp.get(prop.id) ?? [];
 
             return (
               <div
                 key={prop.id}
+                onDragOver={e => { e.preventDefault(); if (!isDragging) setDragOverId(prop.id); }}
+                onDragLeave={e => {
+                  // Only clear if leaving the row entirely (not entering a child)
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverId(null);
+                }}
+                onDrop={e => { e.preventDefault(); handleDrop(prop.id); }}
                 style={{
                   display: 'flex',
                   height: ROW_H,
-                  backgroundColor: rowBg,
+                  backgroundColor: isDragging ? 'rgba(248,250,252,0.4)' : rowBg,
                   borderBottom: '1px solid #f1f5f9',
+                  borderTop: isDropTarget ? '2px solid #3b82f6' : '1px solid transparent',
                   position: 'relative',
+                  opacity: isDragging ? 0.35 : 1,
+                  transition: 'opacity 0.15s ease, border-color 0.1s ease',
                 }}
               >
-                {/* Sticky property name */}
+                {/* Sticky property label — drag handle */}
                 <div
+                  draggable
+                  onDragStart={e => {
+                    setDraggedId(prop.id);
+                    // Ghost image: slightly transparent clone
+                    const ghost = e.currentTarget.cloneNode(true) as HTMLElement;
+                    ghost.style.opacity = '0.85';
+                    ghost.style.position = 'fixed';
+                    ghost.style.top = '-9999px';
+                    document.body.appendChild(ghost);
+                    e.dataTransfer.setDragImage(ghost, 70, 20);
+                    requestAnimationFrame(() => document.body.removeChild(ghost));
+                  }}
+                  onDragEnd={handleDragEnd}
+                  title="Arrastrar para reordenar"
                   style={{
                     width: LABEL_W,
                     flexShrink: 0,
                     position: 'sticky',
                     left: 0,
                     zIndex: 10,
-                    backgroundColor: rowBg,
+                    backgroundColor: isDragging ? '#e0e7ff' : isDropTarget ? '#eff6ff' : rowBg,
                     borderRight: '1px solid #e2e8f0',
                     display: 'flex',
                     alignItems: 'center',
-                    paddingLeft: 12,
+                    gap: 4,
+                    paddingLeft: 6,
                     paddingRight: 8,
                     fontSize: 12,
                     fontWeight: 600,
                     color: '#334155',
+                    cursor: 'grab',
+                    userSelect: 'none',
+                    transition: 'background-color 0.15s ease',
                   }}
                 >
+                  <span style={{ color: '#cbd5e1', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+                    <DragHandle />
+                  </span>
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {prop.name}
                   </span>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Period } from '@/services/financial';
 import { todayISO } from '@/lib/dateUtils';
@@ -22,6 +22,9 @@ export default function PeriodSelector({ value, onChange, customRange, onCustomR
   const today      = todayISO();
   const [from, setFrom] = useState(customRange?.from ?? '');
   const [to,   setTo  ] = useState(customRange?.to   ?? '');
+  const toRef = useRef<HTMLInputElement>(null);
+  const toTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fromWasEmptyRef = useRef(false);
 
   // Sync local state when parent resets
   useEffect(() => {
@@ -77,13 +80,26 @@ export default function PeriodSelector({ value, onChange, customRange, onCustomR
               type="date"
               value={from}
               max={to || today}
-              onChange={e => { setFrom(e.target.value); applyRange(e.target.value, to); }}
+              onFocus={() => { fromWasEmptyRef.current = !from; }}
+              onChange={e => {
+                const val = e.target.value;
+                setFrom(val);
+                applyRange(val, to);
+                if (!fromWasEmptyRef.current) return;
+                if (toTimerRef.current) clearTimeout(toTimerRef.current);
+                if (val) {
+                  toTimerRef.current = setTimeout(() => {
+                    try { toRef.current?.showPicker(); } catch { toRef.current?.focus(); }
+                  }, 200);
+                }
+              }}
               className="border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
             <span className="text-slate-400">–</span>
             <span className="text-slate-500 text-xs font-medium">Hasta</span>
             <input
               type="date"
+              ref={toRef}
               value={to}
               min={from}
               max={today}

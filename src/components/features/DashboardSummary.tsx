@@ -44,11 +44,18 @@ function useCountUp(target: number, duration = 800): number {
 function DeltaBadge({ delta }: { delta: number | null | undefined }) {
   if (delta == null) return null;
   const positive = delta >= 0;
+  const absPercent = Math.abs(delta * 100);
+  // Values at cap (500%) signal early-stage/sparse baseline — show as ">500%"
+  const isCapped = absPercent >= 499.9;
+  const displayVal = isCapped ? '>500' : absPercent.toFixed(1);
   return (
-    <span className={`inline-flex items-center gap-0.5 text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-      positive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-    }`}>
-      {positive ? '▲' : '▼'} {Math.abs(delta * 100).toFixed(1)}%
+    <span
+      title={isCapped ? 'Variación muy alta: el período anterior tiene datos insuficientes para una comparación confiable.' : undefined}
+      className={`inline-flex items-center gap-0.5 text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+        positive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+      }`}
+    >
+      {positive ? '▲' : '▼'} {displayVal}%
     </span>
   );
 }

@@ -1,7 +1,11 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { exportKpisToCsv, exportMonthlyToCsv, exportToExcel } from '@/services/export';
+import { exportKpisToCsv, exportMonthlyToCsv, exportToExcel, type BookingExportRow } from '@/services/export';
 import type { FinancialKPIs, MonthlyPnL, Period } from '@/services/financial';
+import { resolvePeriodRange } from '@/services/financial';
+import { listBookings } from '@/services/bookings';
+import { listAllBookingAdjustmentsForExport } from '@/services/bookingAdjustments';
+import type { BookingWithListingRow } from '@/services/bookings';
 
 const PERIOD_LABELS: Record<Exclude<Period, 'custom'>, string> = {
   'current-month':  'Este mes',
@@ -10,73 +14,85 @@ const PERIOD_LABELS: Record<Exclude<Period, 'custom'>, string> = {
   'all':            'Todo',
 };
 
-const MODE_OPTIONS = [
-  {
-    id: 'by-days' as const,
-    label: 'Por días (prorrateo)',
-    description: 'Reparte cada reserva noche a noche. Más preciso para períodos parciales.',
-  },
-  {
-    id: 'by-bookings' as const,
-    label: 'Por reservas (check-in)',
-    description: 'Toda la reserva se atribuye al mes de llegada. Útil para ver ingresos comprometidos.',
-  },
-];
-
 interface Props {
   kpis: FinancialKPIs;
   monthly: MonthlyPnL[];
+  /** @deprecated retained for prop-compatibility with DashboardClient — not used */
   monthlyByBookings: MonthlyPnL[];
   period: Period;
   customRange?: { from: string; to: string };
   propertyIds?: string[];
 }
 
-export default function ExportMenu({ kpis, monthly, monthlyByBookings, period, customRange, propertyIds }: Props) {
-  const [open, setOpen]                             = useState(false);
-  const [loading, setLoading]                       = useState<string | null>(null);
-  const [pendingLabel, setPendingLabel]             = useState<string | null>(null);
-  const [pendingAction, setPendingAction]           = useState<((mode: 'by-days' | 'by-bookings') => void) | null>(null);
-  const [showModeChooser, setShowModeChooser]       = useState(false);
+interface ExportOption {
+  label: string;
+  description: string;
+  /** Whether this action can include booking data */
+  supportsBookings: boolean;
+  /** For PDF: just opens a window. For CSV/Excel: receives fetched booking rows. */
+  isPdf?: boolean;
+  action: (bookings?: BookingExportRow[]) => void | Promise<void>;
+}
+
+export default function ExportMenu({ kpis, monthly, period, customRange, propertyIds }: Props) {
+  const [open, setOpen]                   = useState(false);
+  const [loading, setLoading]             = useState<string | null>(null);
+  const [pendingOption, setPendingOption] = useState<ExportOption | null>(null);
+  const [showOptionsModal, setShowOptionsModal] = useState(false);
+  const [includeBookings, setIncludeBookings]   = useState(true);
+  const [includeAdjustments, setIncludeAdjustments] = useState(false);
 
   const periodLabel = period === 'custom' && customRange
     ? `${customRange.from} al ${customRange.to}`
     : PERIOD_LABELS[period as Exclude<Period, 'custom'>];
 
-  type ExportAction = (mode: 'by-days' | 'by-bookings') => void;
-
-  const options: { label: string; description: string; needsMode: boolean; action: ExportAction }[] = [
+  const options: ExportOption[] = [
     {
       label: 'KPIs — CSV',
       description: 'Métricas principales del período',
-      needsMode: false,
+      supportsBookings: false,
       action: () => exportKpisToCsv(kpis, periodLabel),
     },
     {
       label: 'P&L Mensual — CSV',
-      description: 'Ingresos / gastos mes a mes',
-      needsMode: true,
-      action: (mode) => exportMonthlyToCsv(
-        mode === 'by-bookings' ? monthlyByBookings : monthly,
-        MODE_OPTIONS.find(m => m.id === mode)!.label,
-      ),
+      description: 'Ingresos / gastos mes a mes + reservas (opcional)',
+      supportsBookings: true,
+      action: (bookings) => exportMonthlyToCsv(monthly, bookings),
     },
     {
       label: 'Reporte Excel',
-      description: 'KPIs + P&L en múltiples hojas',
-      needsMode: true,
-      action: (mode) => exportToExcel(
-        kpis,
-        mode === 'by-bookings' ? monthlyByBookings : monthly,
-        periodLabel,
-        MODE_OPTIONS.find(m => m.id === mode)!.label,
-      ),
+      description: 'KPIs + P&L + hoja de reservas (opcional)',
+      supportsBookings: true,
+      action: (bookings) => exportToExcel(kpis, monthly, periodLabel, bookings),
     },
     {
       label: 'Imprimir / PDF',
-      description: 'Reporte para archivar o compartir',
-      needsMode: true,
-      action: (mode) => {
+      description: 'Reporte con calendario de reservas (opcional)',
+      supportsBookings: true,
+      isPdf: true,
+      action: () => { /* handled in handleOptionsSubmit */ },
+    },
+  ];
+
+  const handleClick = (opt: ExportOption) => {
+    setOpen(false);
+    if (opt.supportsBookings) {
+      setPendingOption(opt);
+      setShowOptionsModal(true);
+    } else {
+      setLoading(opt.label);
+      Promise.resolve(opt.action()).finally(() => setLoading(null));
+    }
+  };
+
+  const handleOptionsSubmit = async () => {
+    if (!pendingOption) return;
+    setShowOptionsModal(false);
+    setLoading(pendingOption.label);
+
+    try {
+      if (pendingOption.isPdf) {
+        // PDF: PrintReport fetches its own data — just pass flags via URL
         const url = new URL('/report', window.location.origin);
         url.searchParams.set('period', period);
         if (period === 'custom' && customRange) {
@@ -86,37 +102,61 @@ export default function ExportMenu({ kpis, monthly, monthlyByBookings, period, c
         if (propertyIds && propertyIds.length > 0) {
           url.searchParams.set('propertyIds', propertyIds.join(','));
         }
-        url.searchParams.set('mode', mode);
+        if (includeBookings)    url.searchParams.set('includeBookings', 'true');
+        if (includeAdjustments) url.searchParams.set('includeAdjustments', 'true');
         window.open(url.toString(), '_blank');
-      },
-    },
-  ];
+        return;
+      }
 
-  const handleClick = (opt: typeof options[0]) => {
-    if (opt.needsMode) {
-      setPendingLabel(opt.label);
-      setPendingAction(() => opt.action);
-      setOpen(false);
-      setShowModeChooser(true);
-    } else {
-      setLoading(opt.label);
-      Promise.resolve(opt.action('by-days')).finally(() => {
-        setLoading(null);
-        setOpen(false);
-      });
-    }
-  };
+      // CSV / Excel: fetch bookings here if requested
+      let bookingRows: BookingExportRow[] | undefined;
 
-  const handleModeSelect = async (mode: 'by-days' | 'by-bookings') => {
-    if (!pendingAction) return;
-    setLoading(pendingLabel);
-    setShowModeChooser(false);
-    try {
-      await pendingAction(mode);
+      if (includeBookings) {
+        const { from, to } = resolvePeriodRange(
+          period,
+          period === 'custom' ? customRange : undefined,
+        );
+        const bRes = await listBookings({
+          propertyIds: propertyIds?.length ? propertyIds : undefined,
+          dateFrom: from,
+          dateTo: to,
+        });
+
+        if (!bRes.error && bRes.data) {
+          const adjMap = new Map<string, number>();
+
+          if (includeAdjustments) {
+            const adjRes = await listAllBookingAdjustmentsForExport();
+            if (!adjRes.error && adjRes.data) {
+              const bookingIdSet = new Set(bRes.data.map(b => b.id));
+              for (const a of adjRes.data) {
+                if (!bookingIdSet.has(a.booking_id)) continue;
+                const delta = a.kind === 'discount' ? -Number(a.amount) : Number(a.amount);
+                adjMap.set(a.booking_id, (adjMap.get(a.booking_id) ?? 0) + delta);
+              }
+            }
+          }
+
+          bookingRows = bRes.data.map((b: BookingWithListingRow) => ({
+            confirmation_code: b.confirmation_code,
+            guest_name: b.guest_name,
+            check_in: b.start_date,
+            check_out: b.end_date,
+            nights: b.num_nights,
+            revenue: Number(b.total_revenue),
+            net_payout: b.net_payout !== null ? Number(b.net_payout) : null,
+            status: b.status ?? '',
+            channel: b.channel,
+            property_name: (b.listings?.properties as { name: string } | null | undefined)?.name ?? null,
+            net_adjustment: includeAdjustments ? (adjMap.get(b.id) ?? 0) : null,
+          }));
+        }
+      }
+
+      await pendingOption.action(bookingRows);
     } finally {
       setLoading(null);
-      setPendingAction(null);
-      setPendingLabel(null);
+      setPendingOption(null);
     }
   };
 
@@ -171,8 +211,8 @@ export default function ExportMenu({ kpis, monthly, monthlyByBookings, period, c
                     <div>
                       <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
                         {loading === opt.label ? 'Generando…' : opt.label}
-                        {opt.needsMode && (
-                          <span className="text-[9px] px-1 py-0.5 bg-blue-100 text-blue-600 rounded font-medium">modo</span>
+                        {opt.supportsBookings && (
+                          <span className="text-[9px] px-1 py-0.5 bg-blue-100 text-blue-600 rounded font-medium">+ reservas</span>
                         )}
                       </p>
                       <p className="text-xs text-slate-400">{opt.description}</p>
@@ -185,36 +225,87 @@ export default function ExportMenu({ kpis, monthly, monthlyByBookings, period, c
         </AnimatePresence>
       </div>
 
-      {/* Mode chooser modal */}
+      {/* Report options modal */}
       <AnimatePresence>
-        {showModeChooser && (
+        {showOptionsModal && pendingOption && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-            onClick={() => setShowModeChooser(false)}
+            onClick={() => setShowOptionsModal(false)}
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
               onClick={e => e.stopPropagation()}
               className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6"
             >
-              <h3 className="text-lg font-bold text-slate-800 mb-1">¿Cómo atribuir los ingresos?</h3>
-              <p className="text-xs text-slate-500 mb-4">Solo afecta la exportación — el dashboard no cambia.</p>
-              <div className="space-y-3">
-                {MODE_OPTIONS.map(m => (
-                  <button
-                    key={m.id}
-                    onClick={() => handleModeSelect(m.id)}
-                    className="w-full text-left px-4 py-3 border-2 border-slate-200 rounded-xl hover:border-blue-400 hover:bg-blue-50 transition-colors group"
+              <h3 className="text-lg font-bold text-slate-800 mb-1">Opciones del informe</h3>
+              <p className="text-xs text-slate-500 mb-5">
+                <span className="font-medium text-slate-700">{pendingOption.label}</span> — {periodLabel}
+              </p>
+
+              {/* Toggle: include bookings */}
+              <label className="flex items-start gap-3 cursor-pointer group mb-4">
+                <div className="mt-0.5">
+                  <input
+                    type="checkbox"
+                    checked={includeBookings}
+                    onChange={e => {
+                      setIncludeBookings(e.target.checked);
+                      if (!e.target.checked) setIncludeAdjustments(false);
+                    }}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 accent-blue-600 cursor-pointer"
+                  />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-800 group-hover:text-blue-700">
+                    📅 Incluir datos de reservas
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {pendingOption.isPdf
+                      ? 'Agrega calendario mensual y tabla de reservas al PDF'
+                      : 'Agrega una sección / hoja con el detalle de cada reserva'}
+                  </p>
+                </div>
+              </label>
+
+              {/* Toggle: include adjustments (only when bookings is checked) */}
+              <AnimatePresence>
+                {includeBookings && (
+                  <motion.label
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="flex items-start gap-3 cursor-pointer group mb-5 pl-7 overflow-hidden"
                   >
-                    <p className="text-sm font-semibold text-slate-800 group-hover:text-blue-700">{m.label}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">{m.description}</p>
-                  </button>
-                ))}
-              </div>
+                    <div className="mt-0.5">
+                      <input
+                        type="checkbox"
+                        checked={includeAdjustments}
+                        onChange={e => setIncludeAdjustments(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600 accent-blue-600 cursor-pointer"
+                      />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700 group-hover:text-blue-700">
+                        🔧 Incluir ajustes por reserva
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Daños cobrados, ingresos extra, descuentos dados
+                      </p>
+                    </div>
+                  </motion.label>
+                )}
+              </AnimatePresence>
+
               <button
-                onClick={() => setShowModeChooser(false)}
-                className="mt-4 w-full py-2 text-sm text-slate-500 hover:text-slate-700"
+                onClick={handleOptionsSubmit}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors"
+              >
+                Generar informe
+              </button>
+              <button
+                onClick={() => setShowOptionsModal(false)}
+                className="mt-3 w-full py-2 text-sm text-slate-500 hover:text-slate-700"
               >
                 Cancelar
               </button>

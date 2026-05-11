@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '@/lib/toast';
 import { listVendors, createVendor, updateVendor, deleteVendor, type Vendor } from '@/services/vendors';
@@ -53,6 +53,9 @@ export default function AseoClient(): JSX.Element {
     return d.toISOString().slice(0, 10);
   });
   const [histDateTo, setHistDateTo]     = useState(() => new Date().toISOString().slice(0, 10));
+  const histDateToRef = useRef<HTMLInputElement>(null);
+  const histDateToTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const histFromWasEmptyRef = useRef(false);
   const [histCleanerIds, setHistCleanerIds] = useState<string[]>([]);
   const [exporting, setExporting]       = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
@@ -489,11 +492,23 @@ export default function AseoClient(): JSX.Element {
                 type="date"
                 value={histDateFrom}
                 max={histDateTo || undefined}
-                onChange={e => setHistDateFrom(e.target.value)}
+                onFocus={() => { histFromWasEmptyRef.current = !histDateFrom; }}
+                onChange={e => {
+                  const val = e.target.value;
+                  setHistDateFrom(val);
+                  if (!histFromWasEmptyRef.current) return;
+                  if (histDateToTimerRef.current) clearTimeout(histDateToTimerRef.current);
+                  if (val) {
+                    histDateToTimerRef.current = setTimeout(() => {
+                      try { histDateToRef.current?.showPicker(); } catch { histDateToRef.current?.focus(); }
+                    }, 200);
+                  }
+                }}
                 className="border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
               />
               <span className="text-slate-400 text-xs">—</span>
               <input
+                ref={histDateToRef}
                 type="date"
                 value={histDateTo}
                 min={histDateFrom || undefined}

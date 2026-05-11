@@ -59,3 +59,18 @@ export const netAdjustment = (adj: BookingAdjustmentRow[]): number =>
     const v = Number(a.amount) || 0;
     return a.kind === 'discount' ? s - v : s + v;
   }, 0);
+
+/**
+ * Carga todos los ajustes de reserva con booking_id y descripción para exportes.
+ * RLS garantiza que solo se devuelven ajustes de reservas propias.
+ */
+export const listAllBookingAdjustmentsForExport = async (): Promise<
+  ServiceResult<Pick<BookingAdjustmentRow, 'booking_id' | 'kind' | 'amount' | 'date' | 'description'>[]>
+> => {
+  const { data, error } = await supabase
+    .from('booking_adjustments')
+    .select('booking_id, kind, amount, date, description')
+    .order('date', { ascending: true });
+  if (error) return { data: null, error: error.message };
+  return { data: data ?? [], error: null };
+};
