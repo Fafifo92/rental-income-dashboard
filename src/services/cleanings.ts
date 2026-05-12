@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase/client';
-import type { BookingCleaningRow, CleaningStatus } from '@/types/database';
+import type { BookingCleaningRow, CleaningStatus, ExpenseRow } from '@/types/database';
 
 export type ServiceResult<T>=
   | { data: T; error: null }
@@ -417,7 +417,7 @@ export const payoutCleanerConsolidated = async (args: {
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-  const expensesToInsert: Array<Omit<import('@/types/database').ExpenseRow, 'id' | 'created_at'>> = [];
+  const expensesToInsert: Array<Omit<ExpenseRow, 'id' | 'created_at'>> = [];
   let totalFee = 0;
   let totalSupplies = 0;
 

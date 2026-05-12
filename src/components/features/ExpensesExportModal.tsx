@@ -9,8 +9,7 @@ import {
 import { listExpenses } from '@/services/expenses';
 import { listProperties } from '@/services/properties';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
-import type { PropertyRow, PropertyGroupRow, PropertyTagRow, PropertyTagAssignmentRow } from '@/types/database';
-import { EXPENSE_CATEGORIES } from '@/types/database';
+import { EXPENSE_CATEGORIES, type PropertyRow, type PropertyGroupRow, type PropertyTagRow, type PropertyTagAssignmentRow } from '@/types/database';
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
 import { todayISO } from '@/lib/dateUtils';
 import type { Expense } from '@/types';
