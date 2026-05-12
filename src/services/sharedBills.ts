@@ -48,11 +48,11 @@ export const createSharedBill = async (args: {
     .single();
   if (billErr || !bill) return { data: null, error: billErr?.message ?? 'No se pudo crear la factura' };
 
-  // Carga el vendor para inferir la subcategory canónica del expense
-  // generado. Sin esto los gastos quedan "huérfanos" en la taxonomía 4+3.
+  // Carga el vendor para inferir la subcategory canónica del expense y
+  // construir una descripción enriquecida (nombre proveedor + periodo).
   const { data: vendor } = await supabase
     .from('vendors')
-    .select('kind')
+    .select('kind, name')
     .eq('id', args.vendorId)
     .single();
   const kindToSub: Record<string, string | null> = {
@@ -65,6 +65,24 @@ export const createSharedBill = async (args: {
   };
   const subcategoryFromVendor = vendor?.kind ? (kindToSub[vendor.kind] ?? null) : null;
 
+  // Construye una descripción legible: "Pago proveedor · Servicios · Nombre — ene 25 · notas"
+  const _ymParts = args.yearMonth.split('-');
+  const _monthNames = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const _ymLabel = _ymParts.length === 2
+    ? `${_monthNames[Number(_ymParts[1]) - 1]} ${_ymParts[0].slice(2)}`
+    : args.yearMonth;
+  const kindLabel: Record<string, string> = {
+    utility:     'Servicios públicos',
+    admin:       'Administración',
+    insurance:   'Seguro',
+    maintenance: 'Mantenimiento',
+    cleaner:     'Aseo',
+    other:       'Otros',
+  };
+  const vendorKindLabel = vendor?.kind ? (kindLabel[vendor.kind] ?? vendor.kind) : null;
+  const descParts = ['Pago proveedor', vendorKindLabel, vendor?.name, _ymLabel].filter(Boolean).join(' · ');
+  const richDescription = args.notes ? `${descParts} · ${args.notes}` : descParts;
+
   const shares = args.perPropertyAmounts && args.perPropertyAmounts.size > 0
     ? args.perPropertyAmounts
     : computeShares(args.totalAmount, vps);
@@ -76,7 +94,7 @@ export const createSharedBill = async (args: {
     amount,
     currency:         'COP',
     date:             args.paidDate,
-    description:      args.notes,
+    description:      richDescription,
     status:           'paid' as const,
     bank_account_id:  args.bankAccountId,
     vendor:           null,

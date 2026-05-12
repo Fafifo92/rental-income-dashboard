@@ -145,17 +145,21 @@ export const listCleaningsByCleaner = async (
 };
 
 /** Same enrichment as listCleaningsByCleaner but for ALL cleaners at once,
- *  with optional date range (done_date) and cleaner id filter. */
+ *  with optional date range (done_date), cleaner id filter, and status filter. */
 export const listAllCleaningsEnriched = async (options?: {
   from?: string;
   to?: string;
   cleanerIds?: string[];
+  statuses?: string[];
 }): Promise<ServiceResult<CleaningHistoryRow[]>> => {
   let query = supabase
     .from('booking_cleanings')
     .select('*');
   if (options?.cleanerIds && options.cleanerIds.length > 0) {
     query = query.in('cleaner_id', options.cleanerIds);
+  }
+  if (options?.statuses && options.statuses.length > 0) {
+    query = query.in('status', options.statuses);
   }
   if (options?.from) query = query.gte('done_date', options.from);
   if (options?.to)   query = query.lte('done_date', options.to);

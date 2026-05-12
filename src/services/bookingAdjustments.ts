@@ -26,6 +26,20 @@ export const createBookingAdjustment = async (
   return { data, error: null };
 };
 
+export const updateBookingAdjustment = async (
+  id: string,
+  patch: Partial<Pick<BookingAdjustmentRow, 'bank_account_id' | 'amount' | 'description' | 'date'>>,
+): Promise<ServiceResult<BookingAdjustmentRow>> => {
+  const { data, error } = await supabase
+    .from('booking_adjustments')
+    .update(patch)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return { data: null, error: error.message };
+  return { data, error: null };
+};
+
 export const deleteBookingAdjustment = async (
   id: string,
 ): Promise<ServiceResult<true>> => {

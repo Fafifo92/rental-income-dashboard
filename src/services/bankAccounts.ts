@@ -139,7 +139,7 @@ export const computeBalances = async (): Promise<ServiceResult<BankAccountBalanc
   if (accounts.length === 0) return { data: [], error: null };
 
   // ── Single batch fetch of all data needed ───────────────────────────────────
-  const [paymentsRes, bookingsRes, adjRes, expensesRes, depositsRes] = await Promise.all([
+  const [paymentsRes, bookingsRes, adjRes, expensesRes, depositsRes, guestDepositsRes] = await Promise.all([
     supabase
       .from('booking_payments')
       .select('bank_account_id, amount, booking_id'),
@@ -159,14 +159,22 @@ export const computeBalances = async (): Promise<ServiceResult<BankAccountBalanc
     supabase
       .from('account_deposits')
       .select('account_id, amount'),
+    // Guest security deposits: inflow when received, outflow when (partially) returned
+    supabase
+      .from('bookings')
+      .select('deposit_bank_account_id, deposit_status, security_deposit, deposit_returned_amount')
+      .not('deposit_bank_account_id', 'is', null)
+      .not('security_deposit', 'is', null)
+      .neq('deposit_status', 'none'),
   ]);
 
   // ── Pre-process into Maps keyed by account.id ────────────────────────────────
-  const allPayments = paymentsRes.data ?? [];
-  const allBookings = bookingsRes.data ?? [];
-  const allAdj      = adjRes.data ?? [];
-  const allExpenses = expensesRes.data ?? [];
-  const allDeposits = depositsRes.data ?? [];
+  const allPayments     = paymentsRes.data ?? [];
+  const allBookings     = bookingsRes.data ?? [];
+  const allAdj          = adjRes.data ?? [];
+  const allExpenses     = expensesRes.data ?? [];
+  const allDeposits     = depositsRes.data ?? [];
+  const allGuestDeps    = guestDepositsRes.data ?? [];
 
   const bookingsWithPayments = new Set(allPayments.map(p => p.booking_id as string));
 
@@ -208,18 +216,51 @@ export const computeBalances = async (): Promise<ServiceResult<BankAccountBalanc
     expOutflowByAcc.set(e.bank_account_id, (expOutflowByAcc.get(e.bank_account_id) ?? 0) + Number(e.amount));
   }
 
-  // deposit inflows per account
+  // account_deposits inflows per account (manual deposits)
   type DepRow = { account_id: string; amount: number };
   const depositInflowByAcc = new Map<string, number>();
   for (const d of allDeposits as DepRow[]) {
     depositInflowByAcc.set(d.account_id, (depositInflowByAcc.get(d.account_id) ?? 0) + Number(d.amount));
   }
 
+  // Guest security deposit: inflow when received (deposit is in the account),
+  // outflow when returned (the money left the account to the guest).
+  type GuestDepRow = {
+    deposit_bank_account_id: string | null;
+    deposit_status: string;
+    security_deposit: number | null;
+    deposit_returned_amount: number | null;
+  };
+  const guestDepInflowByAcc  = new Map<string, number>();
+  const guestDepOutflowByAcc = new Map<string, number>();
+  for (const gd of allGuestDeps as GuestDepRow[]) {
+    const acc = gd.deposit_bank_account_id;
+    if (!acc) continue;
+    const depositAmt  = Number(gd.security_deposit ?? 0);
+    const returnedAmt = Number(gd.deposit_returned_amount ?? 0);
+    // The full deposit entered this account when status ≠ 'none'
+    if (depositAmt > 0) {
+      guestDepInflowByAcc.set(acc, (guestDepInflowByAcc.get(acc) ?? 0) + depositAmt);
+    }
+    // The returned portion left the account
+    if (returnedAmt > 0 && (gd.deposit_status === 'partial_return' || gd.deposit_status === 'returned')) {
+      guestDepOutflowByAcc.set(acc, (guestDepOutflowByAcc.get(acc) ?? 0) + returnedAmt);
+    }
+  }
+
   // ── Assemble balances (pure JS, zero extra queries) ──────────────────────────
   const balances: BankAccountBalance[] = accounts.map(account => {
     const id = account.id;
-    const inflows  = (paymentInflowByAcc.get(id) ?? 0) + (legacyInflowByAcc.get(id) ?? 0) + (adjInflowByAcc.get(id) ?? 0) + (depositInflowByAcc.get(id) ?? 0);
-    const outflows = (expOutflowByAcc.get(id) ?? 0)    + (legacyFineByAcc.get(id) ?? 0);
+    const inflows  =
+      (paymentInflowByAcc.get(id) ?? 0) +
+      (legacyInflowByAcc.get(id) ?? 0) +
+      (adjInflowByAcc.get(id) ?? 0) +
+      (depositInflowByAcc.get(id) ?? 0) +
+      (guestDepInflowByAcc.get(id) ?? 0);
+    const outflows =
+      (expOutflowByAcc.get(id) ?? 0) +
+      (legacyFineByAcc.get(id) ?? 0) +
+      (guestDepOutflowByAcc.get(id) ?? 0);
     return {
       account,
       inflows,

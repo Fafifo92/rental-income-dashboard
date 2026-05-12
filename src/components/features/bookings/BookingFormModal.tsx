@@ -1,4 +1,3 @@
-import { useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MoneyInput from '@/components/MoneyInput';
 import { parseMoney } from '@/lib/money';
@@ -24,10 +23,6 @@ export default function BookingFormModal({
   open, editingId, form, formLoading, formWarning, authStatus, properties,
   onChange, onSubmit, onClose,
 }: Props) {
-  const checkOutRef = useRef<HTMLInputElement>(null);
-  const checkOutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const startWasEmptyRef = useRef(false);
-
   return (
     <AnimatePresence>
       {open && (
@@ -113,17 +108,7 @@ export default function BookingFormModal({
                       Check-in *{form.status === 'Inicia hoy' && <span className="ml-1 text-emerald-600">🔒 Hoy</span>}
                     </label>
                     <input type="date" value={form.start_date}
-                      onFocus={() => { startWasEmptyRef.current = !form.start_date; }}
-                      onChange={e => {
-                        onChange('start_date', e.target.value);
-                        if (!startWasEmptyRef.current) return;
-                        if (checkOutTimerRef.current) clearTimeout(checkOutTimerRef.current);
-                        if (e.target.value) {
-                          checkOutTimerRef.current = setTimeout(() => {
-                            try { checkOutRef.current?.showPicker(); } catch { checkOutRef.current?.focus(); }
-                          }, 200);
-                        }
-                      }}
+                      onChange={e => onChange('start_date', e.target.value)}
                       disabled={form.status === 'Inicia hoy'}
                       min={form.status === 'Reservada' ? todayISO() : undefined}
                       max={(form.status === 'Completada' || form.status === 'En curso') ? todayISO() : undefined}
@@ -133,7 +118,6 @@ export default function BookingFormModal({
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Check-out *</label>
                     <input type="date" value={form.end_date}
-                      ref={checkOutRef}
                       min={form.status === 'En curso'
                         ? (() => { const t = new Date(todayISO()); t.setDate(t.getDate() + 1); return t.toISOString().split('T')[0]; })()
                         : (form.start_date || undefined)}
@@ -162,14 +146,31 @@ export default function BookingFormModal({
                 )}
               </div>
 
-              {/* Ingresos */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Ingresos (COP) *</label>
-                <MoneyInput
-                  value={parseMoney(form.total_revenue)}
-                  onChange={(v) => onChange('total_revenue', v == null ? '' : String(v))}
-                  placeholder="0"
-                />
+              {/* Ingresos + Depósito de seguridad */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Ingresos (COP) *</label>
+                  <MoneyInput
+                    value={parseMoney(form.total_revenue)}
+                    onChange={(v) => onChange('total_revenue', v == null ? '' : String(v))}
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    Depósito de seguridad{' '}
+                    <span className="font-normal text-slate-400">(opcional)</span>
+                  </label>
+                  <MoneyInput
+                    value={parseMoney(form.security_deposit)}
+                    onChange={(v) => onChange('security_deposit', v == null ? '' : String(v))}
+                    placeholder="0"
+                    inputClassName="text-amber-700"
+                  />
+                  <p className="mt-0.5 text-[10px] text-slate-400">
+                    Se debe devolver al huésped al finalizar la estadía.
+                  </p>
+                </div>
               </div>
 
               {/* Anuncio */}

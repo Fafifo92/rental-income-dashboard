@@ -355,6 +355,17 @@ export type BookingRow = {
   checkout_done: boolean;
   inventory_checked: boolean;
   operational_notes: string | null;
+  /** Monto del depósito de seguridad cobrado al huésped (si aplica). */
+  security_deposit: number | null;
+  /** Cuenta bancaria donde se recibió el depósito de seguridad. */
+  deposit_bank_account_id: string | null;
+  /** Estado del depósito: none → sin depósito, received → recibido pendiente devolución,
+   *  partial_return → devolución parcial (daño descontado), returned → devuelto en su totalidad. */
+  deposit_status: 'none' | 'received' | 'partial_return' | 'returned';
+  /** Monto devuelto al huésped (partial_return o returned). */
+  deposit_returned_amount: number | null;
+  /** Fecha en que se devolvió el depósito. */
+  deposit_return_date: string | null;
 };
 
 export type ExpenseRow = {

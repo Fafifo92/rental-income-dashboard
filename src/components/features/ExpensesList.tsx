@@ -124,6 +124,19 @@ export default function ExpensesList({ expenses, loading = false, onDelete, onEd
           );
         },
       }),
+      helper.accessor('vendor', {
+        header: 'Proveedor',
+        enableSorting: false,
+        meta: { className: 'text-slate-600 max-w-[180px] truncate' },
+        cell: info => {
+          const value = info.getValue() as string | null | undefined;
+          return (
+            <span className="truncate" title={value ?? undefined}>
+              {value || '—'}
+            </span>
+          );
+        },
+      }),
       helper.accessor('amount', {
         header: 'Monto',
         meta: { align: 'right' },
@@ -226,7 +239,7 @@ export default function ExpensesList({ expenses, loading = false, onDelete, onEd
       renderFooter={filteredData => {
         const total = filteredData.reduce((sum, e) => sum + e.amount, 0);
         const hasActions = !!(onDelete || onEdit || onView);
-        const colSpanLeft = hasActions ? 4 : 3;
+        const colSpanLeft = hasActions ? 5 : 5;
         const colSpanRight = hasActions ? 2 : 1;
         return (
           <tr className="border-t bg-slate-50">

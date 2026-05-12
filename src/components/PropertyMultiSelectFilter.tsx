@@ -67,8 +67,9 @@ export default function PropertyMultiSelectFilter({
     const onDoc = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+    // Use capture phase so modal stopPropagation calls don't block this listener.
+    document.addEventListener('mousedown', onDoc, true);
+    return () => document.removeEventListener('mousedown', onDoc, true);
   }, [open]);
 
   const handleToggle = () => {

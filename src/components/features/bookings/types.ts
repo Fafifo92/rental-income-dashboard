@@ -28,6 +28,12 @@ export interface DisplayBooking {
   inventory_checked?: boolean;
   operational_notes?: string | null;
   isDemo?: boolean;
+  /** Depósito de seguridad cobrado al huésped (si aplica). */
+  security_deposit?: number | null;
+  deposit_bank_account_id?: string | null;
+  deposit_status?: 'none' | 'received' | 'partial_return' | 'returned';
+  deposit_returned_amount?: number | null;
+  deposit_return_date?: string | null;
 }
 
 export interface BookingForm {
@@ -44,12 +50,14 @@ export interface BookingForm {
   num_adults: string;
   num_children: string;
   notes: string;
+  /** Depósito de seguridad cobrado al huésped (opcional). */
+  security_deposit: string;
 }
 
 export const EMPTY_FORM: BookingForm = {
   guest_name: '', confirmation_code: '', start_date: '', end_date: '',
   num_nights: '', total_revenue: '', status: 'Reservada', listing_name: '', property_id: '',
-  channel: '', num_adults: '1', num_children: '0', notes: '',
+  channel: '', num_adults: '1', num_children: '0', notes: '', security_deposit: '',
 };
 
 export const EMPTY_FILTERS: BookingFilters = {};

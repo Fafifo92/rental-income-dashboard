@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ExpenseFilters } from '@/services/expenses';
 import { type BankAccountRow, EXPENSE_CATEGORIES } from '@/types/database';
@@ -21,9 +21,6 @@ const advancedCount = (f: ExpenseFilters) =>
 
 export default function FilterBar({ filters, onChange, onReset, bankAccounts = [] }: Props) {
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const dateToRef = useRef<HTMLInputElement>(null);
-  const dateToTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fromWasEmptyRef = useRef(false);
   const set = <K extends keyof ExpenseFilters>(key: K, value: ExpenseFilters[K]) =>
     onChange({ ...filters, [key]: value || undefined });
   const count = activeCount(filters);
@@ -109,18 +106,7 @@ export default function FilterBar({ filters, onChange, onReset, bankAccounts = [
             type="date"
             value={filters.dateFrom ?? ''}
             max={filters.dateTo || undefined}
-            onFocus={() => { fromWasEmptyRef.current = !filters.dateFrom; }}
-            onChange={e => {
-              const val = e.target.value;
-              set('dateFrom', val);
-              if (!fromWasEmptyRef.current) return;
-              if (dateToTimerRef.current) clearTimeout(dateToTimerRef.current);
-              if (val) {
-                dateToTimerRef.current = setTimeout(() => {
-                  try { dateToRef.current?.showPicker(); } catch { dateToRef.current?.focus(); }
-                }, 200);
-              }
-            }}
+            onChange={e => set('dateFrom', e.target.value)}
             className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
           />
         </div>
@@ -130,7 +116,6 @@ export default function FilterBar({ filters, onChange, onReset, bankAccounts = [
           <label className="block text-xs font-medium text-slate-500 mb-1.5">Hasta</label>
           <input
             type="date"
-            ref={dateToRef}
             value={filters.dateTo ?? ''}
             min={filters.dateFrom || undefined}
             onChange={e => set('dateTo', e.target.value)}

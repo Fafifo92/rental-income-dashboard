@@ -24,6 +24,10 @@ import { listInventoryItems, getDamageReconciliations, computeInventoryKpis, STA
 import type { InventoryItemRow, PropertyRow } from '@/types/database';
 import { getBooking, type BookingWithListingRow, listBookingAlerts, type BookingAlert } from '@/services/bookings';
 import { listProperties } from '@/services/properties';
+import { listPendingRecurringForOwner } from '@/services/recurringPeriods';
+import { listPendingSharedBills } from '@/services/sharedBills';
+import RecurringPendingPanel from './RecurringPendingPanel';
+import SharedBillsPendingPanel from './SharedBillsPendingPanel';
 
 // ─── Break-even Alert ─────────────────────────────────────────────────────────
 
@@ -96,6 +100,37 @@ function PLPanel({ kpis }: { kpis: FinancialKPIs }) {
   );
 }
 
+// ─── Pending count hook (drives the badge on the Pendientes tab) ──────────────
+
+function usePendingCount(refreshKey: number): number {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let mounted = true;
+    Promise.all([
+      listBookingAlerts(60),
+      listInventoryItems({}),
+      getDamageReconciliations(),
+      listPendingRecurringForOwner(6),
+      listPendingSharedBills(6),
+    ]).then(([alerts, invItems, recon, recurring, sharedBills]) => {
+      if (!mounted) return;
+      const cleanings   = (alerts.data  ?? []).filter(a => a.issues.includes('cleaning')).length;
+      const invProblems = (invItems.data ?? []).filter(it =>
+        it.status === 'damaged' || it.status === 'needs_maintenance' || it.status === 'depleted'
+      ).length;
+      const openRecon   = (recon.data ?? []).filter(r =>
+        r.status === 'pending_recovery' || r.status === 'overpaid' || r.status === 'no_charge'
+      ).length;
+      const recurringN  = (recurring.data    ?? []).length;
+      const sharedN     = (sharedBills.data  ?? []).length;
+      setCount(cleanings + invProblems + openRecon + recurringN + sharedN);
+    });
+    return () => { mounted = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
+  return count;
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function DashboardClient() {
@@ -103,12 +138,15 @@ export default function DashboardClient() {
   const { properties, propertyIds, setPropertyIds, groups, tags, tagAssigns } = usePropertyFilter();
   const [period, setPeriod]               = useState<Period>('current-month');
   const [customRange, setCustomRange]     = useState<{ from: string; to: string } | undefined>(undefined);
-  const [activeTab, setActiveTab]         = useState<'resumen' | 'ingresos-egresos' | 'en-curso' | 'calendario'>('resumen');
+  const [activeTab, setActiveTab]         = useState<'resumen' | 'pendientes' | 'ingresos-egresos' | 'en-curso' | 'calendario'>('resumen');
   const [showUploader, setShowUploader]   = useState(false);
   const [importedBookings, setImportedBookings] = useState<ParsedBooking[]>([]);
   const [calendarDetailBooking, setCalendarDetailBooking] = useState<BookingWithListingRow | null>(null);
   const [calendarDetailLoading, setCalendarDetailLoading] = useState(false);
   const [calendarPayoutBooking, setCalendarPayoutBooking] = useState<BookingWithListingRow | null>(null);
+  const [pendingRefreshKey, setPendingRefreshKey] = useState(0);
+
+  const pendingCount = usePendingCount(pendingRefreshKey);
 
   const { properties: allProperties, bankAccounts: allBankAccounts } = useReferenceData({
     authStatus, withProperties: true, withBankAccounts: true,
@@ -169,27 +207,50 @@ export default function DashboardClient() {
         </motion.div>
 
         {/* Tabs */}
-        <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit">
-          {(['resumen', 'ingresos-egresos', 'en-curso', 'calendario'] as const).map(tab => (
+        <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit flex-wrap">
+          {(['resumen', 'pendientes', 'ingresos-egresos', 'en-curso', 'calendario'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${
+              className={`relative px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${
                 activeTab === tab
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-500 hover:text-slate-700'
               }`}
             >
-              {tab === 'resumen' ? 'Resumen'
+              {tab === 'resumen'          ? 'Resumen'
+                : tab === 'pendientes'   ? 'Pendientes'
                 : tab === 'ingresos-egresos' ? 'Ingresos vs Egresos'
-                : tab === 'en-curso' ? 'Reservas en curso'
+                : tab === 'en-curso'     ? 'Reservas en curso'
                 : 'Calendario de ocupacion'}
+              {tab === 'pendientes' && pendingCount > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold rounded-full bg-rose-500 text-white leading-none">
+                  {pendingCount > 99 ? '99+' : pendingCount}
+                </span>
+              )}
             </button>
           ))}
         </div>
 
         {activeTab === 'ingresos-egresos' && kpis && payoutBreakdown ? (
           <IncomeExpenseTab payout={payoutBreakdown} kpis={kpis} granularity={granularity} transactions={transactions} txLoading={txLoading} />
+        ) : activeTab === 'pendientes' ? (
+          <div className="space-y-6">
+            <RecurringPendingPanel
+              propertyFilter={propertyIds.length === 1 ? propertyIds[0] : null}
+              onChanged={() => setPendingRefreshKey(k => k + 1)}
+            />
+            <SharedBillsPendingPanel
+              onChanged={() => setPendingRefreshKey(k => k + 1)}
+            />
+            <PendingCleaningsWidget />
+            <InventoryProblemsWidget />
+            {!loading && (
+              <p className="text-xs text-slate-400 text-center py-2">
+                Los ítems desaparecen de esta vista cuando son resueltos.
+              </p>
+            )}
+          </div>
         ) : activeTab === 'en-curso' ? (
           <ActiveBookingsWidget propertyIds={propertyIds} />
         ) : activeTab === 'calendario' ? (
@@ -223,12 +284,6 @@ export default function DashboardClient() {
 
         {/* Alerts */}
         {!loading && kpis && <AlertsPanel kpis={kpis} monthly={monthlyPnL} />}
-
-        {/* Aseos pendientes */}
-        {!loading && <PendingCleaningsWidget />}
-
-        {/* Bloque 16 — Items con problemas */}
-        {!loading && <InventoryProblemsWidget />}
 
         {/* Empty state for new authenticated users */}
         {!loading && authStatus === 'authed' && kpis && kpis.totalBookings === 0 && (

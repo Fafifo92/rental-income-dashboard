@@ -1,16 +1,16 @@
 'use client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '@/lib/toast';
 import { listVendors, createVendor, updateVendor, deleteVendor, type Vendor } from '@/services/vendors';
 import { listBankAccounts } from '@/services/bankAccounts';
 import {
-  listAllCleanings,
   listAllCleaningsEnriched,
   computeCleanerBalances,
   payoutCleanerConsolidated,
   getLooseCleanerSuppliesTotals,
   type BookingCleaning,
+  type CleaningHistoryRow,
 } from '@/services/cleanings';
 import {
   listCleanerGroups,
@@ -21,7 +21,7 @@ import {
 } from '@/services/cleanerGroups';
 import type { BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
-import { Pencil, UserMinus, Download } from 'lucide-react';
+import { Pencil, UserMinus, Download, SlidersHorizontal, X, CalendarDays, Users, Building2 } from 'lucide-react';
 import { exportAseoToCsv, exportAseoToExcel, exportAseoToPdf, type AseoExportRow } from '@/services/export';
 import { TagChip, NewTagInline } from './aseo/CleanerTagControls';
 import NewCleanerModal from './aseo/NewCleanerModal';
@@ -30,9 +30,16 @@ import PayoutModal from './aseo/PayoutModal';
 import EditCleanerModal from './aseo/EditCleanerModal';
 import ConfirmDeleteModal from './aseo/ConfirmDeleteModal';
 
+/** Format ISO date string (YYYY-MM-DD) to DD/MM/YYYY for display. */
+function fmtDate(iso: string | null): string {
+  if (!iso) return '—';
+  const [y, m, d] = iso.slice(0, 10).split('-');
+  return `${d}/${m}/${y}`;
+}
+
 export default function AseoClient(): JSX.Element {
   const [cleaners, setCleaners] = useState<Vendor[]>([]);
-  const [cleanings, setCleanings] = useState<BookingCleaning[]>([]);
+  const [cleanings, setCleanings] = useState<CleaningHistoryRow[]>([]);
   const [banks, setBanks] = useState<BankAccountRow[]>([]);
   const [groups, setGroups] = useState<CleanerGroup[]>([]);
   const [looseSupplies, setLooseSupplies] = useState<Map<string, { amount: number; count: number }>>(new Map());
@@ -53,18 +60,16 @@ export default function AseoClient(): JSX.Element {
     return d.toISOString().slice(0, 10);
   });
   const [histDateTo, setHistDateTo]     = useState(() => new Date().toISOString().slice(0, 10));
-  const histDateToRef = useRef<HTMLInputElement>(null);
-  const histDateToTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const histFromWasEmptyRef = useRef(false);
   const [histCleanerIds, setHistCleanerIds] = useState<string[]>([]);
-  const [exporting, setExporting]       = useState(false);
+  const [histStatuses, setHistStatuses]     = useState<string[]>([]);
+  const [histPropertyIds, setHistPropertyIds] = useState<string[]>([]);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     const [vRes, cRes, bRes, gRes, lRes] = await Promise.all([
       listVendors('cleaner'),
-      listAllCleanings(),
+      listAllCleaningsEnriched(),
       listBankAccounts(),
       listCleanerGroups(),
       getLooseCleanerSuppliesTotals(),
@@ -125,20 +130,38 @@ export default function AseoClient(): JSX.Element {
 
   const cleanerMap = useMemo(() => new Map(cleaners.map(c => [c.id, c])), [cleaners]);
 
+  /** Unique properties derived from enriched cleanings for the filter dropdown. */
+  const propertyOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const c of cleanings) {
+      if (c.property_id && c.property_name) seen.set(c.property_id, c.property_name);
+    }
+    return Array.from(seen.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [cleanings]);
+
   const filteredHistCleanings = useMemo(() => {
     return cleanings
       .filter(c => {
         if (histCleanerIds.length > 0 && c.cleaner_id && !histCleanerIds.includes(c.cleaner_id)) return false;
-        if (histDateFrom && c.done_date && c.done_date < histDateFrom) return false;
-        if (histDateTo && c.done_date && c.done_date > histDateTo) return false;
+        if (histStatuses.length > 0 && !histStatuses.includes(c.status)) return false;
+        if (histPropertyIds.length > 0 && (!c.property_id || !histPropertyIds.includes(c.property_id))) return false;
+        // For paid items, filter by paid_date (liquidation date); for others, filter by done_date.
+        // This ensures recently-liquidated items always appear even if done_date is old.
+        const effectiveDate = c.status === 'paid'
+          ? (c.paid_date ?? c.done_date ?? null)
+          : (c.done_date ?? null);
+        if (histDateFrom && effectiveDate && effectiveDate < histDateFrom) return false;
+        if (histDateTo && effectiveDate && effectiveDate > histDateTo) return false;
         return true;
       })
       .sort((a, b) => {
-        const da = a.done_date ?? a.created_at ?? '';
-        const db = b.done_date ?? b.created_at ?? '';
+        const da = (a.status === 'paid' ? (a.paid_date ?? a.done_date) : a.done_date) ?? a.created_at ?? '';
+        const db = (b.status === 'paid' ? (b.paid_date ?? b.done_date) : b.done_date) ?? b.created_at ?? '';
         return db.localeCompare(da);
       });
-  }, [cleanings, histCleanerIds, histDateFrom, histDateTo]);
+  }, [cleanings, histCleanerIds, histStatuses, histPropertyIds, histDateFrom, histDateTo]);
 
   const handleCreate = async () => {
     if (!form.name.trim()) { setErr('El nombre es obligatorio.'); return; }
@@ -217,21 +240,10 @@ export default function AseoClient(): JSX.Element {
   // a través de payoutCleanerConsolidated (botón "Liquidar"). Mantener
   // consistencia entre booking_cleanings.status='paid' y un expense real.
 
-  const handleExport = async (format: 'csv' | 'excel' | 'pdf') => {
-    setExporting(true);
+  const handleExport = (format: 'csv' | 'excel' | 'pdf') => {
     setExportMenuOpen(false);
-    const res = await listAllCleaningsEnriched({
-      from: histDateFrom || undefined,
-      to:   histDateTo   || undefined,
-      cleanerIds: histCleanerIds.length > 0 ? histCleanerIds : undefined,
-    });
-    if (res.error || !res.data) {
-      toast.error('Error al cargar historial para exportar');
-      setExporting(false);
-      return;
-    }
     const periodLabel = [histDateFrom, histDateTo].filter(Boolean).join('_al_') || 'todos';
-    const rows: AseoExportRow[] = res.data.map(r => ({
+    const rows: AseoExportRow[] = filteredHistCleanings.map(r => ({
       cleaner_name:  r.cleaner_id ? (cleanerMap.get(r.cleaner_id)?.name ?? '—') : '—',
       done_date:     r.done_date,
       booking_code:  r.booking_code,
@@ -243,10 +255,9 @@ export default function AseoClient(): JSX.Element {
       status:        r.status,
       paid_date:     r.paid_date,
     }));
-    if (format === 'csv')   exportAseoToCsv(rows, periodLabel);
+    if (format === 'csv')        exportAseoToCsv(rows, periodLabel);
     else if (format === 'excel') exportAseoToExcel(rows, periodLabel);
-    else                    exportAseoToPdf(rows, periodLabel);
-    setExporting(false);
+    else                         exportAseoToPdf(rows, periodLabel);
   };
 
   const totalOwed = useMemo(
@@ -452,29 +463,45 @@ export default function AseoClient(): JSX.Element {
       )}
 
       {/* ── Historial Global de Aseo ──────────────────────────────────────── */}
-      {!loading && cleanings.length > 0 && (
+      {!loading && cleanings.length > 0 && (() => {
+        const activeFilterCount =
+          (histDateFrom || histDateTo ? 1 : 0) +
+          histStatuses.length + histCleanerIds.length + histPropertyIds.length;
+        const clearAll = () => {
+          setHistStatuses([]); setHistCleanerIds([]); setHistPropertyIds([]);
+          setHistDateFrom(''); setHistDateTo('');
+        };
+        return (
         <div className="mt-10">
+          {/* Section header */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-            <h2 className="text-xl font-bold text-slate-800">📋 Historial de Aseo</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-bold text-slate-800">📋 Historial de Aseo</h2>
+              {activeFilterCount > 0 && (
+                <span className="bg-blue-100 text-blue-700 text-[11px] font-bold px-2 py-0.5 rounded-full leading-none">
+                  {activeFilterCount} filtro{activeFilterCount !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
             <div className="relative">
               <button
                 onClick={() => setExportMenuOpen(v => !v)}
-                disabled={exporting || filteredHistCleanings.length === 0}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-slate-700 text-white text-sm font-semibold rounded-lg hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed shadow-sm"
+                disabled={filteredHistCleanings.length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-900 disabled:bg-slate-300 disabled:cursor-not-allowed shadow-sm transition-colors"
               >
                 <Download size={15} />
-                {exporting ? 'Exportando…' : 'Exportar'}
+                Exportar
               </button>
               {exportMenuOpen && (
                 <div
-                  className="absolute right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-20 min-w-[168px] overflow-hidden"
+                  className="absolute right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-20 min-w-[176px] overflow-hidden"
                   onMouseLeave={() => setExportMenuOpen(false)}
                 >
                   {(['csv', 'excel', 'pdf'] as const).map(fmt => (
                     <button
                       key={fmt}
                       onClick={() => handleExport(fmt)}
-                      className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50"
+                      className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
                     >
                       {fmt === 'csv' ? '📄 CSV' : fmt === 'excel' ? '📊 Excel (.xls)' : '🖨️ PDF / Imprimir'}
                     </button>
@@ -484,113 +511,224 @@ export default function AseoClient(): JSX.Element {
             </div>
           </div>
 
-          {/* Filters */}
-          <div className="flex flex-wrap gap-3 items-start p-3 bg-slate-50 border border-slate-200 rounded-xl mb-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Período:</span>
-              <input
-                type="date"
-                value={histDateFrom}
-                max={histDateTo || undefined}
-                onFocus={() => { histFromWasEmptyRef.current = !histDateFrom; }}
-                onChange={e => {
-                  const val = e.target.value;
-                  setHistDateFrom(val);
-                  if (!histFromWasEmptyRef.current) return;
-                  if (histDateToTimerRef.current) clearTimeout(histDateToTimerRef.current);
-                  if (val) {
-                    histDateToTimerRef.current = setTimeout(() => {
-                      try { histDateToRef.current?.showPicker(); } catch { histDateToRef.current?.focus(); }
-                    }, 200);
-                  }
-                }}
-                className="border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-              />
-              <span className="text-slate-400 text-xs">—</span>
-              <input
-                ref={histDateToRef}
-                type="date"
-                value={histDateTo}
-                min={histDateFrom || undefined}
-                onChange={e => setHistDateTo(e.target.value)}
-                className="border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-              />
-              {(histDateFrom || histDateTo) && (
+          {/* ── Filter Panel ─────────────────────────────────────────────── */}
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm mb-5 overflow-hidden">
+            {/* Panel header */}
+            <div className="px-5 py-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white flex items-center justify-between">
+              <div className="flex items-center gap-2 text-slate-500">
+                <SlidersHorizontal size={14} strokeWidth={2.5} />
+                <span className="text-xs font-bold uppercase tracking-widest">Filtros</span>
+              </div>
+              {activeFilterCount > 0 && (
                 <button
-                  onClick={() => { setHistDateFrom(''); setHistDateTo(''); }}
-                  className="text-xs text-blue-600 underline"
+                  onClick={clearAll}
+                  className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-500 transition-colors font-medium"
                 >
-                  Ver todos
+                  <X size={12} /> Limpiar todo
                 </button>
               )}
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Personal:</span>
-              {histCleanerIds.length > 0 && (
-                <button onClick={() => setHistCleanerIds([])} className="text-xs text-blue-600 underline">
-                  Todos
-                </button>
-              )}
-              {cleaners.map(c => (
-                <button
-                  key={c.id}
-                  onClick={() => setHistCleanerIds(prev =>
-                    prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]
+
+            <div className="p-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-6 gap-y-5">
+              {/* Período */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  <CalendarDays size={11} strokeWidth={2.5} />
+                  <span>Período <span className="normal-case font-normal text-slate-300">(aseo / liquidación)</span></span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="date"
+                    value={histDateFrom}
+                    max={histDateTo || undefined}
+                    onChange={e => setHistDateFrom(e.target.value)}
+                    className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 bg-slate-50 hover:bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition-colors"
+                  />
+                  <span className="text-slate-300 text-sm font-light shrink-0">–</span>
+                  <input
+                    type="date"
+                    value={histDateTo}
+                    min={histDateFrom || undefined}
+                    onChange={e => setHistDateTo(e.target.value)}
+                    className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 bg-slate-50 hover:bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition-colors"
+                  />
+                </div>
+                {(histDateFrom || histDateTo) && (
+                  <button
+                    onClick={() => { setHistDateFrom(''); setHistDateTo(''); }}
+                    className="text-[11px] text-blue-500 hover:text-blue-700 font-medium transition-colors"
+                  >
+                    Ver todos
+                  </button>
+                )}
+              </div>
+
+              {/* Estado */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  <span className="text-[11px]">◉</span>
+                  <span>Estado</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {([
+                    { value: 'pending', label: 'Pendiente', dot: '🟡',
+                      on: 'bg-amber-50 text-amber-700 border-amber-300 ring-1 ring-amber-200' },
+                    { value: 'done',    label: 'Hecho',     dot: '🔵',
+                      on: 'bg-blue-50 text-blue-700 border-blue-300 ring-1 ring-blue-200' },
+                    { value: 'paid',    label: 'Liquidado', dot: '✅',
+                      on: 'bg-emerald-50 text-emerald-700 border-emerald-300 ring-1 ring-emerald-200' },
+                  ] as const).map(({ value, label, dot, on }) => (
+                    <button
+                      key={value}
+                      onClick={() => setHistStatuses(prev =>
+                        prev.includes(value) ? prev.filter(s => s !== value) : [...prev, value]
+                      )}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all ${
+                        histStatuses.includes(value)
+                          ? on
+                          : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700'
+                      }`}
+                    >
+                      <span className="text-[10px] leading-none">{dot}</span>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Personal */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  <Users size={11} strokeWidth={2.5} />
+                  <span>Personal</span>
+                  {histCleanerIds.length > 0 && (
+                    <button onClick={() => setHistCleanerIds([])} className="ml-auto text-[10px] text-blue-400 hover:text-blue-600 font-medium normal-case tracking-normal">Todos</button>
                   )}
-                  className={`px-2 py-0.5 rounded-full text-xs font-semibold border transition-colors ${
-                    histCleanerIds.includes(c.id)
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
-                  }`}
-                >
-                  {c.name}
-                </button>
-              ))}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {cleaners.map(c => (
+                    <button
+                      key={c.id}
+                      onClick={() => setHistCleanerIds(prev =>
+                        prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]
+                      )}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all ${
+                        histCleanerIds.includes(c.id)
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-200'
+                          : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-700'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${histCleanerIds.includes(c.id) ? 'bg-blue-200' : 'bg-slate-300'}`} />
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Propiedad */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  <Building2 size={11} strokeWidth={2.5} />
+                  <span>Propiedad</span>
+                  {histPropertyIds.length > 0 && (
+                    <button onClick={() => setHistPropertyIds([])} className="ml-auto text-[10px] text-blue-400 hover:text-blue-600 font-medium normal-case tracking-normal">Todas</button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {propertyOptions.length === 0
+                    ? <span className="text-xs text-slate-400 italic">Sin propiedades</span>
+                    : propertyOptions.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => setHistPropertyIds(prev =>
+                          prev.includes(p.id) ? prev.filter(id => id !== p.id) : [...prev, p.id]
+                        )}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all ${
+                          histPropertyIds.includes(p.id)
+                            ? 'bg-violet-600 text-white border-violet-600 shadow-sm shadow-violet-200'
+                            : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300 hover:text-violet-700'
+                        }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${histPropertyIds.includes(p.id) ? 'bg-violet-200' : 'bg-slate-300'}`} />
+                        {p.name}
+                      </button>
+                    ))
+                  }
+                </div>
+              </div>
             </div>
           </div>
 
           {/* Table */}
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/70 flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
                 {filteredHistCleanings.length} registro{filteredHistCleanings.length !== 1 ? 's' : ''}
               </span>
-              <span className="text-xs font-semibold text-slate-700">
+              <span className="text-xs font-bold text-slate-700">
                 Total: {formatCurrency(filteredHistCleanings.reduce((s, c) => s + c.fee, 0))}
               </span>
             </div>
             {filteredHistCleanings.length === 0 ? (
-              <p className="text-center text-slate-400 text-sm py-8">Sin registros para el período seleccionado</p>
+              <div className="py-12 text-center">
+                <p className="text-slate-400 text-sm">Sin registros para los filtros seleccionados</p>
+                {activeFilterCount > 0 && (
+                  <button onClick={clearAll} className="mt-2 text-xs text-blue-500 hover:text-blue-700 underline">
+                    Limpiar filtros
+                  </button>
+                )}
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-left bg-slate-50">
-                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Personal</th>
-                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Fecha hecho</th>
-                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide text-right">Valor</th>
-                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Estado</th>
-                      <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Liquidado</th>
+                    <tr className="text-left bg-slate-50 border-b border-slate-100">
+                      <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Personal</th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Propiedad</th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fecha aseo</th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Valor</th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Estado</th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fecha liquidado</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y divide-slate-50">
                     {filteredHistCleanings.slice(0, 200).map(c => {
                       const cleanerName = c.cleaner_id ? (cleanerMap.get(c.cleaner_id)?.name ?? '—') : '—';
-                      const statusLabel = c.status === 'paid' ? '✅ Liquidado' : c.status === 'done' ? '🔵 Hecho' : '🟡 Pendiente';
                       return (
-                        <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50">
-                          <td className="px-4 py-2.5 font-medium text-slate-800">{cleanerName}</td>
-                          <td className="px-4 py-2.5 text-slate-600">{c.done_date ?? '—'}</td>
-                          <td className="px-4 py-2.5 text-right font-mono text-slate-700">{formatCurrency(c.fee)}</td>
-                          <td className="px-4 py-2.5 text-slate-600">{statusLabel}</td>
-                          <td className="px-4 py-2.5 text-slate-500">{c.paid_date ?? '—'}</td>
+                        <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="px-4 py-3 font-medium text-slate-800">{cleanerName}</td>
+                          <td className="px-4 py-3 text-slate-600 text-xs">{c.property_name ?? <span className="text-slate-300">—</span>}</td>
+                          <td className="px-4 py-3 text-slate-500 text-xs tabular-nums">{fmtDate(c.done_date)}</td>
+                          <td className="px-4 py-3 text-right font-mono font-semibold text-slate-700">{formatCurrency(c.fee)}</td>
+                          <td className="px-4 py-3">
+                            {c.status === 'paid' && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[11px] font-semibold">
+                                ✅ Liquidado
+                              </span>
+                            )}
+                            {c.status === 'done' && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-full text-[11px] font-semibold">
+                                🔵 Hecho
+                              </span>
+                            )}
+                            {c.status === 'pending' && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-[11px] font-semibold">
+                                🟡 Pendiente
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-xs tabular-nums">
+                            {c.paid_date
+                              ? <span className="text-emerald-700 font-semibold">{fmtDate(c.paid_date)}</span>
+                              : <span className="text-slate-300">—</span>}
+                          </td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
                 {filteredHistCleanings.length > 200 && (
-                  <p className="text-center text-xs text-slate-400 py-3 border-t">
+                  <p className="text-center text-xs text-slate-400 py-3 border-t border-slate-100">
                     Mostrando 200 de {filteredHistCleanings.length} registros. Usa el exportador para ver todos.
                   </p>
                 )}
@@ -598,7 +736,8 @@ export default function AseoClient(): JSX.Element {
             )}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       <AnimatePresence>
         {newModal && (

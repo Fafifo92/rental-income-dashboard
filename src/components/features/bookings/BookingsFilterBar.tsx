@@ -1,4 +1,3 @@
-import { useRef } from 'react';
 import { motion } from 'framer-motion';
 import type { BookingFilters } from '@/services/bookings';
 import type { DerivedBookingStatus } from '@/lib/bookingStatus';
@@ -18,9 +17,6 @@ export default function BookingsFilterBar({
   search, setSearch, applySearch, filters, setFilters, statusFilter, setStatusFilter, onClear,
 }: Props) {
   const hasFilters = !!(filters.dateFrom || filters.dateTo || filters.search || statusFilter !== 'all');
-  const dateToRef = useRef<HTMLInputElement>(null);
-  const dateToTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fromWasEmptyRef = useRef(false);
 
   return (
     <motion.div
@@ -46,25 +42,13 @@ export default function BookingsFilterBar({
         <label className="block text-xs font-medium text-slate-500 mb-1.5">Desde</label>
         <input type="date" value={filters.dateFrom ?? ''}
           max={filters.dateTo || undefined}
-          onFocus={() => { fromWasEmptyRef.current = !filters.dateFrom; }}
-          onChange={e => {
-            const val = e.target.value;
-            setFilters(prev => ({ ...prev, dateFrom: val || undefined }));
-            if (!fromWasEmptyRef.current) return;
-            if (dateToTimerRef.current) clearTimeout(dateToTimerRef.current);
-            if (val) {
-              dateToTimerRef.current = setTimeout(() => {
-                try { dateToRef.current?.showPicker(); } catch { dateToRef.current?.focus(); }
-              }, 200);
-            }
-          }}
+          onChange={e => setFilters(prev => ({ ...prev, dateFrom: e.target.value || undefined }))}
           className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
         />
       </div>
       <div className="min-w-[140px]">
         <label className="block text-xs font-medium text-slate-500 mb-1.5">Hasta</label>
         <input type="date" value={filters.dateTo ?? ''}
-          ref={dateToRef}
           min={filters.dateFrom || undefined}
           onChange={e => setFilters(prev => ({ ...prev, dateTo: e.target.value || undefined }))}
           className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"

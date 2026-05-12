@@ -6,6 +6,7 @@ import ExpenseDetailModal from './ExpenseDetailModal';
 import FilterBar from './FilterBar';
 import { type ExpenseTypeChoice } from './ExpenseTypeChooser';
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
+import ExpensesExportModal from './ExpensesExportModal';
 
 const BookingDetailModal = lazy(() => import('./BookingDetailModal'));
 import RecurringPendingPanel from './RecurringPendingPanel';
@@ -58,6 +59,7 @@ export default function ExpensesClient() {
   const [viewingBooking, setViewingBooking] = useState<BookingRow | null>(null);
   const [tab, setTab] = useState<'all' | ExpenseSection | 'others'>('all');
   const [subFilter, setSubFilter] = useState<ExpenseSubcategory | null>(null);
+  const [showExportModal, setShowExportModal] = useState(false);
 
   // Deep-link: capture ?recurring=<id>&ym=<ym> at mount and clear from URL immediately
   const [deepLinkRecurring] = useState<{ id: string; ym: string } | null>(() => {
@@ -389,6 +391,17 @@ export default function ExpensesClient() {
             <motion.button
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
+              onClick={() => setShowExportModal(true)}
+              className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-1.5"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Exportar
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
               onClick={() => setShowChooser(true)}
               className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
             >
@@ -595,6 +608,19 @@ export default function ExpensesClient() {
             target={deleteTarget}
             onCancel={() => setDeleteTarget(null)}
             onConfirm={handleConfirmDelete}
+          />
+        )}
+
+        {showExportModal && (
+          <ExpensesExportModal
+            properties={properties}
+            groups={groups}
+            tags={tags}
+            tagAssigns={tagAssigns}
+            defaultPropertyIds={propertyIds}
+            defaultDateFrom={filters.dateFrom}
+            defaultDateTo={filters.dateTo}
+            onClose={() => setShowExportModal(false)}
           />
         )}
       </AnimatePresence>

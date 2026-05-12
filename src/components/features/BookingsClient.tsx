@@ -20,6 +20,7 @@ import ConfirmDeleteChallenge from './ConfirmDeleteChallenge';
 import { parseMoney } from '@/lib/money';
 import { getBookingStatus, inferOperationalFlags, type DerivedBookingStatus } from '@/lib/bookingStatus';
 import { toast } from '@/lib/toast';
+import BookingsExportModal from './BookingsExportModal';
 
 import {
   type DisplayBooking, type BookingForm,
@@ -53,6 +54,7 @@ export default function BookingsClient() {
   const [detailTarget, setDetailTarget] = useState<DisplayBooking | null>(null);
   const [statusFilter, setStatusFilter] = useState<DerivedBookingStatus | 'all'>('all');
   const [pendingCleaningIds, setPendingCleaningIds] = useState<Set<string>>(new Set());
+  const [showExportModal, setShowExportModal] = useState(false);
 
   // Deep-link: capture ?booking=<id> at mount and clear from URL immediately
   const [deepLinkBookingId] = useState<string | null>(() => {
@@ -321,6 +323,7 @@ export default function BookingsClient() {
           num_adults: parseInt(form.num_adults) || 1,
           num_children: parseInt(form.num_children) || 0,
           notes: form.notes || null,
+          security_deposit: parseMoney(form.security_deposit) ?? null,
           ...(targetListingId !== editingListingId ? { listing_id: targetListingId } : {}),
         });
         if (res.error) { toast.error(res.error); setFormLoading(false); return; }
@@ -375,6 +378,7 @@ export default function BookingsClient() {
           notes: form.notes || undefined,
           checkin_done: opFlags.checkin_done,
           checkout_done: opFlags.checkout_done,
+          security_deposit: parseMoney(form.security_deposit) ?? null,
         });
         if (res.error) { toast.error(res.error); setFormLoading(false); return; }
         toast.success('Reserva creada');
@@ -417,6 +421,7 @@ export default function BookingsClient() {
       num_adults: '1',
       num_children: '0',
       notes: '',
+      security_deposit: b.security_deposit != null ? String(b.security_deposit) : '',
     });
     setShowModal(true);
   }, []);
@@ -521,6 +526,16 @@ export default function BookingsClient() {
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           <PropertyMultiSelect properties={allProperties} value={propertyIds} onChange={setPropertyIds} groups={groups} tags={tags} tagAssigns={tagAssigns} />
+          <motion.button
+            whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+            onClick={() => setShowExportModal(true)}
+            className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-1.5"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Exportar
+          </motion.button>
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
             onClick={openNewBookingModal}
@@ -652,6 +667,23 @@ export default function BookingsClient() {
           )}
         </AnimatePresence>
       </Suspense>
+
+      {/* ── Export Modal ────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showExportModal && (
+          <BookingsExportModal
+            properties={allProperties}
+            groups={groups}
+            tags={tags}
+            tagAssigns={tagAssigns}
+            defaultPropertyIds={propertyIds}
+            defaultDateFrom={filters.dateFrom}
+            defaultDateTo={filters.dateTo}
+            defaultStatusFilter={statusFilter}
+            onClose={() => setShowExportModal(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* ── Delete confirmation (reto BORRAR) ──────────────────────────── */}
       <AnimatePresence>

@@ -29,6 +29,11 @@ export const fromRow = (row: BookingWithListingRow): DisplayBooking => ({
   checkout_done: row.checkout_done ?? false,
   inventory_checked: row.inventory_checked ?? false,
   operational_notes: row.operational_notes ?? null,
+  security_deposit: row.security_deposit !== null && row.security_deposit !== undefined ? Number(row.security_deposit) : null,
+  deposit_bank_account_id: row.deposit_bank_account_id ?? null,
+  deposit_status: (row.deposit_status ?? 'none') as DisplayBooking['deposit_status'],
+  deposit_returned_amount: row.deposit_returned_amount !== null && row.deposit_returned_amount !== undefined ? Number(row.deposit_returned_amount) : null,
+  deposit_return_date: row.deposit_return_date ?? null,
 });
 
 export const fromDemo = (b: ParsedBooking, i: number): DisplayBooking => ({

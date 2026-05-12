@@ -642,6 +642,7 @@ export const insertBooking = async (
     notes?: string;
     checkin_done?: boolean;
     checkout_done?: boolean;
+    security_deposit?: number | null;
   },
 ): Promise<ServiceResult<BookingRow>> => {
   const { data: row, error } = await supabase
@@ -673,6 +674,8 @@ export const insertBooking = async (
       checkout_done: data.checkout_done ?? false,
       inventory_checked: false,
       operational_notes: null,
+      security_deposit: data.security_deposit ?? null,
+      deposit_status: 'none',
     })
     .select()
     .single();
@@ -696,6 +699,7 @@ export const updateBooking = async (
     num_children?: number;
     notes?: string | null;
     listing_id?: string | null;
+    security_deposit?: number | null;
   },
 ): Promise<ServiceResult<BookingRow>> => {
   const dbPatch: Partial<Omit<BookingRow, 'id' | 'created_at'>> = { ...patch } as Partial<Omit<BookingRow, 'id' | 'created_at'>>;
@@ -742,6 +746,27 @@ export const updateBookingPayout = async (
   const { data, error } = await supabase
     .from('bookings')
     .update(dbPatch)
+    .eq('id', bookingId)
+    .select()
+    .single();
+  if (error) return { data: null, error: error.message };
+  return { data, error: null };
+};
+
+/** Update the deposit-related fields of a booking. */
+export const updateBookingDeposit = async (
+  bookingId: string,
+  patch: {
+    security_deposit?: number | null;
+    deposit_bank_account_id?: string | null;
+    deposit_status?: 'none' | 'received' | 'partial_return' | 'returned';
+    deposit_returned_amount?: number | null;
+    deposit_return_date?: string | null;
+  },
+): Promise<ServiceResult<BookingRow>> => {
+  const { data, error } = await supabase
+    .from('bookings')
+    .update(patch)
     .eq('id', bookingId)
     .select()
     .single();

@@ -90,7 +90,7 @@ function MonthTimeline({ year, month, bookings }: { year: number; month: number;
   const isoDay      = (d: number) => `${year}-${pad2(month)}-${pad2(d)}`;
   const DOW_LETTER  = ['D', 'L', 'M', 'X', 'J', 'V', 'S']; // Sun=0
 
-  const days   = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const days    = Array.from({ length: daysInMonth }, (_, i) => i + 1);
   const LABEL_W = 168; // px
 
   // Active first (by start date), then cancelled
@@ -99,165 +99,174 @@ function MonthTimeline({ year, month, bookings }: { year: number; month: number;
     return a.start.localeCompare(b.start);
   });
 
+  const activeCount = sorted.filter(b => !b.cancelled).length;
+
   return (
-    <div style={{
-      border: '1.5px solid #cbd5e1', borderRadius: 12, overflow: 'hidden',
-      background: 'white', breakInside: 'avoid', marginBottom: 16,
-    }}>
-      {/* Month header */}
+    // month-cal class lets the print CSS override overflow so thead can repeat across pages.
+    // border-radius on the outer div still shows the rounded border; the gradient header
+    // has its own border-radius so it clips correctly without needing parent overflow:hidden.
+    <div
+      className="month-cal"
+      style={{
+        border: '1.5px solid #cbd5e1', borderRadius: 12, overflow: 'hidden',
+        background: 'white', marginBottom: 16,
+      }}
+    >
+      {/* Month header — own border-radius so it still looks rounded when print overrides overflow */}
       <div style={{
         background: 'linear-gradient(135deg, #1e40af 0%, #3b82f6 100%)',
         color: 'white', padding: '9px 14px',
         fontWeight: 800, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em',
         display: 'flex', alignItems: 'center', gap: 10,
+        borderRadius: '10px 10px 0 0',
       }}>
         {MONTHS_ES[month - 1]} {year}
         <span style={{ fontSize: 10, fontWeight: 400, opacity: 0.75, marginLeft: 'auto' }}>
-          {sorted.filter(b => !b.cancelled).length} reserva{sorted.filter(b => !b.cancelled).length !== 1 ? 's' : ''} activa{sorted.filter(b => !b.cancelled).length !== 1 ? 's' : ''}
+          {activeCount} reserva{activeCount !== 1 ? 's' : ''} activa{activeCount !== 1 ? 's' : ''}
         </span>
       </div>
 
-      {/* Column headers */}
-      <div style={{ display: 'flex', background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-        <div style={{
-          width: LABEL_W, flexShrink: 0, padding: '5px 8px',
-          fontSize: 8, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em',
-          borderRight: '2px solid #e2e8f0',
-        }}>
-          Huésped · Propiedad
-        </div>
-        {days.map(d => {
-          const dow       = new Date(year, month - 1, d).getDay();
-          const isWeekend = dow === 0 || dow === 6;
-          return (
-            <div key={d} style={{
-              flex: 1, textAlign: 'center', padding: '3px 0',
-              borderRight: d < daysInMonth ? '1px solid #e8edf2' : 'none',
-              background: isWeekend ? '#f1f5f9' : 'transparent',
+      {/* ── Calendar grid as proper <table> so <thead> auto-repeats on print page breaks ── */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <colgroup>
+          <col style={{ width: LABEL_W }} />
+          {days.map(d => <col key={d} />)}
+        </colgroup>
+
+        <thead>
+          <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+            <th style={{
+              padding: '5px 8px',
+              fontSize: 8, fontWeight: 700, color: '#94a3b8',
+              textTransform: 'uppercase', letterSpacing: '0.05em',
+              borderRight: '2px solid #e2e8f0', textAlign: 'left', verticalAlign: 'middle',
             }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: isWeekend ? '#94a3b8' : '#374151', lineHeight: 1 }}>{d}</div>
-              <div style={{ fontSize: 7, color: '#cbd5e1', lineHeight: 1, marginTop: 1 }}>{DOW_LETTER[dow]}</div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* One row per booking */}
-      {sorted.length === 0 && (
-        <div style={{ padding: '14px 16px', textAlign: 'center', color: '#94a3b8', fontSize: 10 }}>
-          Sin reservas este mes
-        </div>
-      )}
-      {sorted.map((bk, rowIdx) => {
-        const palette = bk.cancelled
-          ? CANCELLED_STYLE
-          : BOOKING_PALETTE[bk.colorIndex % BOOKING_PALETTE.length];
-        const isLast = rowIdx === sorted.length - 1;
-
-        return (
-          <div key={bk.id} style={{
-            display: 'flex',
-            borderBottom: isLast ? 'none' : '1px solid #f1f5f9',
-            minHeight: 36,
-          }}>
-            {/* ── Label column ── */}
-            <div style={{
-              width: LABEL_W, flexShrink: 0, padding: '4px 8px',
-              background: bk.cancelled ? '#f8fafc' : palette.bg,
-              borderRight: `3px solid ${palette.dot}`,
-              display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1,
-              opacity: bk.cancelled ? 0.6 : 1,
-            }}>
-              {/* Guest name */}
-              <div style={{
-                fontSize: 10, fontWeight: 700, color: palette.color, lineHeight: 1.2,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                textDecoration: bk.cancelled ? 'line-through' : 'none',
-              }}>
-                {bk.guest ?? '—'}
-              </div>
-              {/* Property name badge */}
-              {bk.propertyName && (
-                <div style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 3,
-                  fontSize: 8, fontWeight: 600, color: palette.dot,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  <span style={{
-                    width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-                    background: palette.dot, display: 'inline-block',
-                  }} />
-                  {bk.propertyName}
-                </div>
-              )}
-              {/* Code · nights · revenue */}
-              <div style={{
-                fontSize: 8, fontFamily: 'monospace', color: palette.color, opacity: 0.75,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1,
-              }}>
-                {bk.cancelled ? '✕ ' : ''}{bk.confirmationCode}
-                {!bk.cancelled && bk.nights > 0 && ` · ${bk.nights}n`}
-              </div>
-              {/* Revenue — always shown in label (never cut off by bar width) */}
-              {!bk.cancelled && bk.revenue > 0 && (
-                <div style={{
-                  fontSize: 9, fontWeight: 800, color: palette.dot, lineHeight: 1,
-                }}>
-                  {formatCurrency(bk.revenue)}
-                </div>
-              )}
-            </div>
-
-            {/* ── Day cells ── */}
+              Huésped · Propiedad
+            </th>
             {days.map(d => {
-              const iso       = isoDay(d);
-              const inStay    = iso >= bk.start && iso < bk.end;
-              const isCheckIn = iso === bk.start;
-              const nextIso   = isoDay(d + 1);
-              const isLastOcc = inStay && nextIso === bk.end;
-              const isCheckOutDay = iso === bk.end; // checkout day itself (empty)
               const dow       = new Date(year, month - 1, d).getDay();
               const isWeekend = dow === 0 || dow === 6;
-
-              if (!inStay) {
-                return (
-                  <div key={d} style={{
-                    flex: 1,
-                    background: isWeekend ? '#f8fafc' : 'white',
-                    borderRight: d < daysInMonth ? '1px solid #f1f5f9' : 'none',
-                    borderLeft: isCheckOutDay ? `2px solid ${palette.dot}33` : 'none',
-                  }} />
-                );
-              }
-
               return (
-                <div key={d} style={{
-                  flex: 1,
-                  background: bk.cancelled ? palette.bg + 'aa' : palette.bg,
-                  borderRight: d < daysInMonth ? `1px solid ${palette.border}44` : 'none',
-                  borderLeft: isCheckIn ? `3px solid ${palette.dot}` : 'none',
-                  position: 'relative',
+                <th key={d} style={{
+                  textAlign: 'center', padding: '3px 0',
+                  borderRight: d < daysInMonth ? '1px solid #e8edf2' : 'none',
+                  background: isWeekend ? '#f1f5f9' : 'transparent',
+                  fontWeight: 'normal',
                 }}>
-                  {/* Check-in dot (top-center) */}
-                  {isCheckIn && (
-                    <div style={{
-                      position: 'absolute', top: 3, left: '50%', transform: 'translateX(-50%)',
-                      width: 5, height: 5, borderRadius: '50%', background: palette.dot,
-                    }} />
-                  )}
-                  {/* Check-out dot (bottom-right of last occupied day) */}
-                  {isLastOcc && (
-                    <div style={{
-                      position: 'absolute', bottom: 3, right: 3,
-                      width: 4, height: 4, borderRadius: '50%', background: palette.dot, opacity: 0.55,
-                    }} />
-                  )}
-                </div>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: isWeekend ? '#94a3b8' : '#374151', lineHeight: 1 }}>{d}</div>
+                  <div style={{ fontSize: 7, color: '#cbd5e1', lineHeight: 1, marginTop: 1 }}>{DOW_LETTER[dow]}</div>
+                </th>
               );
             })}
-          </div>
-        );
-      })}
+          </tr>
+        </thead>
+
+        <tbody>
+          {sorted.length === 0 ? (
+            <tr>
+              <td colSpan={daysInMonth + 1} style={{ padding: '14px 16px', textAlign: 'center', color: '#94a3b8', fontSize: 10 }}>
+                Sin reservas este mes
+              </td>
+            </tr>
+          ) : sorted.map((bk, rowIdx) => {
+            const palette = bk.cancelled
+              ? CANCELLED_STYLE
+              : BOOKING_PALETTE[bk.colorIndex % BOOKING_PALETTE.length];
+            const isLast = rowIdx === sorted.length - 1;
+
+            return (
+              <tr key={bk.id} style={{ borderBottom: isLast ? 'none' : '1px solid #f1f5f9', height: 36 }}>
+
+                {/* ── Label cell ── */}
+                <td style={{
+                  padding: '4px 8px',
+                  background: bk.cancelled ? '#f8fafc' : palette.bg,
+                  borderRight: `3px solid ${palette.dot}`,
+                  verticalAlign: 'middle',
+                  opacity: bk.cancelled ? 0.6 : 1,
+                }}>
+                  <div style={{
+                    fontSize: 10, fontWeight: 700, color: palette.color, lineHeight: 1.2,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    textDecoration: bk.cancelled ? 'line-through' : 'none',
+                  }}>
+                    {bk.guest ?? '—'}
+                  </div>
+                  {bk.propertyName && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 3,
+                      fontSize: 8, fontWeight: 600, color: palette.dot,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      <span style={{
+                        width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                        background: palette.dot, display: 'inline-block',
+                      }} />
+                      {bk.propertyName}
+                    </div>
+                  )}
+                  <div style={{
+                    fontSize: 8, fontFamily: 'monospace', color: palette.color, opacity: 0.75,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1,
+                  }}>
+                    {bk.cancelled ? '✕ ' : ''}{bk.confirmationCode}
+                    {!bk.cancelled && bk.nights > 0 && ` · ${bk.nights}n`}
+                  </div>
+                  {!bk.cancelled && bk.revenue > 0 && (
+                    <div style={{ fontSize: 9, fontWeight: 800, color: palette.dot, lineHeight: 1 }}>
+                      {formatCurrency(bk.revenue)}
+                    </div>
+                  )}
+                </td>
+
+                {/* ── Day cells ── */}
+                {days.map(d => {
+                  const iso           = isoDay(d);
+                  const inStay        = iso >= bk.start && iso < bk.end;
+                  const isCheckIn     = iso === bk.start;
+                  const nextIso       = isoDay(d + 1);
+                  const isLastOcc     = inStay && nextIso === bk.end;
+                  const isCheckOutDay = iso === bk.end;
+                  const dow           = new Date(year, month - 1, d).getDay();
+                  const isWeekend     = dow === 0 || dow === 6;
+
+                  if (!inStay) {
+                    return (
+                      <td key={d} style={{
+                        background: isWeekend ? '#f8fafc' : 'white',
+                        borderRight: d < daysInMonth ? '1px solid #f1f5f9' : 'none',
+                        borderLeft: isCheckOutDay ? `2px solid ${palette.dot}33` : 'none',
+                      }} />
+                    );
+                  }
+
+                  return (
+                    <td key={d} style={{
+                      background: bk.cancelled ? palette.bg + 'aa' : palette.bg,
+                      borderRight: d < daysInMonth ? `1px solid ${palette.border}44` : 'none',
+                      borderLeft: isCheckIn ? `3px solid ${palette.dot}` : 'none',
+                      position: 'relative',
+                    }}>
+                      {isCheckIn && (
+                        <div style={{
+                          position: 'absolute', top: 3, left: '50%', transform: 'translateX(-50%)',
+                          width: 5, height: 5, borderRadius: '50%', background: palette.dot,
+                        }} />
+                      )}
+                      {isLastOcc && (
+                        <div style={{
+                          position: 'absolute', bottom: 3, right: 3,
+                          width: 4, height: 4, borderRadius: '50%', background: palette.dot, opacity: 0.55,
+                        }} />
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1173,6 +1182,10 @@ export default function PrintReport() {
           body { margin: 0; }
           @page { margin: 1.2cm; size: A4; }
           .print\\:hidden { display: none !important; }
+          /* Allow the calendar tables to break across pages so thead repeats */
+          .month-cal { overflow: visible !important; }
+          /* Ensure thead is treated as a repeating header group */
+          .month-cal thead { display: table-header-group; }
         }
       `}</style>
     </>
