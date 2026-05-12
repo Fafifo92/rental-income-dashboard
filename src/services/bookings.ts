@@ -134,6 +134,11 @@ export const upsertBookings = async (
       checkout_done: flags.checkout_done,
       inventory_checked: false,
       operational_notes: null,
+      security_deposit: null,
+      deposit_bank_account_id: null,
+      deposit_status: 'none',
+      deposit_returned_amount: null,
+      deposit_return_date: null,
     });
   }
 
@@ -676,6 +681,9 @@ export const insertBooking = async (
       operational_notes: null,
       security_deposit: data.security_deposit ?? null,
       deposit_status: 'none',
+      deposit_bank_account_id: null,
+      deposit_returned_amount: null,
+      deposit_return_date: null,
     })
     .select()
     .single();

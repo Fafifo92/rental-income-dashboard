@@ -150,7 +150,7 @@ export const listAllCleaningsEnriched = async (options?: {
   from?: string;
   to?: string;
   cleanerIds?: string[];
-  statuses?: string[];
+  statuses?: CleaningStatus[];
 }): Promise<ServiceResult<CleaningHistoryRow[]>> => {
   let query = supabase
     .from('booking_cleanings')
