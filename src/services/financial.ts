@@ -648,7 +648,7 @@ export const computeFinancials = async (
   isAuthenticated = false,
   propertyIdOrIds?: string | string[],
   customDateRange?: { from: string; to: string },
-): Promise<{ kpis: FinancialKPIs; monthlyPnL: MonthlyPnL[]; exportMonthly: MonthlyPnL[]; exportMonthlyByBookings: MonthlyPnL[]; payoutBreakdown: PayoutBreakdown; granularity: ChartGranularity }> => {
+): Promise<{ kpis: FinancialKPIs; monthlyPnL: MonthlyPnL[]; exportMonthly: MonthlyPnL[]; exportMonthlyByBookings: MonthlyPnL[]; payoutBreakdown: PayoutBreakdown; granularity: ChartGranularity; expensesInPeriod: Expense[] }> => {
   const propertyIds: string[] | undefined = Array.isArray(propertyIdOrIds)
     ? (propertyIdOrIds.length > 0 ? propertyIdOrIds : undefined)
     : (propertyIdOrIds ? [propertyIdOrIds] : undefined);
