@@ -48,6 +48,26 @@ export interface Expense {
   expense_group_id?: string | null;
 }
 
+/**
+ * Expense row as displayed in the table — may represent a single expense or
+ * a group header that aggregates multiple property-split expenses sharing the
+ * same `expense_group_id`.
+ */
+export interface GroupedExpense extends Expense {
+  /** True when this row is the collapsed/expanded group header. */
+  isGroup?: boolean;
+  /** True when this row is an expanded child inside a group. */
+  isChild?: boolean;
+  /** Sum of all children amounts (only set on group headers). */
+  groupTotal?: number;
+  /** Number of properties in the group (only set on group headers). */
+  groupSize?: number;
+  /** Individual expenses that belong to this group (only on group headers). */
+  children?: Expense[];
+  /** Points back to the parent expense_group_id (only on child rows). */
+  parentGroupId?: string;
+}
+
 export interface FinancialMetrics {
   grossRevenue: number;
   totalExpenses: number;

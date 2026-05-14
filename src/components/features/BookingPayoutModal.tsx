@@ -14,7 +14,7 @@ import type { BankAccountRow, BookingPaymentRow, BookingAdjustmentRow } from '@/
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import { subMoney } from '@/lib/money';
-import { todayISO } from '@/lib/dateUtils';
+import { todayISO, formatDateDisplay } from '@/lib/dateUtils';
 import MoneyInput from '@/components/MoneyInput';
 import { Trash2, Plus, AlertCircle, CheckCircle2, RotateCcw } from 'lucide-react';
 
@@ -47,11 +47,7 @@ interface Props {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const fmtDate = (d: string | null | undefined) => {
-  if (!d) return '—';
-  const [y, m, day] = d.split('-');
-  return `${day}/${m}/${y.slice(2)}`;
-};
+const fmtDate = (d: string | null | undefined) => formatDateDisplay(d);
 
 const DEPOSIT_STATUS_LABELS: Record<string, string> = {
   none: 'No aplica',

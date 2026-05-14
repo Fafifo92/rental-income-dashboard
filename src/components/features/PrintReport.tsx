@@ -4,7 +4,9 @@ import { listProperties } from '@/services/properties';
 import { listBookings, type BookingWithListingRow } from '@/services/bookings';
 import { listAllBookingAdjustmentsForExport } from '@/services/bookingAdjustments';
 import type { PropertyRow } from '@/types/database';
+import type { Expense } from '@/types';
 import { formatCurrency } from '@/lib/utils';
+import { formatDateDisplay, todayISO } from '@/lib/dateUtils';
 
 const PERIOD_LABELS: Record<Exclude<Period, 'custom'>, string> = {
   'current-month': 'Este mes',
@@ -18,7 +20,6 @@ const MONTHS_ES = [
   'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre',
 ];
 
-const MONTHS_SHORT = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
 // ─── Booking types for report ──────────────────────────────────────────────────
 
@@ -59,12 +60,13 @@ const BOOKING_PALETTE = [
 
 const CANCELLED_STYLE = { bg: '#f1f5f9', color: '#94a3b8', dot: '#cbd5e1', border: '#e2e8f0' };
 
-function getBookingStatusLabel(s: string): string {
-  const l = s.toLowerCase();
-  if (l.includes('cancel')) return 'Cancelada';
-  if (l.includes('complet') || l.includes('done')) return 'Completada';
-  if (l.includes('reserv') || l.includes('confirm') || l.includes('upcoming')) return 'Reservada';
-  return s;
+function getBookingStatusLabel(b: BookingForReport): string {
+  if (b.status.toLowerCase().includes('cancel')) return 'Cancelada';
+  const t = todayISO();
+  if (b.start_date && b.start_date > t) return 'Reservada';
+  if (b.start_date && b.end_date && b.start_date <= t && t < b.end_date) return 'En curso';
+  if (b.end_date && b.end_date <= t) return 'Completada';
+  return 'Reservada';
 }
 
 function isCancelledStatus(s: string) { return s.toLowerCase().includes('cancel'); }
@@ -276,26 +278,21 @@ function now() {
   return `${MONTHS_ES[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-/** Formats "2026-01-01" → "1 ene 2026" */
+/** Formats "2026-01-01" → "01-01-2026" */
 function fmtDate(iso: string): string {
-  const [y, m, d] = iso.split('-').map(Number);
-  return `${d} ${MONTHS_SHORT[m - 1]} ${y}`;
+  return formatDateDisplay(iso);
 }
 
 /** Builds a human-readable date range string from two ISO dates */
 function buildDateRangeLabel(from: string, to: string): string {
-  const [fy, fm, fd] = from.split('-').map(Number);
-  const [ty, tm, td] = to.split('-').map(Number);
+  const [fy, fm] = from.split('-').map(Number);
+  const [ty, tm] = to.split('-').map(Number);
 
   // Same month and year → "Mayo 2026"
   if (fy === ty && fm === tm) {
     return `${MONTHS_ES[fm - 1]} ${fy}`;
   }
-  // Same year → "1 ene — 31 abr 2026"
-  if (fy === ty) {
-    return `${fd} ${MONTHS_SHORT[fm - 1]} — ${td} ${MONTHS_SHORT[tm - 1]} ${ty}`;
-  }
-  // Different years → "1 ene 2025 — 31 mar 2026"
+  // Different months/years → range in DD-MM-YYYY
   return `${fmtDate(from)} — ${fmtDate(to)}`;
 }
 
@@ -343,6 +340,7 @@ export default function PrintReport() {
   const [loading, setLoading]             = useState(true);
   const [dateRangeLabel, setDateRangeLabel] = useState('');
   const [periodShortLabel, setPeriodShortLabel] = useState('');
+  const [expensesInPeriod, setExpensesInPeriod] = useState<Expense[]>([]);
 
   // Booking detail state
   const [includeBookings, setIncludeBookings]       = useState(false);
@@ -388,6 +386,7 @@ export default function PrintReport() {
       setKpis(main.kpis);
       setMonthly(main.exportMonthly);
       setPayout(main.payoutBreakdown);
+      setExpensesInPeriod(main.expensesInPeriod);
 
       const allProps    = propsRes.data ?? [];
       const targetProps = propertyIds && propertyIds.length > 0
@@ -650,7 +649,184 @@ export default function PrintReport() {
           </table>
         </Section>
 
-        {/* ── S3: OCUPACIÓN Y EFICIENCIA ─────────────────────────────────── */}
+        {/* ── S3: DESGLOSE DE GASTOS POR CATEGORÍA ──────────────────────── */}
+        {expensesInPeriod.length > 0 && (() => {
+          const catMap = new Map<string, { category: string; fixed: number; variable: number }>();
+          for (const e of expensesInPeriod) {
+            const entry = catMap.get(e.category) ?? { category: e.category, fixed: 0, variable: 0 };
+            if (e.type === 'fixed') entry.fixed += e.amount;
+            else entry.variable += e.amount;
+            catMap.set(e.category, entry);
+          }
+          const rows = Array.from(catMap.values())
+            .sort((a, b) => (b.fixed + b.variable) - (a.fixed + a.variable));
+          const cleaningCategories = ['limpieza', 'aseo', 'lavandera', 'lavandería', 'aseo y lavandería'];
+          return (
+            <Section num={S()} title="Desglose de Gastos por Categoría">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b-2 border-slate-200">
+                    {['Categoría', 'Tipo', 'Monto', '% del Total'].map(h => (
+                      <th key={h} className="pb-2 pr-2 text-left font-semibold text-slate-500 text-[10px] uppercase tracking-wider">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(({ category, fixed, variable }) => {
+                    const total = fixed + variable;
+                    const pct = kpis.totalExpenses > 0 ? ((total / kpis.totalExpenses) * 100).toFixed(1) : '0';
+                    const isCleaning = cleaningCategories.some(k => category.toLowerCase().includes(k));
+                    return (
+                      <tr key={category} className={`border-b border-slate-100 ${isCleaning ? 'bg-blue-50' : ''}`}>
+                        <td className={`py-1.5 pr-2 font-medium ${isCleaning ? 'text-blue-800' : 'text-slate-700'}`}>
+                          {isCleaning && <span className="mr-1">🧹</span>}{category}
+                        </td>
+                        <td className="py-1.5 pr-2">
+                          {fixed > 0 && variable > 0 ? (
+                            <span className="inline-flex gap-1">
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-orange-100 text-orange-700">Fijo</span>
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-700">Variable</span>
+                            </span>
+                          ) : fixed > 0 ? (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-orange-100 text-orange-700">Fijo</span>
+                          ) : (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-700">Variable</span>
+                          )}
+                        </td>
+                        <td className="py-1.5 pr-2 text-right font-mono text-red-600 font-semibold">
+                          {formatCurrency(total)}
+                        </td>
+                        <td className="py-1.5 text-right font-mono text-slate-500">{pct}%</td>
+                      </tr>
+                    );
+                  })}
+                  <tr className="font-bold bg-slate-50 border-t-2 border-slate-300">
+                    <td colSpan={2} className="py-2 text-slate-700 text-[10px]">TOTAL GASTOS</td>
+                    <td className="py-2 text-right font-mono text-red-700">{formatCurrency(kpis.totalExpenses)}</td>
+                    <td className="py-2 text-right font-mono text-slate-500">100%</td>
+                  </tr>
+                </tbody>
+              </table>
+            </Section>
+          );
+        })()}
+
+        {/* ── LIQUIDACIONES DE ASEO ─────────────────────────────────────── */}
+        {expensesInPeriod.filter(e => e.subcategory === 'cleaning' || e.category === 'Aseo' || e.category === 'Insumos de aseo').length > 0 && (() => {
+          const cleaningExpenses = expensesInPeriod.filter(e => e.subcategory === 'cleaning' || e.category === 'Aseo' || e.category === 'Insumos de aseo');
+
+          // Group by expense_group_id — each group = one payout session
+          const groupMap = new Map<string, Expense[]>();
+          for (const e of cleaningExpenses) {
+            const gid = e.expense_group_id ?? e.id;
+            const arr = groupMap.get(gid) ?? [];
+            arr.push(e);
+            groupMap.set(gid, arr);
+          }
+
+          const payoutGroups = Array.from(groupMap.values())
+            .map(members => ({
+              cleanerName: members[0].vendor ?? 'Desconocido',
+              payoutDate:  members[0].date,
+              total:       members.reduce((s, e) => s + e.amount, 0),
+              bookingCount: Math.max(new Set(members.map(m => m.booking_id).filter(Boolean)).size, 1),
+              members,
+            }))
+            .sort((a, b) => b.payoutDate.localeCompare(a.payoutDate));
+
+          // Cleaner summary cards
+          const byCleanerMap = new Map<string, { name: string; total: number; bookings: number; payouts: number }>();
+          for (const g of payoutGroups) {
+            const e = byCleanerMap.get(g.cleanerName) ?? { name: g.cleanerName, total: 0, bookings: 0, payouts: 0 };
+            e.total += g.total; e.bookings += g.bookingCount; e.payouts += 1;
+            byCleanerMap.set(g.cleanerName, e);
+          }
+          const cleanerCards = Array.from(byCleanerMap.values()).sort((a, b) => b.total - a.total);
+          const grandTotal = payoutGroups.reduce((s, g) => s + g.total, 0);
+
+          // Helper: parse description → { propName, code, doneDate, isSupplies }
+          // Uses indexOf('Reserva ') to avoid dependency on separator character.
+          const parseDsc = (desc: string | null, cat: string) => {
+            const isSupplies = cat === 'Insumos de aseo';
+            if (!desc) return { propName: '—', code: '—', doneDate: '', isSupplies };
+            const reservaIdx = desc.indexOf('Reserva ');
+            if (reservaIdx === -1) return { propName: desc, code: '—', doneDate: '', isSupplies };
+            const beforeReserva = desc.slice(0, reservaIdx).trim();
+            const propMatch = beforeReserva.match(/^(?:Insumos de aseo|Aseo)\s*[–\-]\s*(.+?)[\s·•|,]*$/i);
+            const propName = propMatch ? propMatch[1].trim() : beforeReserva || '—';
+            const afterReserva = desc.slice(reservaIdx + 'Reserva '.length);
+            const m = afterReserva.match(/^([^\s(·•]+)\s*\(([^)]+)\)/);
+            return { propName, code: m?.[1] ?? '—', doneDate: m?.[2] ?? '', isSupplies };
+          };
+
+          return (
+            <Section num={S()} title="🧹 Liquidaciones de Aseo">
+              {/* Summary cards */}
+              <div className="grid grid-cols-3 gap-3 mb-5">
+                {cleanerCards.map(cs => (
+                  <div key={cs.name} className="p-3 rounded-xl border bg-sky-50 border-sky-200">
+                    <p className="text-xs font-bold text-sky-800 truncate">{cs.name}</p>
+                    <p className="text-sm font-extrabold text-sky-900 mt-1">{formatCurrency(cs.total)}</p>
+                    <p className="text-[10px] text-sky-600 mt-0.5">
+                      {cs.bookings} aseo{cs.bookings !== 1 ? 's' : ''}
+                      <span className="ml-1 text-slate-400">· {cs.payouts} liquidación{cs.payouts !== 1 ? 'es' : ''}</span>
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Per-payout detail tables */}
+              {payoutGroups.map((g, gi) => (
+                <div key={gi} className="mb-5">
+                  <div className="flex items-center justify-between bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 mb-2">
+                    <div>
+                      <span className="font-bold text-sky-800 text-xs">{g.cleanerName}</span>
+                      <span className="text-slate-500 text-xs ml-2">· Liquidación del {formatDateDisplay(g.payoutDate)}</span>
+                      <span className="text-slate-400 text-xs ml-2">({g.bookingCount} aseo{g.bookingCount !== 1 ? 's' : ''})</span>
+                    </div>
+                    <span className="font-extrabold font-mono text-red-700 text-sm">{formatCurrency(g.total)}</span>
+                  </div>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b-2 border-slate-200">
+                        {['Tipo', 'Cód. reserva', 'Propiedad', 'Fecha aseo', 'Monto'].map(h => (
+                          <th key={h} className="pb-1.5 pr-2 text-left font-semibold text-slate-500 text-[10px] uppercase">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {g.members.map((e, i) => {
+                        const pd = parseDsc(e.description, e.category);
+                        return (
+                          <tr key={e.id} className={`border-b border-slate-100 ${i % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
+                            <td className="py-1.5 pr-2">
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold ${pd.isSupplies ? 'bg-amber-100 text-amber-700' : 'bg-cyan-100 text-cyan-700'}`}>
+                                {pd.isSupplies ? 'Insumos' : 'Aseo'}
+                              </span>
+                            </td>
+                            <td className="py-1.5 pr-2 font-mono text-[10px] text-slate-700">{pd.code}</td>
+                            <td className="py-1.5 pr-2 text-slate-600 max-w-[110px]">
+                              <span className="truncate block">{pd.propName}</span>
+                            </td>
+                            <td className="py-1.5 pr-2 font-mono text-slate-500">{formatDateDisplay(pd.doneDate)}</td>
+                            <td className="py-1.5 text-right font-mono text-red-600 font-semibold">{formatCurrency(e.amount)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+
+              <div className="mt-2 border-t-2 border-slate-300 pt-2 flex justify-between items-center">
+                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Total liquidaciones de aseo</span>
+                <span className="text-sm font-extrabold font-mono text-red-700">{formatCurrency(grandTotal)}</span>
+              </div>
+            </Section>
+          );
+        })()}
+
+        {/* ── S4 (dyn): OCUPACIÓN Y EFICIENCIA ─────────────────────────── */}
         <Section num={S()} title="Ocupación y Eficiencia Operativa">
           <div className="grid grid-cols-2 gap-6 mb-4">
             {/* Columna izquierda: métricas de ocupación */}
@@ -1051,7 +1227,7 @@ export default function PrintReport() {
                     .sort((a, b) => a.start_date.localeCompare(b.start_date))
                     .map((b, i) => {
                       const cancelled = isCancelledStatus(b.status);
-                      const statusLabel = getBookingStatusLabel(b.status);
+                      const statusLabel = getBookingStatusLabel(b);
                       const netAdj = adjMap.get(b.id) ?? 0;
                       const propColorIdx = propertyColorMap.get(b.property_name ?? '') ?? 0;
                       const dot = cancelled
@@ -1091,7 +1267,9 @@ export default function PrintReport() {
                                 ? 'bg-red-100 text-red-700'
                                 : statusLabel === 'Completada'
                                   ? 'bg-green-100 text-green-700'
-                                  : 'bg-blue-100 text-blue-700'
+                                  : statusLabel === 'En curso'
+                                    ? 'bg-violet-100 text-violet-700'
+                                    : 'bg-blue-100 text-blue-700'
                             }`}>
                               {statusLabel}
                             </span>
@@ -1173,7 +1351,7 @@ export default function PrintReport() {
         {/* ── FOOTER ─────────────────────────────────────────────────────── */}
         <div className="border-t pt-4 text-xs text-slate-400 flex justify-between items-center">
           <span>STR Analytics — Plataforma de gestión financiera</span>
-          <span>{new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' })}</span>
+          <span>{formatDateDisplay(todayISO())}</span>
         </div>
       </div>
 

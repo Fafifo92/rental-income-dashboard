@@ -17,7 +17,7 @@ const activeCount = (f: ExpenseFilters) =>
     .filter(Boolean).length;
 
 const advancedCount = (f: ExpenseFilters) =>
-  [f.vendor, f.bankAccountId, f.personInCharge].filter(Boolean).length;
+  [f.vendor, f.personInCharge].filter(Boolean).length;
 
 export default function FilterBar({ filters, onChange, onReset, bankAccounts = [] }: Props) {
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -82,6 +82,23 @@ export default function FilterBar({ filters, onChange, onReset, bankAccounts = [
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Bank account */}
+        <div className="min-w-[180px]">
+          <label className="block text-xs font-medium text-slate-500 mb-1.5">Cuenta</label>
+          <select
+            value={filters.bankAccountId ?? ''}
+            onChange={e => set('bankAccountId', e.target.value)}
+            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+          >
+            <option value="">Todas las cuentas</option>
+            {bankAccounts.map(a => (
+              <option key={a.id} value={a.id}>
+                {a.name}{a.bank ? ` (${a.bank})` : ''}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Status */}
@@ -177,21 +194,6 @@ export default function FilterBar({ filters, onChange, onReset, bankAccounts = [
                   onChange={e => set('personInCharge', e.target.value)}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                 />
-              </div>
-              <div className="min-w-[200px] flex-1">
-                <label className="block text-xs font-medium text-slate-500 mb-1.5">Pagado desde (cuenta)</label>
-                <select
-                  value={filters.bankAccountId ?? ''}
-                  onChange={e => set('bankAccountId', e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="">Todas las cuentas</option>
-                  {bankAccounts.map(a => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}{a.bank ? ` (${a.bank})` : ''}
-                    </option>
-                  ))}
-                </select>
               </div>
             </div>
           </motion.div>

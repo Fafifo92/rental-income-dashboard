@@ -378,15 +378,18 @@ export const validateAccountSpend = async (
 
 // ---------- Bloque 18 — Historial de transacciones por cuenta ----------
 export type BankTxKind =
-  | 'opening'             // saldo de apertura
-  | 'deposit'             // depósito manual (fuera de contabilidad de rentas)
-  | 'booking_payout'      // ingreso por payout de reserva
-  | 'cancellation_fine'   // egreso por multa de cancelación (net_payout negativo)
-  | 'damage_recovery'     // ingreso por recuperación de daño (booking_adjustment)
-  | 'platform_refund'     // ingreso por reembolso de plataforma
-  | 'extra_income'        // ingreso extra registrado en la reserva
-  | 'extra_guest_fee'     // huésped extra
-  | 'expense'             // egreso por gasto
+  | 'opening'                 // saldo de apertura
+  | 'deposit'                 // depósito manual (fuera de contabilidad de rentas)
+  | 'booking_payout'          // payout legacy (reservas sin booking_payments)
+  | 'booking_payment'         // pago individual de reserva (booking_payments)
+  | 'cancellation_fine'       // egreso por multa de cancelación (net_payout negativo)
+  | 'damage_recovery'         // ingreso por recuperación de daño (booking_adjustment)
+  | 'platform_refund'         // ingreso por reembolso de plataforma
+  | 'extra_income'            // ingreso extra registrado en la reserva
+  | 'extra_guest_fee'         // huésped extra
+  | 'expense'                 // egreso por gasto
+  | 'guest_deposit_received'  // ingreso por depósito de seguridad recibido del huésped
+  | 'guest_deposit_returned'  // egreso por devolución de depósito de seguridad al huésped
   ;
 
 export interface BankTransaction {
@@ -420,6 +423,18 @@ export const getBankAccountTransactions = async (
     .order('end_date', { ascending: false });
   if (e1) return { data: null, error: e1.message };
 
+  // 1b) booking_payments para esta cuenta — cada pago aparece como línea individual
+  const { data: bkPayments, error: e1b } = await supabase
+    .from('booking_payments')
+    .select('id, booking_id, amount, payment_date, notes')
+    .eq('bank_account_id', accountId);
+  if (e1b) return { data: null, error: e1b.message };
+
+  // IDs de reservas que tienen entradas en booking_payments (sistema nuevo)
+  const bookingsWithPayments = new Set(
+    (bkPayments ?? []).map((p: { booking_id: string }) => p.booking_id)
+  );
+
   // 2) Adjustments con bank_account_id = esta cuenta
   const { data: adjs, error: e2 } = await supabase
     .from('booking_adjustments')
@@ -427,23 +442,38 @@ export const getBankAccountTransactions = async (
     .eq('bank_account_id', accountId);
   if (e2) return { data: null, error: e2.message };
 
-  // 3) Expenses con esta cuenta
+  // 3) Expenses con esta cuenta (solo gastos pagados, consistente con computeBalances)
   const { data: expenses, error: e3 } = await supabase
     .from('expenses')
     .select('id, date, amount, description, category, booking_id, property_id')
-    .eq('bank_account_id', accountId);
+    .eq('bank_account_id', accountId)
+    .eq('status', 'paid');
   if (e3) return { data: null, error: e3.message };
+
+  // 3b) Depósitos de seguridad de huéspedes en esta cuenta
+  const { data: guestDeps, error: e3b } = await supabase
+    .from('bookings')
+    .select('id, confirmation_code, guest_name, listing_id, security_deposit, deposit_status, deposit_returned_amount, deposit_return_date, end_date')
+    .eq('deposit_bank_account_id', accountId)
+    .not('security_deposit', 'is', null)
+    .neq('deposit_status', 'none');
+  if (e3b) return { data: null, error: e3b.message };
 
   // 4) Resolver listings → properties para nombres
   type B = { id: string; confirmation_code: string | null; guest_name: string | null; end_date: string | null; net_payout: number | null; listing_id: string; status: string | null };
   type A = { id: string; kind: string; amount: number; description: string | null; date: string; booking_id: string };
   type E = { id: string; date: string; amount: number; description: string | null; category: string | null; booking_id: string | null; property_id: string | null };
+  type GD = { id: string; confirmation_code: string | null; guest_name: string | null; listing_id: string; security_deposit: number | null; deposit_status: string; deposit_returned_amount: number | null; deposit_return_date: string | null; end_date: string | null };
 
   const bs = (bookings ?? []) as B[];
   const ajs = (adjs ?? []) as A[];
   const es = (expenses ?? []) as E[];
+  const gds = (guestDeps ?? []) as GD[];
 
-  const listingIds = Array.from(new Set(bs.map(b => b.listing_id).filter(Boolean)));
+  const listingIds = Array.from(new Set([
+    ...bs.map(b => b.listing_id),
+    ...gds.map(g => g.listing_id),
+  ].filter(Boolean)));
   const propIdsFromExpenses = Array.from(new Set(es.map(e => e.property_id).filter((x): x is string => !!x)));
   const propMap = new Map<string, string>();
   const listingPropMap = new Map<string, string | null>();
@@ -511,8 +541,9 @@ export const getBankAccountTransactions = async (
     });
   }
 
-  // Bookings → payouts and fines
+  // Bookings → payouts legacy (sin booking_payments) y multas por cancelación
   for (const b of bs) {
+    if (bookingsWithPayments.has(b.id)) continue; // tiene pagos individuales, se listan abajo
     const amount = Number(b.net_payout ?? 0);
     if (amount === 0) continue;
     const isFine = amount < 0 && !!b.status?.toLowerCase().includes('cancel');
@@ -529,6 +560,27 @@ export const getBankAccountTransactions = async (
       booking_code: b.confirmation_code,
       property_name: listingPropMap.get(b.listing_id) ?? null,
       category: isFine ? 'Multa por cancelación' : null,
+    });
+  }
+
+  // Pagos individuales (booking_payments) — cada cuota aparece como línea propia
+  type BKP = { id: string; booking_id: string; amount: number; payment_date: string | null; notes: string | null };
+  const bookingInfoMap = new Map(bs.map(b => [b.id, b]));
+  for (const p of (bkPayments ?? []) as BKP[]) {
+    const b = bookingInfoMap.get(p.booking_id);
+    const guestName = b?.guest_name ?? null;
+    const notes = p.notes ? ` · ${p.notes}` : '';
+    txs.push({
+      id: `bkp-${p.id}`,
+      date: p.payment_date ?? b?.end_date ?? '',
+      kind: 'booking_payment',
+      amount: Number(p.amount),
+      description: `Pago reserva${guestName ? ' · ' + guestName : ''}${notes}`,
+      reference_id: p.booking_id,
+      reference_type: 'booking',
+      booking_code: b?.confirmation_code ?? null,
+      property_name: b ? (listingPropMap.get(b.listing_id) ?? null) : null,
+      category: null,
     });
   }
 
@@ -586,6 +638,43 @@ export const getBankAccountTransactions = async (
     });
   }
 
+  // Guest security deposits: received (inflow) and returned (outflow)
+  for (const gd of gds) {
+    const depositAmt = Number(gd.security_deposit ?? 0);
+    const returnedAmt = Number(gd.deposit_returned_amount ?? 0);
+    const propName = listingPropMap.get(gd.listing_id) ?? null;
+    // Inflow: the deposit entered the account when it was received
+    if (depositAmt > 0) {
+      txs.push({
+        id: `gdep-in-${gd.id}`,
+        date: gd.end_date ?? gd.deposit_return_date ?? '',
+        kind: 'guest_deposit_received',
+        amount: depositAmt,
+        description: `Depósito de seguridad${gd.guest_name ? ' · ' + gd.guest_name : ''}`,
+        reference_id: gd.id,
+        reference_type: 'booking',
+        booking_code: gd.confirmation_code,
+        property_name: propName,
+        category: null,
+      });
+    }
+    // Outflow: returned portion left the account
+    if (returnedAmt > 0 && (gd.deposit_status === 'partial_return' || gd.deposit_status === 'returned')) {
+      txs.push({
+        id: `gdep-out-${gd.id}`,
+        date: gd.deposit_return_date ?? gd.end_date ?? '',
+        kind: 'guest_deposit_returned',
+        amount: -returnedAmt,
+        description: `Devolución depósito de seguridad${gd.guest_name ? ' · ' + gd.guest_name : ''}`,
+        reference_id: gd.id,
+        reference_type: 'booking',
+        booking_code: gd.confirmation_code,
+        property_name: propName,
+        category: null,
+      });
+    }
+  }
+
   // Orden cronológico descendente, opening al final si misma fecha
   txs.sort((a, b) => {
     if (a.date !== b.date) return b.date.localeCompare(a.date);
@@ -608,15 +697,18 @@ const labelForAdjKind = (kind: string): string => {
 };
 
 export const BANK_TX_KIND_META: Record<BankTxKind, { label: string; tone: 'in' | 'out' | 'neutral' }> = {
-  opening:           { label: 'Apertura',                tone: 'neutral' },
-  deposit:           { label: 'Depósito manual',         tone: 'in' },
-  booking_payout:    { label: 'Payout reserva',           tone: 'in' },
-  cancellation_fine: { label: 'Multa por cancelación',    tone: 'out' },
-  damage_recovery:   { label: 'Recuperación por daño',    tone: 'in' },
-  platform_refund:   { label: 'Reembolso plataforma',     tone: 'in' },
-  extra_income:      { label: 'Ingreso extra',            tone: 'in' },
-  extra_guest_fee:   { label: 'Huésped adicional',        tone: 'in' },
-  expense:           { label: 'Gasto',                    tone: 'out' },
+  opening:                  { label: 'Apertura',                         tone: 'neutral' },
+  deposit:                  { label: 'Depósito manual',                  tone: 'in' },
+  booking_payout:           { label: 'Payout reserva',                   tone: 'in' },
+  booking_payment:          { label: 'Pago reserva',                     tone: 'in' },
+  cancellation_fine:        { label: 'Multa por cancelación',            tone: 'out' },
+  damage_recovery:          { label: 'Recuperación por daño',            tone: 'in' },
+  platform_refund:          { label: 'Reembolso plataforma',             tone: 'in' },
+  extra_income:             { label: 'Ingreso extra',                    tone: 'in' },
+  extra_guest_fee:          { label: 'Huésped adicional',                tone: 'in' },
+  expense:                  { label: 'Gasto',                            tone: 'out' },
+  guest_deposit_received:   { label: 'Depósito de seguridad recibido',   tone: 'in' },
+  guest_deposit_returned:   { label: 'Devolución depósito de seguridad', tone: 'out' },
 };
 
 // ─── Depósitos manuales ───────────────────────────────────────────────────────

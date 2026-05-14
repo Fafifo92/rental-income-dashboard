@@ -1,6 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { Wrench, Trash2, RotateCcw } from 'lucide-react';
+import { formatDateDisplay } from '@/lib/dateUtils';
 import type {
   InventoryItemRow,
   MaintenanceScheduleRow,
@@ -125,7 +126,7 @@ export function MaintenanceHistoryView({
                   return (
                     <tr key={s.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-4 py-2.5 text-slate-700 font-mono text-xs whitespace-nowrap">
-                        {s.scheduled_date}
+                        {formatDateDisplay(s.scheduled_date)}
                       </td>
                       <td className="px-4 py-2.5 text-slate-600 text-xs">
                         {prop?.name ?? '\u2014'}

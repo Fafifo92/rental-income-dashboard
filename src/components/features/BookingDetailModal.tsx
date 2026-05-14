@@ -16,7 +16,7 @@ import {
 } from '@/services/cleanings';
 import { listVendors, type Vendor } from '@/services/vendors';
 import { consumeCreditsForCheckin } from '@/services/creditPools';
-import { todayISO } from '@/lib/dateUtils';
+import { todayISO, formatDateDisplay } from '@/lib/dateUtils';
 import type { Expense } from '@/types';
 import type {
   PropertyRow, BankAccountRow, BookingAdjustmentRow, BookingAdjustmentKind,
@@ -578,7 +578,7 @@ export default function BookingDetailModal({
                     <tbody>
                       {expenses.map(e => (
                         <tr key={e.id} className="border-t border-slate-100 hover:bg-slate-50/50">
-                          <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{e.date}</td>
+                          <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{formatDateDisplay(e.date)}</td>
                           <td className="px-3 py-2">
                             <div className="font-medium text-slate-800">{e.category}</div>
                             {(() => { const d = cleanDamageDescription(e.description); return d ? <div className="text-xs text-slate-500">{d}</div> : null; })()}
@@ -678,7 +678,7 @@ export default function BookingDetailModal({
                         const linkedExpense = expenses.find(e => e.adjustment_id === a.id);
                         return (
                           <tr key={a.id} className="border-t border-slate-100 hover:bg-slate-50/50">
-                            <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{a.date}</td>
+                            <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{formatDateDisplay(a.date)}</td>
                             <td className="px-3 py-2">
                               <span className={`inline-flex whitespace-nowrap text-xs font-semibold px-2 py-0.5 rounded-full ${ADJ_KIND_STYLE[a.kind]}`}>
                                 {ADJ_KIND_LABEL[a.kind]}

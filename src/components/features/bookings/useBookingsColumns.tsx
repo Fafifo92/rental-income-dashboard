@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table';
 import { CalendarCheck, Pencil, HandCoins, Trash2 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
+import { formatDateDisplay } from '@/lib/dateUtils';
 import { getBookingStatus, statusUI } from '@/lib/bookingStatus';
 import type { DisplayBooking } from './types';
 
@@ -66,14 +67,9 @@ export function useBookingsColumns({ onView, onEdit, onPayout, onDelete, pending
       meta: { className: 'whitespace-nowrap' },
       cell: info => {
         const b = info.row.original;
-        const fmt = (d: string) => {
-          if (!d) return '—';
-          const [y, m, day] = d.split('-');
-          return `${day}/${m}/${y.slice(2)}`;
-        };
         return (
           <div className="flex flex-col text-xs">
-            <span className="text-slate-700">{fmt(b.start_date)} → {fmt(b.end_date)}</span>
+            <span className="text-slate-700">{formatDateDisplay(b.start_date)} → {formatDateDisplay(b.end_date)}</span>
             <span className="text-slate-400">{b.num_nights} noche{b.num_nights !== 1 ? 's' : ''}</span>
           </div>
         );

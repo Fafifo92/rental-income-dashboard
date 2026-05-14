@@ -79,6 +79,7 @@ export default function BookingsClient() {
     }
     if (f.dateFrom) demo = demo.filter(b => b.start_date >= f.dateFrom!);
     if (f.dateTo)   demo = demo.filter(b => b.start_date <= f.dateTo!);
+    if (f.channel)  demo = demo.filter(b => b.channel === f.channel);
     return demo;
   }, []);
 

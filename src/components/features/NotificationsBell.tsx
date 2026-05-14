@@ -4,6 +4,7 @@ import { listPendingRecurringForOwner, type PendingRecurring } from '@/services/
 import { getNotificationSettings } from '@/services/notificationSettings';
 import { isSupabaseConfigured } from '@/services/auth';
 import { formatCurrency } from '@/lib/utils';
+import { formatDateDisplay } from '@/lib/dateUtils';
 import { listBookingAlerts, type BookingAlert } from '@/services/bookings';
 import { getUpcomingAndOverdueSchedules } from '@/services/maintenanceSchedules';
 import { getEndOfLifeItems } from '@/services/inventory';
@@ -22,10 +23,7 @@ const ISSUE_LABEL: Record<string, string> = {
   cleaning:  'Aseo pendiente',
 };
 
-const fmtDate = (iso: string): string => {
-  const [y, m, d] = iso.split('-');
-  return `${d}/${m}/${y.slice(2)}`;
-};
+const fmtDate = (iso: string): string => formatDateDisplay(iso);
 
 export default function NotificationsBell() {
   const [open, setOpen] = useState(false);

@@ -23,6 +23,7 @@ export interface BookingFilters {
   dateFrom?: string;
   dateTo?: string;
   search?: string;
+  channel?: string;
   /** 1-indexed page number for server-side pagination. Requires `pageSize`. */
   page?: number;
   /** Rows per page for server-side pagination. Requires `page`. */
@@ -212,6 +213,7 @@ export const listBookings = async (
   if (allowedListingIds) query = query.in('listing_id', allowedListingIds);
   if (filters?.listingId) query = query.eq('listing_id', filters.listingId);
   if (filters?.status) query = query.eq('status', filters.status);
+  if (filters?.channel) query = query.eq('channel', filters.channel);
   if (filters?.dateFrom) query = query.gte('start_date', filters.dateFrom);
   if (filters?.dateTo) query = query.lte('start_date', filters.dateTo);
 

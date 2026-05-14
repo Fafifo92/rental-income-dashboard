@@ -1,4 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
+import { formatDateDisplay } from '@/lib/dateUtils';
 import type { MaintenanceScheduleRow, InventoryItemRow, PropertyRow } from '@/types/database';
 
 interface Props {
@@ -72,7 +73,7 @@ export default function MaintenancePanels({
                             </span>
                           </div>
                           <p className="text-xs text-slate-600 mt-0.5 truncate">{s.title}</p>
-                          <p className="text-xs text-slate-400 mt-0.5">{prop?.name ?? ''} · Fecha: {s.scheduled_date}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">{prop?.name ?? ''} · Fecha: {formatDateDisplay(s.scheduled_date)}</p>
                         </div>
                       </div>
                       <button
@@ -130,7 +131,7 @@ export default function MaintenancePanels({
                           </span>
                         </div>
                         <p className="text-xs text-slate-600 mt-0.5 truncate">{s.title}</p>
-                        <p className="text-xs text-slate-400 mt-0.5">{prop?.name ?? ''} · Completado: {s.scheduled_date}</p>
+                        <p className="text-xs text-slate-400 mt-0.5">{prop?.name ?? ''} · Completado: {formatDateDisplay(s.scheduled_date)}</p>
                       </div>
                       <button
                         type="button"

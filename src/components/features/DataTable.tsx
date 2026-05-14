@@ -42,6 +42,8 @@ interface DataTableProps<T extends object> {
   emptyDescription?: React.ReactNode;
   renderFooter?: (filteredData: T[]) => React.ReactNode;
   skeletonRows?: number;
+  /** Optional extra CSS classes per row based on the row data. */
+  getRowClassName?: (row: T) => string;
 }
 
 export default function DataTable<T extends object>({
@@ -56,6 +58,7 @@ export default function DataTable<T extends object>({
   emptyDescription,
   renderFooter,
   skeletonRows = 5,
+  getRowClassName,
 }: DataTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
@@ -75,6 +78,7 @@ export default function DataTable<T extends object>({
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
+    autoResetPageIndex: false, // prevent page reset when data changes (e.g. expanding a group row)
   });
 
   const filteredRows = table.getFilteredRowModel().rows;
@@ -185,7 +189,7 @@ export default function DataTable<T extends object>({
               </tr>
             ) : (
               pageRows.map(row => (
-                <tr key={row.id} className="hover:bg-slate-50 transition-colors">
+                <tr key={row.id} className={['hover:bg-slate-50 transition-colors', getRowClassName ? getRowClassName(row.original) : ''].filter(Boolean).join(' ')}>
                   {row.getVisibleCells().map(cell => {
                     const align = cell.column.columnDef.meta?.align ?? 'left';
                     const extraClass = cell.column.columnDef.meta?.className ?? '';

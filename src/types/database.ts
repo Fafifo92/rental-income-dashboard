@@ -427,6 +427,8 @@ export type ExpenseCategory =
   | 'Mantenimiento'
   | 'Stock e inventario'
   | 'Aseo y lavandería'
+  | 'Aseo'
+  | 'Insumos de aseo'
   | 'Daños del huésped'
   | 'Atenciones al huésped'
   | 'Multas por cancelación'
@@ -438,6 +440,8 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
   'Mantenimiento',
   'Stock e inventario',
   'Aseo y lavandería',
+  'Aseo',
+  'Insumos de aseo',
   'Daños del huésped',
   'Atenciones al huésped',
   'Multas por cancelación',

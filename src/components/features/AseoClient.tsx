@@ -21,6 +21,7 @@ import {
 } from '@/services/cleanerGroups';
 import type { BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
+import { formatDateDisplay } from '@/lib/dateUtils';
 import { Pencil, UserMinus, Download, SlidersHorizontal, X, CalendarDays, Users, Building2 } from 'lucide-react';
 import { exportAseoToCsv, exportAseoToExcel, exportAseoToPdf, type AseoExportRow } from '@/services/export';
 import { TagChip, NewTagInline } from './aseo/CleanerTagControls';
@@ -30,11 +31,9 @@ import PayoutModal from './aseo/PayoutModal';
 import EditCleanerModal from './aseo/EditCleanerModal';
 import ConfirmDeleteModal from './aseo/ConfirmDeleteModal';
 
-/** Format ISO date string (YYYY-MM-DD) to DD/MM/YYYY for display. */
+/** Format ISO date string (YYYY-MM-DD) to DD-MM-YYYY for display. */
 function fmtDate(iso: string | null): string {
-  if (!iso) return '—';
-  const [y, m, d] = iso.slice(0, 10).split('-');
-  return `${d}/${m}/${y}`;
+  return formatDateDisplay(iso);
 }
 
 export default function AseoClient(): JSX.Element {

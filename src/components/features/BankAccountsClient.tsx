@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { formatDateDisplay } from '@/lib/dateUtils';
 import { useAuth } from '@/lib/useAuth';
 import {
   createBankAccount,
@@ -236,7 +237,7 @@ export default function BankAccountsClient() {
                     {unassigned.unassignedPaidExpenses.slice(0, 8).map(e => (
                       <li key={e.id} className="text-xs text-amber-900 flex justify-between gap-2">
                         <a href={`/expenses?focus=${e.id}`} className="underline truncate">
-                          {e.description ?? e.category} · {e.date}
+                          {e.description ?? e.category} · {formatDateDisplay(e.date)}
                         </a>
                         <span className="font-mono whitespace-nowrap">{formatCurrency(e.amount)}</span>
                       </li>
@@ -676,7 +677,7 @@ function BankHistoryModal({
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{t.description}</p>
                       <p className="text-[10px] text-slate-400 mt-0.5">
-                        {t.date}{t.property_name ? ` · ${t.property_name}` : ''}
+                        {formatDateDisplay(t.date)}{t.property_name ? ` · ${t.property_name}` : ''}
                       </p>
                     </div>
                     <div className={`text-sm font-bold whitespace-nowrap ${

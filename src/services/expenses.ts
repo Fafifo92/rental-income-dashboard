@@ -63,7 +63,11 @@ export const listExpenses = async (
     .select('*')
     .order('date', { ascending: false });
 
-  if (propertyIds) query = query.in('property_id', propertyIds);
+  // When a property filter is active, also include expenses with property_id=null
+  // (e.g. cleaning payout rows where the booking→listing→property chain couldn't be resolved).
+  if (propertyIds) {
+    query = query.or(`property_id.in.(${propertyIds.join(',')}),property_id.is.null`);
+  }
   if (filters?.category) query = query.eq('category', filters.category);
   if (filters?.type) query = query.eq('type', filters.type);
   if (filters?.status) query = query.eq('status', filters.status);

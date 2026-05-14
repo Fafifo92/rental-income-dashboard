@@ -6,6 +6,7 @@ import { listProperties } from '@/services/properties';
 import { listBankAccounts } from '@/services/bankAccounts';
 import { getBookingStatus, statusUI } from '@/lib/bookingStatus';
 import { formatCurrency } from '@/lib/utils';
+import { formatDateDisplay } from '@/lib/dateUtils';
 import type { PropertyRow, BankAccountRow } from '@/types/database';
 
 const BookingDetailModal = lazy(() => import('./BookingDetailModal'));
@@ -67,11 +68,7 @@ function fromRow(row: BookingWithListingRow): ActiveBooking {
   };
 }
 
-const fmt = (d: string) => {
-  if (!d) return '—';
-  const [y, m, day] = d.split('-');
-  return `${day}/${m}/${y.slice(2)}`;
-};
+
 
 interface Props {
   propertyIds?: string[];
@@ -202,7 +199,7 @@ export default function ActiveBookingsWidget({ propertyIds }: Props) {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col text-xs">
-                        <span className="text-slate-700 whitespace-nowrap">{fmt(b.start_date)} → {fmt(b.end_date)}</span>
+                        <span className="text-slate-700 whitespace-nowrap">{formatDateDisplay(b.start_date)} → {formatDateDisplay(b.end_date)}</span>
                         <span className="text-slate-400">{b.num_nights} noche{b.num_nights !== 1 ? 's' : ''}</span>
                       </div>
                     </td>

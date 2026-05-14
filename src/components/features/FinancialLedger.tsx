@@ -18,6 +18,7 @@ import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import type { FinancialTransaction } from '@/services/transactions';
 import { formatCurrency } from '@/lib/utils';
+import { formatDateDisplay } from '@/lib/dateUtils';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -106,10 +107,7 @@ export default function FinancialLedger({ transactions, loading }: Props) {
   const totalFees    = filtered.filter(r => r.isSynthetic && r.category === 'Fee de canal').reduce((s, r) => s + r.amount, 0);
   const net          = totalIncome - totalExpense;
 
-  const fmtDate = (d: string) => {
-    const [y, m, day] = d.split('-');
-    return `${day}/${m}/${y.slice(2)}`;
-  };
+  const fmtDate = (d: string) => formatDateDisplay(d);
 
   const handleSearch = (v: string) => {
     setSearch(v);

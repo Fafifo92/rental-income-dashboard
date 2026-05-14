@@ -5,6 +5,7 @@ import type { PropertyRow } from '@/types/database';
 import type { AuthStatus } from '@/lib/useAuth';
 import type { BookingForm } from './types';
 import { todayISO } from './helpers';
+import { formatDateDisplay } from '@/lib/dateUtils';
 
 interface Props {
   open: boolean;
@@ -139,9 +140,9 @@ export default function BookingFormModal({
                 </div>
                 {form.start_date && form.end_date && (
                   <p className="text-xs text-slate-500">
-                    {new Date(form.start_date + 'T00:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'long' })}
+                    {formatDateDisplay(form.start_date)}
                     {' → '}
-                    {new Date(form.end_date + 'T00:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}
+                    {formatDateDisplay(form.end_date)}
                   </p>
                 )}
               </div>

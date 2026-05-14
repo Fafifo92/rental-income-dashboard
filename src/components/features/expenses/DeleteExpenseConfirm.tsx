@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import type { Expense } from '@/types';
 import { formatCurrency } from '@/lib/utils';
+import { formatDateDisplay } from '@/lib/dateUtils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 
 interface Props {
@@ -25,7 +26,7 @@ export default function DeleteExpenseConfirm({ target, onCancel, onConfirm }: Pr
           <p className="text-sm text-red-800">
             <span className="font-semibold">{target.category}</span> — {formatCurrency(target.amount)}
           </p>
-          <p className="text-xs text-red-600 mt-1">{target.date}{target.description ? ` · ${target.description}` : ''}</p>
+          <p className="text-xs text-red-600 mt-1">{formatDateDisplay(target.date)}{target.description ? ` · ${target.description}` : ''}</p>
         </div>
         <p className="text-sm text-slate-500 mb-5">Esta acción es irreversible.</p>
         <div className="flex gap-3">

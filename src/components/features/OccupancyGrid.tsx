@@ -4,6 +4,7 @@ import { listPropertiesSlim } from '@/services/properties';
 import { listListingsByPropertyIds } from '@/services/listings';
 import { listBookingsForOccupancy, type OccupancyBooking } from '@/services/bookings';
 import { supabase } from '@/lib/supabase/client';
+import { formatDateDisplay } from '@/lib/dateUtils';
 
 interface Props {
   from: string;
@@ -70,8 +71,7 @@ function channelColor(channel: string | null, cancelled: boolean): string {
 }
 
 function formatIso(iso: string): string {
-  const [y, m, d] = iso.split('-');
-  return `${d}/${m}/${y}`;
+  return formatDateDisplay(iso);
 }
 
 const LEGEND_ITEMS = [

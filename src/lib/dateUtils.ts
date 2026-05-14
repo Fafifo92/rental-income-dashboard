@@ -38,6 +38,14 @@ export const setCachedTimezone = (tz: string): void => {
 /** Hora "hoy" usando la timezone del usuario (desde localStorage). */
 export const todayISO = (): string => todayInTZ(getCachedTimezone());
 
+/** Formatea una fecha YYYY-MM-DD para mostrar en pantalla como DD-MM-YYYY. */
+export const formatDateDisplay = (d: string | null | undefined): string => {
+  if (!d) return '—';
+  const clean = d.slice(0, 10);
+  const [y, m, day] = clean.split('-');
+  return `${day}-${m}-${y}`;
+};
+
 /** Lista curada de timezones para el selector UI. */
 export const COMMON_TIMEZONES: { value: string; label: string }[] = [
   // América Latina

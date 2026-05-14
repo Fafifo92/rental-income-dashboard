@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { formatCurrency } from '@/lib/utils';
 import type { DuplicateEntry, DuplicateAction, DuplicateResolutions, ParsedBooking } from '@/services/etl';
+import { formatDateDisplay } from '@/lib/dateUtils';
 
 interface Props {
   duplicates: DuplicateEntry[];
@@ -23,9 +24,7 @@ const FIELD_LABELS: Record<string, string> = {
 const ALL_FIELDS = ['status', 'guest_name', 'start_date', 'end_date', 'num_nights', 'listing_name', 'revenue'] as const;
 
 function fmtDate(d: string): string {
-  if (!d) return '—';
-  const [y, m, day] = d.split('-');
-  return `${day}/${m}/${y}`;
+  return formatDateDisplay(d);
 }
 
 function fmtValue(field: string, value: string | number | null | undefined): string {

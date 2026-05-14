@@ -16,7 +16,7 @@ interface Props {
 export default function BookingsFilterBar({
   search, setSearch, applySearch, filters, setFilters, statusFilter, setStatusFilter, onClear,
 }: Props) {
-  const hasFilters = !!(filters.dateFrom || filters.dateTo || filters.search || statusFilter !== 'all');
+  const hasFilters = !!(filters.dateFrom || filters.dateTo || filters.search || filters.channel || statusFilter !== 'all');
 
   return (
     <motion.div
@@ -53,6 +53,21 @@ export default function BookingsFilterBar({
           onChange={e => setFilters(prev => ({ ...prev, dateTo: e.target.value || undefined }))}
           className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
         />
+      </div>
+      <div className="min-w-[140px]">
+        <label className="block text-xs font-medium text-slate-500 mb-1.5">Canal</label>
+        <select
+          value={filters.channel ?? ''}
+          onChange={e => setFilters(prev => ({ ...prev, channel: e.target.value || undefined }))}
+          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+        >
+          <option value="">Todos</option>
+          <option value="airbnb">Airbnb</option>
+          <option value="booking">Booking.com</option>
+          <option value="vrbo">Vrbo</option>
+          <option value="direct">Directo</option>
+          <option value="other">Otro</option>
+        </select>
       </div>
       <div className="min-w-[140px]">
         <label className="block text-xs font-medium text-slate-500 mb-1.5">Estado</label>

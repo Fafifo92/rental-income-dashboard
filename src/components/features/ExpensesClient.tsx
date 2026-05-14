@@ -131,6 +131,11 @@ export default function ExpensesClient() {
     return Array.from(seen).sort((a, b) => a.localeCompare(b, 'es'));
   }, [expenses]);
 
+  const propertyMap = useMemo(
+    () => new Map(properties.map((p: { id: string; name: string }) => [p.id, p.name])),
+    [properties],
+  );
+
   const loadMaintenancePanel = useCallback(async () => {
     const [schedRes, doneRes, itemsRes] = await Promise.all([
       getUpcomingAndOverdueSchedules(),
@@ -490,6 +495,8 @@ export default function ExpensesClient() {
         <ExpensesList
           expenses={visibleExpenses}
           loading={loading}
+          bankAccounts={bankAccounts}
+          propertyMap={propertyMap}
           onDelete={handleDeleteRequest}
           onEdit={handleEdit}
           onView={setViewing}

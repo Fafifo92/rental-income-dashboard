@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import type { ConflictEntry, ConflictAction, ConflictResolutions, ParsedBooking } from '@/services/etl';
+import { formatDateDisplay } from '@/lib/dateUtils';
 
 interface Props {
   conflicts: ConflictEntry[];
@@ -10,9 +11,7 @@ interface Props {
 }
 
 function fmtDate(d: string): string {
-  if (!d) return '—';
-  const [y, m, day] = d.split('-');
-  return `${day}/${m}/${y}`;
+  return formatDateDisplay(d);
 }
 
 function BookingMiniCard({

@@ -2,6 +2,7 @@ import { motion } from 'framer-motion';
 import type { Expense } from '@/types';
 import type { PropertyRow, BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
+import { formatDateDisplay } from '@/lib/dateUtils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import { cleanDamageDescription } from '@/lib/damageDescription';
 
@@ -93,7 +94,7 @@ export default function ExpenseDetailModal({
 
         {/* Detalle tipo factura */}
         <div className="px-7 py-5 grid grid-cols-2 gap-y-4 gap-x-6 text-sm">
-          <Row label="Fecha" value={expense.date} />
+          <Row label="Fecha" value={formatDateDisplay(expense.date)} />
           <Row label="Propiedad" value={property ? property.name : 'General / sin asignar'} />
           <Row label="Proveedor" value={expense.vendor ?? '—'} />
           <Row label="A cargo de" value={expense.person_in_charge ?? '—'} />

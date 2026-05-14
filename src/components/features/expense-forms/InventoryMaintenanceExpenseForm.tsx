@@ -26,7 +26,7 @@ import {
 import { listInventoryCategories, listInventoryItems, updateInventoryItem } from '@/services/inventory';
 import { listMaintenanceSchedules, completeMaintenanceSchedule } from '@/services/maintenanceSchedules';
 import MoneyInput from '@/components/MoneyInput';
-import { todayISO } from '@/lib/dateUtils';
+import { todayISO, formatDateDisplay } from '@/lib/dateUtils';
 
 type FormData = Omit<Expense, 'id' | 'owner_id'>;
 
@@ -511,7 +511,7 @@ export default function InventoryMaintenanceExpenseForm({
                         Mantenimiento vinculado: {linkedSchedule.title}
                       </p>
                       <p className="text-[11px] text-amber-700 mt-0.5">
-                        Fecha programada: {linkedSchedule.scheduled_date}
+                        Fecha programada: {formatDateDisplay(linkedSchedule.scheduled_date)}
                         {linkedSchedule.is_recurring && linkedSchedule.recurrence_days && (
                           <span className="ml-2">· 🔁 Recurrente cada {linkedSchedule.recurrence_days} días</span>
                         )}
@@ -531,7 +531,7 @@ export default function InventoryMaintenanceExpenseForm({
                           Próximo mantenimiento: {closestScheduleForItem.title}
                         </p>
                         <p className="text-[11px] text-amber-700 mt-0.5">
-                          Fecha programada: {closestScheduleForItem.scheduled_date}
+                          Fecha programada: {formatDateDisplay(closestScheduleForItem.scheduled_date)}
                           {closestScheduleForItem.is_recurring && closestScheduleForItem.recurrence_days && (
                             <span className="ml-2">· 🔁 Recurrente cada {closestScheduleForItem.recurrence_days} días</span>
                           )}

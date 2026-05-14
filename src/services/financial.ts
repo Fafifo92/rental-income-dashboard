@@ -848,5 +848,8 @@ export const computeFinancials = async (
   const exportMonthlyByBookings = buildMonthlyPnLByBookings(bookings, expenses, adjustments, exportRange, propertyCount);
   const payoutBreakdown = buildPayoutBreakdown(bookings, expenses, chartRange, granularity);
 
-  return { kpis, monthlyPnL, exportMonthly, exportMonthlyByBookings, payoutBreakdown, granularity };
+  const inPeriod = (d: string) => { const t = new Date(d + 'T12:00:00'); return t >= range.from && t <= range.to; };
+  const expensesInPeriod = expenses.filter(e => e.date && inPeriod(e.date));
+
+  return { kpis, monthlyPnL, exportMonthly, exportMonthlyByBookings, payoutBreakdown, granularity, expensesInPeriod };
 };

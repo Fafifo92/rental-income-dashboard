@@ -1,6 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Expense } from '@/types';
 import { formatCurrency } from '@/lib/utils';
+import { formatDateDisplay } from '@/lib/dateUtils';
 import { cleanDamageDescription } from '@/lib/damageDescription';
 
 interface Props {
@@ -64,7 +65,7 @@ export default function PendingPayablesPanel({ pendingExpenses, totalPending, on
                               </span>
                             )}
                           </div>
-                          <p className="text-xs text-slate-400 mt-0.5">{e.date}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">{formatDateDisplay(e.date)}</p>
                           {(() => { const d = cleanDamageDescription(e.description); return d ? (
                             <p className="text-xs text-slate-600 mt-1 line-clamp-2">{d}</p>
                           ) : null; })()}

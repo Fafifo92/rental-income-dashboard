@@ -1,8 +1,9 @@
 import { formatCurrency } from '@/lib/utils';
-import { todayISO } from '@/lib/dateUtils';
+import { todayISO, formatDateDisplay } from '@/lib/dateUtils';
 import type { FinancialKPIs, MonthlyPnL } from './financial';
 import type { InventoryItemRow } from '@/types/database';
 import type { Expense } from '@/types';
+import { flattenExpensesForExport } from '@/lib/expenseGrouping';
 
 // ─── Booking Export Row ───────────────────────────────────────────────────────
 
@@ -21,12 +22,13 @@ export interface BookingExportRow {
   net_adjustment: number | null;
 }
 
-const BOOKING_STATUS_LABEL = (s: string): string => {
-  const l = s.toLowerCase();
-  if (l.includes('cancel')) return 'Cancelada';
-  if (l.includes('complet') || l.includes('done')) return 'Completada';
-  if (l.includes('reserv') || l.includes('confirm') || l.includes('upcoming')) return 'Reservada';
-  return s;
+const BOOKING_STATUS_LABEL = (b: { status: string; check_in: string; check_out: string }): string => {
+  if (b.status.toLowerCase().includes('cancel')) return 'Cancelada';
+  const t = todayISO();
+  if (b.check_in && b.check_in > t) return 'Reservada';
+  if (b.check_in && b.check_out && b.check_in <= t && t < b.check_out) return 'En curso';
+  if (b.check_out && b.check_out <= t) return 'Completada';
+  return 'Reservada';
 };
 
 // ─── CSV Export ───────────────────────────────────────────────────────────────
@@ -98,12 +100,12 @@ export function exportMonthlyToCsv(data: MonthlyPnL[], bookings?: BookingExportR
       rows.push(toCsvRow([
         b.confirmation_code,
         b.guest_name ?? '',
-        b.check_in,
-        b.check_out,
+        formatDateDisplay(b.check_in),
+        formatDateDisplay(b.check_out),
         b.nights,
         b.revenue,
         b.net_payout ?? '',
-        BOOKING_STATUS_LABEL(b.status),
+        BOOKING_STATUS_LABEL(b),
         b.channel ?? '',
         b.property_name ?? '',
         ...(hasAdj ? [b.net_adjustment ?? 0] : []),
@@ -188,12 +190,12 @@ export function exportToExcel(kpis: FinancialKPIs, monthly: MonthlyPnL[], period
     const bookingDataRows: (string | number | null)[][] = bookings.map(b => [
       b.confirmation_code,
       b.guest_name ?? '',
-      b.check_in,
-      b.check_out,
+      formatDateDisplay(b.check_in),
+      formatDateDisplay(b.check_out),
       b.nights,
       b.revenue,
       b.net_payout ?? null,
-      BOOKING_STATUS_LABEL(b.status),
+      BOOKING_STATUS_LABEL(b),
       b.channel ?? '',
       b.property_name ?? '',
       ...(hasAdj ? [b.net_adjustment ?? 0] : []),
@@ -317,13 +319,13 @@ function resolveInventoryCell(
     case 'unit':         return item.unit ?? '';
     case 'is_consumable': return item.is_consumable ? 'Sí' : 'No';
     case 'min_stock':    return item.min_stock != null ? Number(item.min_stock) : '';
-    case 'purchase_date':  return item.purchase_date ?? '';
+    case 'purchase_date':  return item.purchase_date ? formatDateDisplay(item.purchase_date) : '';
     case 'purchase_price': return item.purchase_price != null ? Number(item.purchase_price) : '';
     case 'expected_lifetime_months':
       return item.expected_lifetime_months != null ? item.expected_lifetime_months : '';
     case 'notes':        return item.notes ?? '';
-    case 'created_at':   return item.created_at ? item.created_at.slice(0, 10) : '';
-    case 'updated_at':   return item.updated_at ? item.updated_at.slice(0, 10) : '';
+    case 'created_at':   return item.created_at ? formatDateDisplay(item.created_at.slice(0, 10)) : '';
+    case 'updated_at':   return item.updated_at ? formatDateDisplay(item.updated_at.slice(0, 10)) : '';
     // ── Maintenance columns ────────────────────────────────────────────────
     case 'maint_status':     return r.getMaintInfo ? r.getMaintInfo(item.id).statusLabel : '';
     case 'maint_last_date':  return r.getMaintInfo ? r.getMaintInfo(item.id).lastDate : '';
@@ -414,12 +416,11 @@ const ASEO_STATUS_LABEL: Record<string, string> = {
   paid:    'Liquidado',
 };
 
-/** Convert ISO date YYYY-MM-DD to DD/MM/YYYY for display. */
+/** Convert ISO date YYYY-MM-DD to DD-MM-YYYY for display in exports. */
 function fmtAseoDate(iso: string | null): string {
   if (!iso) return '';
-  const d = iso.slice(0, 10);
-  const [y, m, day] = d.split('-');
-  return `${day}/${m}/${y}`;
+  const [y, m, day] = iso.slice(0, 10).split('-');
+  return `${day}-${m}-${y}`;
 }
 
 export function exportAseoToCsv(rows: AseoExportRow[], periodLabel: string) {
@@ -539,12 +540,12 @@ export function exportBookingsToCsv(rows: BookingExportRow[], title: string) {
   const dataRows = rows.map(b => toCsvRow([
     b.confirmation_code,
     b.guest_name ?? '',
-    b.check_in,
-    b.check_out,
+    formatDateDisplay(b.check_in),
+    formatDateDisplay(b.check_out),
     b.nights,
     b.revenue,
     b.net_payout ?? '',
-    BOOKING_STATUS_LABEL(b.status),
+    BOOKING_STATUS_LABEL(b),
     b.channel ?? '',
     b.property_name ?? '',
     ...(hasAdj ? [b.net_adjustment ?? 0] : []),
@@ -562,12 +563,12 @@ export function exportBookingsToExcel(rows: BookingExportRow[], title: string) {
   const dataRows: (string | number | null)[][] = rows.map(b => [
     b.confirmation_code,
     b.guest_name ?? '',
-    b.check_in,
-    b.check_out,
+    formatDateDisplay(b.check_in),
+    formatDateDisplay(b.check_out),
     b.nights,
     b.revenue,
     b.net_payout ?? null,
-    BOOKING_STATUS_LABEL(b.status),
+    BOOKING_STATUS_LABEL(b),
     b.channel ?? '',
     b.property_name ?? '',
     ...(hasAdj ? [b.net_adjustment ?? 0] : []),
@@ -775,12 +776,12 @@ export function exportBookingsToPdf(rows: BookingExportRow[], title: string, opt
     <tr>
       <td><code>${escXml(b.confirmation_code)}</code></td>
       <td>${escXml(b.guest_name ?? '—')}</td>
-      <td>${b.check_in}</td>
-      <td>${b.check_out}</td>
+      <td>${formatDateDisplay(b.check_in)}</td>
+      <td>${formatDateDisplay(b.check_out)}</td>
       <td class="num">${b.nights}</td>
       <td class="num">${formatCurrency(b.revenue)}</td>
       <td class="num">${b.net_payout != null ? formatCurrency(b.net_payout) : '—'}</td>
-      <td><span class="chip">${escXml(BOOKING_STATUS_LABEL(b.status))}</span></td>
+      <td><span class="chip">${escXml(BOOKING_STATUS_LABEL(b))}</span></td>
       <td>${escXml(b.channel ?? '—')}</td>
       <td>${escXml(b.property_name ?? '—')}</td>
       ${hasAdj ? `<td class="num">${b.net_adjustment != null ? formatCurrency(b.net_adjustment) : '—'}</td>` : ''}
@@ -900,14 +901,17 @@ export function exportExpensesToCsv(
   propMap: Map<string, string>,
   title: string,
 ) {
+  const flat = flattenExpensesForExport(rows);
   const header = toCsvRow(['Fecha', 'Categoría', 'Tipo', 'Descripción', 'Proveedor', 'Propiedad', 'Monto', 'Estado']);
-  const dataRows = rows.map(e => toCsvRow([
+  const dataRows = flat.map(e => toCsvRow([
     e.date,
     e.category,
     EXPENSE_TYPE_LABEL[e.type] ?? e.type,
     e.description ?? '',
     e.vendor ?? '',
-    e.property_id ? (propMap.get(e.property_id) ?? '') : 'General',
+    e._isGroupHeader
+      ? `(${e._groupSize} propiedades)`
+      : (e.property_id ? (propMap.get(e.property_id) ?? '') : 'General'),
     e.amount,
     EXPENSE_STATUS_LABEL[e.status] ?? e.status,
   ]));
@@ -919,26 +923,29 @@ export function exportExpensesToExcel(
   propMap: Map<string, string>,
   title: string,
 ) {
+  const flat = flattenExpensesForExport(rows);
   const headerRow = ['Fecha', 'Categoría', 'Tipo', 'Descripción', 'Proveedor', 'Propiedad', 'Monto (COP)', 'Estado'];
-  const dataRows: (string | number | null)[][] = rows.map(e => [
+  const dataRows: (string | number | null)[][] = flat.map(e => [
     e.date,
     e.category,
     EXPENSE_TYPE_LABEL[e.type] ?? e.type,
     e.description ?? '',
     e.vendor ?? '',
-    e.property_id ? (propMap.get(e.property_id) ?? '') : 'General',
+    e._isGroupHeader
+      ? `(${e._groupSize} propiedades)`
+      : (e.property_id ? (propMap.get(e.property_id) ?? '') : 'General'),
     e.amount,
     EXPENSE_STATUS_LABEL[e.status] ?? e.status,
   ]);
-  const total = rows.reduce((s, e) => s + e.amount, 0);
+  const total = flat.reduce((s, e) => s + e.amount, 0);
   const summaryRows: (string | number)[][] = [
     ['Resumen', ''],
-    ['Total gastos',   rows.length],
+    ['Total gastos',   flat.length],
     ['Total monto',    total],
-    ['Gastos fijos',   rows.filter(e => e.type === 'fixed').length],
-    ['Gastos variables', rows.filter(e => e.type === 'variable').length],
-    ['Pendientes',     rows.filter(e => e.status === 'pending').length],
-    ['Pagados',        rows.filter(e => e.status === 'paid').length],
+    ['Gastos fijos',   flat.filter(e => e.type === 'fixed').length],
+    ['Gastos variables', flat.filter(e => e.type === 'variable').length],
+    ['Pendientes',     flat.filter(e => e.status === 'pending').length],
+    ['Pagados',        flat.filter(e => e.status === 'paid').length],
   ];
   const xml = buildSpreadsheetML([
     { name: 'Gastos',  rows: [headerRow, ...dataRows] },
@@ -952,20 +959,55 @@ export function exportExpensesToPdf(
   propMap: Map<string, string>,
   title: string,
 ) {
-  const total = rows.reduce((s, e) => s + e.amount, 0);
-  const pendingTotal = rows.filter(e => e.status === 'pending').reduce((s, e) => s + e.amount, 0);
+  // Pre-compute group map for property sub-rows in PDF
+  const groupMap = new Map<string, Expense[]>();
+  for (const e of rows) {
+    if (e.expense_group_id) {
+      const b = groupMap.get(e.expense_group_id) ?? [];
+      b.push(e);
+      groupMap.set(e.expense_group_id, b);
+    }
+  }
 
-  const tableRows = rows.map(e => `
-    <tr>
-      <td>${e.date}</td>
+  const flat = flattenExpensesForExport(rows);
+  const total = flat.reduce((s, e) => s + e.amount, 0);
+  const pendingTotal = flat.filter(e => e.status === 'pending').reduce((s, e) => s + e.amount, 0);
+
+  const tableRows = flat.map(e => {
+    const propCell = e._isGroupHeader
+      ? `<span style="color:#7c3aed;font-size:10px">⇄ ${e._groupSize} propiedades</span>`
+      : escXml(e.property_id ? (propMap.get(e.property_id) ?? '—') : 'General');
+
+    const mainRow = `
+    <tr${e._isGroupHeader ? ' style="background:#f5f3ff"' : ''}>
+      <td>${formatDateDisplay(e.date)}</td>
       <td>${escXml(e.category)}</td>
       <td><span class="chip-${e.type}">${EXPENSE_TYPE_LABEL[e.type] ?? e.type}</span></td>
       <td class="desc">${escXml(e.description ?? '—')}</td>
       <td>${escXml(e.vendor ?? '—')}</td>
-      <td>${escXml(e.property_id ? (propMap.get(e.property_id) ?? '—') : 'General')}</td>
+      <td>${propCell}</td>
       <td class="num">${formatCurrency(e.amount)}</td>
       <td><span class="chip-status-${e.status}">${EXPENSE_STATUS_LABEL[e.status] ?? e.status}</span></td>
+    </tr>`;
+
+    // For group headers, add one child row per property
+    let childRows = '';
+    if (e._isGroupHeader && e.expense_group_id) {
+      const members = groupMap.get(e.expense_group_id) ?? [];
+      childRows = members.map(m => `
+    <tr style="background:#faf5ff">
+      <td style="padding-left:20px;color:#94a3b8;font-size:10px">└</td>
+      <td colspan="4" style="font-size:10px;color:#7c3aed;padding-left:4px">
+        ${escXml(m.property_id ? (propMap.get(m.property_id) ?? m.property_id.slice(0, 8)) : 'General')}
+      </td>
+      <td style="font-size:10px;color:#7c3aed"></td>
+      <td class="num" style="font-size:10px;color:#7c3aed">${formatCurrency(m.amount)}</td>
+      <td></td>
     </tr>`).join('');
+    }
+
+    return mainRow + childRows;
+  }).join('');
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -1005,7 +1047,7 @@ export function exportExpensesToPdf(
     🖨️ Imprimir / PDF
   </button>
   <h1>💸 Gastos</h1>
-  <p class="sub">Período: ${escXml(title)} — ${rows.length} gasto${rows.length !== 1 ? 's' : ''}</p>
+  <p class="sub">Período: ${escXml(title)} — ${flat.length} gasto${flat.length !== 1 ? 's' : ''}</p>
   <div class="summary">
     <div class="kpi">
       <div class="kpi-label">Total gastos</div>
@@ -1017,7 +1059,7 @@ export function exportExpensesToPdf(
     </div>
     <div class="kpi">
       <div class="kpi-label">N.º registros</div>
-      <div class="kpi-value" style="font-size:18px">${rows.length}</div>
+      <div class="kpi-value" style="font-size:18px">${flat.length}</div>
     </div>
   </div>
   <table>

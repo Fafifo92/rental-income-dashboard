@@ -351,12 +351,14 @@ export const payoutCleanerConsolidated = async (args: {
 
   // 1b. Traer expenses sueltos pendientes anclados al cleaner
   //     (compras de insumos pagadas por la persona de aseo y aún sin liquidar).
+  //     Incluimos tanto los que tienen subcategory='cleaning' (creados por código)
+  //     como los que tienen category con 'aseo' (registrados manualmente sin subcategory).
   const { data: looseExpenses, error: lqErr } = await supabase
     .from('expenses')
     .select('id, amount')
     .eq('vendor_id', cleanerId)
     .eq('status', 'pending')
-    .eq('subcategory', 'cleaning');
+    .or('subcategory.eq.cleaning,category.ilike.%aseo%');
 
   if (lqErr) return { data: null, error: lqErr.message };
 
@@ -499,6 +501,11 @@ export const payoutCleanerConsolidated = async (args: {
       .insert(expensesToInsert)
       .select('id');
     if (eErr || !inserted) return { data: null, error: eErr?.message ?? 'No se pudieron crear los gastos.' };
+    // Verify the insert actually persisted rows — a silent 0-row result would mean
+    // RLS or a constraint silently rejected the insert, leaving cleanings orphaned.
+    if (inserted.length === 0) {
+      return { data: null, error: 'Los gastos no pudieron guardarse (posible problema de permisos). Los aseos NO fueron marcados como pagados. Contacta soporte.' };
+    }
     insertedIds = inserted.map(r => r.id as string);
   }
 
@@ -511,6 +518,7 @@ export const payoutCleanerConsolidated = async (args: {
         bank_account_id: bankAccountId,
         date: paidDate,
         expense_group_id: groupId,
+        subcategory: 'cleaning',
       })
       .in('id', looseExpenseIds);
     if (upErr) return { data: null, error: upErr.message };

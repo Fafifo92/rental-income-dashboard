@@ -20,6 +20,7 @@ import { usePropertyFilter } from '@/lib/usePropertyFilter';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { useReferenceData } from '@/lib/hooks/useReferenceData';
 import { formatCurrency } from '@/lib/utils';
+import { formatDateDisplay } from '@/lib/dateUtils';
 import { listInventoryItems, getDamageReconciliations, computeInventoryKpis, STATUS_LABEL, type DamageReconciliation } from '@/services/inventory';
 import type { InventoryItemRow, PropertyRow } from '@/types/database';
 import { getBooking, type BookingWithListingRow, listBookingAlerts, type BookingAlert } from '@/services/bookings';
@@ -530,10 +531,7 @@ function PendingCleaningsWidget(): JSX.Element | null {
 
   if (loading || alerts.length === 0) return null;
 
-  const fmt = (iso: string) => {
-    const [y, m, d] = iso.split('-');
-    return `${d}/${m}/${y.slice(2)}`;
-  };
+  const fmt = (iso: string) => formatDateDisplay(iso);
 
   return (
     <motion.section

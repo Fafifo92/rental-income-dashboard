@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { listExpenses } from '@/services/expenses';
 import type { Expense } from '@/types';
 import { formatCurrency } from '@/lib/utils';
+import { formatDateDisplay } from '@/lib/dateUtils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 
 export default function LinkExistingExpenseModal({
@@ -78,7 +79,7 @@ export default function LinkExistingExpenseModal({
                         {e.vendor && <span className="text-xs text-slate-500 truncate">· {e.vendor}</span>}
                       </div>
                       <div className="text-xs text-slate-500 truncate">
-                        {e.date}{e.description ? ` — ${e.description}` : ''}
+                        {formatDateDisplay(e.date)}{e.description ? ` — ${e.description}` : ''}
                       </div>
                     </div>
                     <span className="font-semibold text-rose-600 tabular-nums whitespace-nowrap">

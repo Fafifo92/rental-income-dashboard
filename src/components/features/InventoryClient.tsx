@@ -33,7 +33,7 @@ import {
   deleteMaintenanceSchedule,
   updateMaintenanceSchedule,
 } from '@/services/maintenanceSchedules';
-import { todayISO } from '@/lib/dateUtils';
+import { todayISO, formatDateDisplay } from '@/lib/dateUtils';
 import { CategorizedInventoryView } from './inventory/InventoryListView';
 import { ItemFormModal } from './inventory/ItemFormModal';
 import { QuickMovementModal, MovementsModal } from './inventory/InventoryMovementModals';
@@ -307,7 +307,7 @@ export default function InventoryClient(): JSX.Element {
                   return (
                     <li key={s.id} className="flex items-center justify-between gap-2">
                       <span className="text-xs text-red-700">
-                        <span className="font-medium">{it?.name ?? '—'}</span> · {s.title} · <span className="font-mono">{s.scheduled_date}</span>
+                        <span className="font-medium">{it?.name ?? '—'}</span> · {s.title} · <span className="font-mono">{formatDateDisplay(s.scheduled_date)}</span>
                       </span>
                       <button
                         onClick={() => it && setMaintenanceTarget({ item: it, schedule: s })}
@@ -332,7 +332,7 @@ export default function InventoryClient(): JSX.Element {
                   return (
                     <li key={s.id} className="flex items-center justify-between gap-2">
                       <span className="text-xs text-amber-700">
-                        <span className="font-medium">{it?.name ?? '—'}</span> · {s.title} · <span className="font-mono">{s.scheduled_date}</span>
+                        <span className="font-medium">{it?.name ?? '—'}</span> · {s.title} · <span className="font-mono">{formatDateDisplay(s.scheduled_date)}</span>
                       </span>
                       <button
                         onClick={() => it && setMaintenanceTarget({ item: it, schedule: s })}

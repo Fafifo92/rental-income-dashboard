@@ -11,6 +11,7 @@ import {
 } from '@/services/cleanings';
 import type { Vendor } from '@/services/vendors';
 import { formatCurrency } from '@/lib/utils';
+import { formatDateDisplay } from '@/lib/dateUtils';
 
 interface Props {
   cleaner: Vendor;
@@ -209,12 +210,12 @@ export default function DetailModal({ cleaner, onClose }: Props) {
                                 ? <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs font-semibold">Liquidado</span>
                                 : <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-semibold">Por liquidar</span>}
                             </td>
-                            <td className="py-2 px-2 text-slate-500">{l.date}</td>
+                            <td className="py-2 px-2 text-slate-500">{formatDateDisplay(l.date)}</td>
                             <td className="py-2 px-2 text-slate-700">{l.property_name ?? <span className="text-slate-400">—</span>}</td>
                             <td className="py-2 px-2 text-slate-600 truncate max-w-[260px]" title={l.description ?? undefined}>
                               {l.description ?? <span className="text-slate-400">Sin detalle</span>}
                             </td>
-                            <td className="py-2 px-2 text-slate-500">{l.paid_date ?? '—'}</td>
+                            <td className="py-2 px-2 text-slate-500">{formatDateDisplay(l.paid_date)}</td>
                             <td className="py-2 px-2 text-right font-semibold text-cyan-700">{formatCurrency(l.amount)}</td>
                           </tr>
                         ))}
