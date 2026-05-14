@@ -44,7 +44,7 @@ function parseCleaningDesc(desc: string | null): {
   if (reservaIdx === -1) return null;
   // Prop name: between "Aseo – " / "Insumos de aseo – " and the separator before "Reserva"
   const beforeReserva = desc.slice(0, reservaIdx).trim();
-  const propMatch = beforeReserva.match(/^(?:Insumos de aseo|Aseo)\s*[–\-]\s*(.+?)[\s·•|,]*$/i);
+  const propMatch = beforeReserva.match(/^(?:Insumos de aseo|Aseo)\s*[–-]\s*(.+?)[\s·•|,]*$/i);
   const propName = propMatch ? propMatch[1].trim() : beforeReserva;
   // Code and date: "CODE (DATE)" right after "Reserva "
   const afterReserva = desc.slice(reservaIdx + 'Reserva '.length);

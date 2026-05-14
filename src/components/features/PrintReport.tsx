@@ -752,7 +752,7 @@ export default function PrintReport() {
             const reservaIdx = desc.indexOf('Reserva ');
             if (reservaIdx === -1) return { propName: desc, code: '—', doneDate: '', isSupplies };
             const beforeReserva = desc.slice(0, reservaIdx).trim();
-            const propMatch = beforeReserva.match(/^(?:Insumos de aseo|Aseo)\s*[–\-]\s*(.+?)[\s·•|,]*$/i);
+            const propMatch = beforeReserva.match(/^(?:Insumos de aseo|Aseo)\s*[–-]\s*(.+?)[\s·•|,]*$/i);
             const propName = propMatch ? propMatch[1].trim() : beforeReserva || '—';
             const afterReserva = desc.slice(reservaIdx + 'Reserva '.length);
             const m = afterReserva.match(/^([^\s(·•]+)\s*\(([^)]+)\)/);
