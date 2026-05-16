@@ -277,6 +277,7 @@ export interface BookingAlert {
   confirmation_code: string;
   guest_name: string | null;
   end_date: string;
+  property_id: string | null;
   issues: BookingAlertIssue[];
 }
 
@@ -374,6 +375,7 @@ export const listBookingAlerts = async (
         confirmation_code: b.confirmation_code,
         guest_name: b.guest_name,
         end_date: b.end_date,
+        property_id: listingToProperty.get(b.listing_id) ?? null,
         issues,
       });
     }
@@ -385,7 +387,7 @@ export const listBookingAlerts = async (
   if (outsideWindow.length > 0) {
     const { data: extraRows } = await supabase
       .from('bookings')
-      .select('id, confirmation_code, guest_name, end_date')
+      .select('id, confirmation_code, guest_name, end_date, listing_id')
       .in('id', outsideWindow);
     for (const b of (extraRows ?? [])) {
       alertMap.set(b.id, {
@@ -393,6 +395,7 @@ export const listBookingAlerts = async (
         confirmation_code: b.confirmation_code,
         guest_name: b.guest_name,
         end_date: b.end_date,
+        property_id: listingToProperty.get(b.listing_id) ?? null,
         issues: ['cleaning'],
       });
     }

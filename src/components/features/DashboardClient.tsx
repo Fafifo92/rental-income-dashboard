@@ -200,8 +200,10 @@ export default function DashboardClient() {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <PropertyMultiSelect properties={properties} value={propertyIds} onChange={setPropertyIds} groups={groups} tags={tags} tagAssigns={tagAssigns} />
-            <PeriodSelector value={period} onChange={setPeriod} customRange={customRange} onCustomRangeChange={setCustomRange} />
-            {!loading && kpis && (
+            {activeTab !== 'pendientes' && (
+              <PeriodSelector value={period} onChange={setPeriod} customRange={customRange} onCustomRangeChange={setCustomRange} />
+            )}
+            {activeTab !== 'pendientes' && !loading && kpis && (
               <ExportMenu kpis={kpis} monthly={exportMonthly} monthlyByBookings={exportMonthlyByBookings} period={period} customRange={customRange} propertyIds={propertyIds} />
             )}
           </div>
@@ -238,14 +240,15 @@ export default function DashboardClient() {
         ) : activeTab === 'pendientes' ? (
           <div className="space-y-6">
             <RecurringPendingPanel
-              propertyFilter={propertyIds.length === 1 ? propertyIds[0] : null}
+              propertyIds={propertyIds.length > 0 ? propertyIds : null}
               onChanged={() => setPendingRefreshKey(k => k + 1)}
             />
             <SharedBillsPendingPanel
+              propertyIds={propertyIds.length > 0 ? propertyIds : null}
               onChanged={() => setPendingRefreshKey(k => k + 1)}
             />
-            <PendingCleaningsWidget />
-            <InventoryProblemsWidget />
+            <PendingCleaningsWidget propertyIds={propertyIds.length > 0 ? propertyIds : null} />
+            <InventoryProblemsWidget propertyIds={propertyIds.length > 0 ? propertyIds : null} />
             {!loading && (
               <p className="text-xs text-slate-400 text-center py-2">
                 Los ítems desaparecen de esta vista cuando son resueltos.
@@ -513,7 +516,7 @@ export default function DashboardClient() {
 }
 
 // ---------- Widget "Aseos pendientes" ----------
-function PendingCleaningsWidget(): JSX.Element | null {
+function PendingCleaningsWidget({ propertyIds }: { propertyIds?: string[] | null }): JSX.Element | null {
   const [alerts, setAlerts] = useState<BookingAlert[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -529,7 +532,13 @@ function PendingCleaningsWidget(): JSX.Element | null {
     return () => { mounted = false; };
   }, []);
 
-  if (loading || alerts.length === 0) return null;
+  if (loading) return null;
+
+  const visible = propertyIds && propertyIds.length > 0
+    ? alerts.filter(a => a.property_id && propertyIds.includes(a.property_id))
+    : alerts;
+
+  if (visible.length === 0) return null;
 
   const fmt = (iso: string) => formatDateDisplay(iso);
 
@@ -544,7 +553,7 @@ function PendingCleaningsWidget(): JSX.Element | null {
           <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
             🧹 Aseos pendientes
             <span className="text-sm font-semibold px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700">
-              {alerts.length}
+              {visible.length}
             </span>
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -567,7 +576,7 @@ function PendingCleaningsWidget(): JSX.Element | null {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {alerts.slice(0, 10).map(a => {
+            {visible.slice(0, 10).map(a => {
               const otherIssues = a.issues.filter(i => i !== 'cleaning');
               return (
                 <tr key={a.id}>
@@ -606,9 +615,9 @@ function PendingCleaningsWidget(): JSX.Element | null {
             })}
           </tbody>
         </table>
-        {alerts.length > 10 && (
+        {visible.length > 10 && (
           <p className="text-xs text-slate-400 text-center mt-3">
-            +{alerts.length - 10} más — ve a{' '}
+            +{visible.length - 10} más — ve a{' '}
             <a href="/bookings" className="text-blue-600 hover:underline">reservas</a> para verlos todos.
           </p>
         )}
@@ -618,7 +627,7 @@ function PendingCleaningsWidget(): JSX.Element | null {
 }
 
 // ---------- Bloque 16 — Widget "Items con problemas" ----------
-function InventoryProblemsWidget(): JSX.Element | null {
+function InventoryProblemsWidget({ propertyIds }: { propertyIds?: string[] | null }): JSX.Element | null {
   const [items, setItems] = useState<InventoryItemRow[]>([]);
   const [recon, setRecon] = useState<DamageReconciliation[]>([]);
   const [propMap, setPropMap] = useState<Map<string, string>>(new Map());
@@ -638,15 +647,22 @@ function InventoryProblemsWidget(): JSX.Element | null {
 
   if (loading) return null;
 
-  const kpis = computeInventoryKpis(items);
-  const openRecon = recon.filter(r =>
+  const filteredItems = propertyIds && propertyIds.length > 0
+    ? items.filter(it => propertyIds.includes(it.property_id))
+    : items;
+  const filteredRecon = propertyIds && propertyIds.length > 0
+    ? recon.filter(r => r.property_id && propertyIds.includes(r.property_id))
+    : recon;
+
+  const kpis = computeInventoryKpis(filteredItems);
+  const openRecon = filteredRecon.filter(r =>
     r.status === 'pending_recovery' || r.status === 'overpaid' || r.status === 'no_charge',
   );
   const totalProblems = kpis.damaged + kpis.needsMaintenance + kpis.lowStock + kpis.depleted;
 
   if (totalProblems === 0 && openRecon.length === 0) return null;
 
-  const problemItems = items
+  const problemItems = filteredItems
     .filter(it => it.status === 'damaged' || it.status === 'needs_maintenance' || it.status === 'depleted')
     .slice(0, 12);
   const totalUnreconciled = openRecon

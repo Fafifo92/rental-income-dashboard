@@ -60,11 +60,13 @@ interface Props {
   /** Map of property_id → property name, used to label group children */
   propertyMap?: Map<string, string>;
   onDelete?: (id: string) => void;
+  onDeleteGroup?: (expense: GroupedExpense) => void;
   onEdit?: (expense: Expense) => void;
+  onEditGroup?: (expense: GroupedExpense) => void;
   onView?: (expense: Expense) => void;
 }
 
-export default function ExpensesList({ expenses, loading = false, bankAccounts = [], propertyMap = new Map(), onDelete, onEdit, onView }: Props) {
+export default function ExpensesList({ expenses, loading = false, bankAccounts = [], propertyMap = new Map(), onDelete, onDeleteGroup, onEdit, onEditGroup, onView }: Props) {
   const accountMap = useMemo(() => new Map(bankAccounts.map(a => [a.id, a])), [bankAccounts]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
@@ -355,7 +357,7 @@ export default function ExpensesList({ expenses, loading = false, bankAccounts =
       }),
     ];
 
-    if (onView || onEdit || onDelete) {
+    if (onView || onEdit || onEditGroup || onDeleteGroup || onDelete) {
       cols.push(
         helper.display({
           id: 'actions',
@@ -364,12 +366,85 @@ export default function ExpensesList({ expenses, loading = false, bankAccounts =
           meta: { align: 'center', className: 'w-32 whitespace-nowrap' },
           cell: info => {
             const row = info.row.original;
-            // Child rows and group headers don't have individual actions
-            if (row.isChild) return null;
+
+            // Group header: Edit + View + Delete group
             if (row.isGroup) {
-              // Group header: only allow expand toggle (handled in category cell)
-              return null;
+              return (
+                <div className="flex items-center justify-center gap-1">
+                  {onEditGroup && (
+                    <motion.button
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => onEditGroup(row)}
+                      className="p-1.5 rounded-md text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-colors"
+                      title="Editar grupo (estado, fecha, cuenta, montos)"
+                      aria-label="Editar grupo de gastos"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </motion.button>
+                  )}
+                  {onView && (
+                    <motion.button
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => onView(row)}
+                      className="p-1.5 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                      title="Ver detalle del grupo"
+                      aria-label="Ver detalle del grupo"
+                    >
+                      <FileText className="w-4 h-4" />
+                    </motion.button>
+                  )}
+                  {onDeleteGroup && (
+                    <motion.button
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => onDeleteGroup(row)}
+                      className="p-1.5 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                      title="Eliminar grupo completo"
+                      aria-label="Eliminar grupo de gastos"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </motion.button>
+                  )}
+                </div>
+              );
             }
+
+            // Child rows: View + Delete only (no Edit — use the group header to avoid discrepancies)
+            if (row.isChild) {
+              const synthetic = isSynthetic(row.id);
+              return (
+                <div className="flex items-center justify-center gap-1">
+                  {onView && (
+                    <motion.button
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => onView(row)}
+                      className="p-1.5 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                      title="Ver comprobante / detalle"
+                      aria-label="Ver detalle del gasto"
+                    >
+                      <FileText className="w-4 h-4" />
+                    </motion.button>
+                  )}
+                  {onDelete && !synthetic && (
+                    <motion.button
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => onDelete(row.id)}
+                      className="p-1.5 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                      title="Eliminar gasto"
+                      aria-label="Eliminar gasto"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </motion.button>
+                  )}
+                </div>
+              );
+            }
+
+            // Regular (ungrouped) rows: all actions
             const synthetic = isSynthetic(row.id);
             return (
               <div className="flex items-center justify-center gap-1">
@@ -418,7 +493,7 @@ export default function ExpensesList({ expenses, loading = false, bankAccounts =
     }
 
     return cols;
-  }, [accountMap, expandedGroups, propertyMap, onDelete, onEdit, onView]);
+  }, [accountMap, expandedGroups, propertyMap, onDelete, onDeleteGroup, onEdit, onEditGroup, onView]);
 
   return (
     <DataTable<GroupedExpense>

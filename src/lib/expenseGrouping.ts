@@ -68,10 +68,18 @@ export function groupExpenses(
       ? Math.max(new Set(members.map(m => m.booking_id).filter(Boolean)).size, 1)
       : members.length;
 
+    // Use consensus bank_account_id: pick from the first member that has one
+    // (the first member in array order may have null if it hasn't been paid yet,
+    // while other members already have the account set).
+    const consensusBankAccountId =
+      members.find(m => m.bank_account_id != null)?.bank_account_id ?? null;
+
     // Group header row – use the representative (first-encountered) expense
-    // for descriptive fields, but replace amount with the group total.
+    // for descriptive fields, but replace amount with the group total and
+    // derive bank_account_id from any member that has it.
     result.push({
       ...exp,
+      bank_account_id: consensusBankAccountId,
       amount: groupTotal,
       isGroup: true,
       groupTotal,

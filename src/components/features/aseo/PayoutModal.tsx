@@ -17,7 +17,7 @@ interface Props {
   looseCount: number;
   banks: BankAccountRow[];
   onClose: () => void;
-  onConfirm: (args: { paidDate: string; bankAccountId: string | null; includePending: boolean }) => Promise<string | null>;
+  onConfirm: (args: { paidDate: string; bankAccountId: string; includePending: boolean }) => Promise<string | null>;
 }
 
 export default function PayoutModal({
@@ -36,9 +36,13 @@ export default function PayoutModal({
   const count = cleaningCount;
 
   const submit = async () => {
+    if (!bankId) {
+      setError('Selecciona la cuenta bancaria desde la que se realizó el pago.');
+      return;
+    }
     setWorking(true);
     setError(null);
-    const err = await onConfirm({ paidDate, bankAccountId: bankId || null, includePending });
+    const err = await onConfirm({ paidDate, bankAccountId: bankId, includePending });
     setWorking(false);
     if (err) setError(err);
   };
@@ -97,7 +101,9 @@ export default function PayoutModal({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Cuenta bancaria (opcional)</label>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">
+              Cuenta bancaria <span className="text-red-500">*</span>
+            </label>
             <select
               value={bankId}
               onChange={e => setBankId(e.target.value)}
@@ -129,7 +135,7 @@ export default function PayoutModal({
           </button>
           <button
             onClick={submit}
-            disabled={working || amount === 0}
+            disabled={working || amount === 0 || !bankId}
             className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg disabled:bg-slate-300 disabled:cursor-not-allowed"
           >
             {working ? 'Procesando…' : `Pagar ${formatCurrency(amount)}`}

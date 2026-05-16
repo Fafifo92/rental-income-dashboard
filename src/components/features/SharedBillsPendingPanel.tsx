@@ -14,8 +14,10 @@ const ymLabel = (ym: string): string => {
 
 export default function SharedBillsPendingPanel({
   onChanged,
+  propertyIds,
 }: {
   onChanged?: () => void;
+  propertyIds?: string[] | null;
 }) {
   const [items, setItems] = useState<PendingSharedBill[]>([]);
   const [banks, setBanks] = useState<BankAccountRow[]>([]);
@@ -43,11 +45,16 @@ export default function SharedBillsPendingPanel({
   }, [load]);
 
   if (loading) return <div className="h-20 bg-slate-100 rounded-2xl animate-pulse" />;
-  if (items.length === 0) return null;
 
-  const overdue = items.filter(p => !p.isCurrentMonth).length;
-  const currentMonth = items.filter(p => p.isCurrentMonth).length;
-  const total = items.reduce((s, p) => s + p.estimatedAmount, 0);
+  const visible = propertyIds && propertyIds.length > 0
+    ? items.filter(p => p.propertyIds.some(pid => propertyIds.includes(pid)))
+    : items;
+
+  if (visible.length === 0) return null;
+
+  const overdue = visible.filter(p => !p.isCurrentMonth).length;
+  const currentMonth = visible.filter(p => p.isCurrentMonth).length;
+  const total = visible.reduce((s, p) => s + p.estimatedAmount, 0);
 
   return (
     <>
@@ -66,7 +73,7 @@ export default function SharedBillsPendingPanel({
               <h3 className="font-bold text-blue-800">
                 Facturas de proveedor pendientes
                 <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-200 text-blue-800">
-                  {items.length}
+                  {visible.length}
                 </span>
               </h3>
               <p className="text-xs text-blue-700">
@@ -92,7 +99,7 @@ export default function SharedBillsPendingPanel({
               className="overflow-hidden"
             >
               <div className="p-4 pt-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {items.map((p, i) => (
+                {visible.map((p, i) => (
                   <motion.div
                     key={`${p.vendor.id}-${p.yearMonth}`}
                     initial={{ opacity: 0, scale: 0.95 }}

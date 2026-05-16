@@ -15,11 +15,13 @@ const ymLabel = (ym: string): string => {
 
 export default function RecurringPendingPanel({
   propertyFilter = null,
+  propertyIds = null,
   onChanged,
   autoOpenRecurringId,
   autoOpenYm,
 }: {
   propertyFilter?: string | null;
+  propertyIds?: string[] | null;
   onChanged?: () => void;
   autoOpenRecurringId?: string | null;
   autoOpenYm?: string | null;
@@ -44,9 +46,11 @@ export default function RecurringPendingPanel({
 
   useEffect(() => { load(); }, [load]);
 
-  const visible = propertyFilter
-    ? items.filter(p => p.recurring.property_id === propertyFilter)
-    : items;
+  const visible = propertyIds && propertyIds.length > 0
+    ? items.filter(p => propertyIds.includes(p.recurring.property_id))
+    : propertyFilter
+      ? items.filter(p => p.recurring.property_id === propertyFilter)
+      : items;
 
   // Deep-link: auto-open MarkPaidModal for a specific recurring + yearMonth
   useEffect(() => {

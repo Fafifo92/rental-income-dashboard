@@ -109,31 +109,80 @@ interface Group {
   color: string;
 }
 
-type ChartDataRow = Record<string, string | number>;
+type ChartDataRow = Record<string, string | number | string[]>;
 
 // ── Tooltip ───────────────────────────────────────────────────────────────────
 
-interface TooltipEntry { name: string; value: number; color: string; dataKey: string }
-interface TTProps { active?: boolean; payload?: TooltipEntry[]; label?: string; totalProperties: number }
+interface TooltipEntry { name: string; value: number; color: string; dataKey: string; payload: ChartDataRow }
+interface TTProps {
+  active?: boolean;
+  payload?: TooltipEntry[];
+  label?: string;
+  totalProperties: number;
+  coordinate?: { x: number; y: number };
+  viewBox?: { x: number; y: number; width: number; height: number };
+}
 
-function CustomTooltip({ active, payload, label, totalProperties }: TTProps) {
+function CustomTooltip({ active, payload, label, totalProperties, coordinate, viewBox }: TTProps) {
   if (!active || !payload?.length) return null;
   const entries = payload.filter(p => p.value > 0);
   const total = entries.reduce((s, p) => s + p.value, 0);
   const pct = totalProperties > 0 ? Math.round((total / totalProperties) * 100) : 0;
+
+  // For bar charts: default to above the coordinate (bars grow from bottom, space is above).
+  // Only drop below if very near the top of the chart area.
+  const nearTop = coordinate && viewBox && coordinate.y < viewBox.y + viewBox.height * 0.25;
+  const flipX   = coordinate && viewBox && coordinate.x > viewBox.x + viewBox.width  * 0.55;
+
+  const transform = [
+    flipX ? 'translateX(calc(-100% - 12px))' : 'translateX(12px)',
+    nearTop ? 'translateY(8px)' : 'translateY(calc(-100% - 8px))',
+  ].join(' ');
+
   return (
-    <div className="bg-white rounded-xl shadow-xl border p-3 text-sm min-w-[180px]">
-      <p className="font-bold text-slate-700 mb-1">{label}</p>
-      <p className="text-xs text-slate-400 mb-2">{total} de {totalProperties} propiedades · {pct}% ocupación</p>
-      {entries.map(p => (
-        <div key={p.dataKey} className="flex items-center justify-between gap-3 mb-1">
-          <span className="flex items-center gap-1.5 text-slate-500">
-            <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: p.color }} />
-            <span className="truncate max-w-[130px]">{p.name}</span>
-          </span>
-          <span className="font-semibold text-slate-800 shrink-0">{p.value}</span>
-        </div>
-      ))}
+    <div
+      style={{
+        background: '#ffffff',
+        transform,
+        zIndex: 9999,
+        boxShadow: '0 4px 24px 0 rgba(15,23,42,0.13), 0 1px 4px 0 rgba(15,23,42,0.08)',
+        borderRadius: 12,
+        border: '1px solid #e2e8f0',
+        padding: '12px 14px',
+        minWidth: 200,
+        maxWidth: 290,
+        fontSize: 13,
+        pointerEvents: 'none',
+      }}
+    >
+      <p style={{ fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{label}</p>
+      <p style={{ fontSize: 11, color: '#94a3b8', marginBottom: 10 }}>
+        {total} de {totalProperties} propiedades · {pct}% ocupación
+      </p>
+      {entries.map(p => {
+        const namesKey = `_names_${p.dataKey}`;
+        const names: string[] = (p.payload[namesKey] as string[] | undefined) ?? [];
+        return (
+          <div key={p.dataKey} style={{ marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#475569', fontWeight: 600, minWidth: 0 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: p.color, flexShrink: 0, display: 'inline-block' }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>{p.name}</span>
+              </span>
+              <span style={{ fontWeight: 700, color: '#1e293b', flexShrink: 0 }}>{p.value}</span>
+            </div>
+            {names.length > 0 && (
+              <ul style={{ margin: '3px 0 0 14px', padding: 0, listStyle: 'none' }}>
+                {names.map(n => (
+                  <li key={n} style={{ fontSize: 11, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    · {n}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -146,11 +195,18 @@ interface BookingRaw {
   listing_id: string;
 }
 
+interface OccupancyStats {
+  mostOccupied: { name: string; buckets: number } | null;
+  leastOccupied: { name: string; buckets: number } | null;
+  totalBuckets: number;
+}
+
 export default function OccupancyByProperty({ granularity, from, to, propertyIds, breakEvenOccupancy }: Props) {
   const [mounted, setMounted]       = useState(false);
   const [chartData, setChartData]   = useState<ChartDataRow[]>([]);
   const [groups, setGroups]         = useState<Group[]>([]);
   const [totalProps, setTotalProps] = useState(0);
+  const [stats, setStats]           = useState<OccupancyStats>({ mostOccupied: null, leastOccupied: null, totalBuckets: 0 });
   const [loading, setLoading]       = useState(true);
 
   useEffect(() => setMounted(true), []);
@@ -169,8 +225,12 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
         setGroups([]); setChartData([]); setTotalProps(0); setLoading(false);
         return;
       }
-      type PropRow = { id: string; group_id: string | null };
+      type PropRow = { id: string; name: string; group_id: string | null };
       const propArr = props as PropRow[];
+
+      // Build id → name map for tooltip and stats
+      const propNameMap = new Map<string, string>();
+      for (const p of propArr) propNameMap.set(p.id, p.name);
 
       // 2. Property groups
       const uniqueGroupIds = Array.from(new Set(propArr.map(p => p.group_id).filter(Boolean))) as string[];
@@ -221,6 +281,10 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
       // 5. Build buckets and count DISTINCT properties occupied per group per bucket
       const buckets = buildBuckets(from, to, granularity);
 
+      // Track per-property bucket occupation count for stats
+      const propOccupancyCount = new Map<string, number>(); // propId → buckets occupied
+      for (const p of propArr) propOccupancyCount.set(p.id, 0);
+
       const data: ChartDataRow[] = buckets.map(bucket => {
         // For this bucket, which properties have at least 1 booking overlapping?
         const occupiedProps = new Set<string>();
@@ -234,21 +298,41 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
           }
         }
 
-        // Count occupied properties per group
+        // Count occupied properties per group, tracking names
         const row: ChartDataRow = { bucket: bucket.label };
-        for (const g of orderedGroups) row[g.id] = 0;
+        for (const g of orderedGroups) {
+          row[g.id] = 0;
+          row[`_names_${g.id}`] = [];
+        }
 
         for (const propId of occupiedProps) {
           const group = propToGroup.get(propId);
-          if (group) row[group.id] = (row[group.id] as number) + 1;
+          if (group) {
+            row[group.id] = (row[group.id] as number) + 1;
+            const nameList = row[`_names_${group.id}`] as string[];
+            const propName = propNameMap.get(propId) ?? propId;
+            nameList.push(propName);
+          }
+          propOccupancyCount.set(propId, (propOccupancyCount.get(propId) ?? 0) + 1);
         }
         return row;
       });
+
+      // Compute most/least occupied property
+      let mostOccupied: { name: string; buckets: number } | null = null;
+      let leastOccupied: { name: string; buckets: number } | null = null;
+      for (const p of propArr) {
+        const count = propOccupancyCount.get(p.id) ?? 0;
+        const entry = { name: p.name, buckets: count };
+        if (!mostOccupied || count > mostOccupied.buckets) mostOccupied = entry;
+        if (!leastOccupied || count < leastOccupied.buckets) leastOccupied = entry;
+      }
 
       if (!cancelled) {
         setGroups(orderedGroups);
         setChartData(data);
         setTotalProps(propArr.length);
+        setStats({ mostOccupied, leastOccupied, totalBuckets: buckets.length });
         setLoading(false);
       }
     })();
@@ -280,7 +364,7 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
 
   return (
     <div className="p-6 bg-white border rounded-xl shadow-sm">
-      <div className="flex items-start justify-between mb-4 gap-4 flex-wrap">
+      <div className="flex items-start justify-between mb-3 gap-4 flex-wrap">
         <div>
           <h3 className="text-lg font-bold text-slate-800">Ocupación por grupo</h3>
           <p className="text-sm text-slate-500 mt-0.5">
@@ -296,6 +380,34 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
           </div>
         )}
       </div>
+
+      {/* Occupancy stats: most & least occupied */}
+      {(stats.mostOccupied || stats.leastOccupied) && (
+        <div className="flex gap-3 mb-4 flex-wrap">
+          {stats.mostOccupied && (
+            <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-xs min-w-0">
+              <span className="w-1 self-stretch rounded-full bg-emerald-400 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-emerald-800 font-semibold truncate max-w-[160px]">{stats.mostOccupied.name}</p>
+                <p className="text-emerald-500 mt-0.5">
+                  Más ocupada · {stats.mostOccupied.buckets}/{stats.totalBuckets} períodos
+                </p>
+              </div>
+            </div>
+          )}
+          {stats.leastOccupied && stats.mostOccupied?.name !== stats.leastOccupied.name && (
+            <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2 text-xs min-w-0">
+              <span className="w-1 self-stretch rounded-full bg-rose-400 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-rose-800 font-semibold truncate max-w-[160px]">{stats.leastOccupied.name}</p>
+                <p className="text-rose-400 mt-0.5">
+                  Menos ocupada · {stats.leastOccupied.buckets}/{stats.totalBuckets} períodos
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="h-64 w-full">
         {mounted && (
@@ -326,7 +438,12 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
                 strokeWidth={2}
               />
             )}
-            <Tooltip content={<CustomTooltip totalProperties={totalProps} />} />
+            <Tooltip
+              content={<CustomTooltip totalProperties={totalProps} />}
+              wrapperStyle={{ zIndex: 9999, outline: 'none' }}
+              allowEscapeViewBox={{ x: true, y: true }}
+              isAnimationActive={false}
+            />
             <Legend
               iconType="square"
               iconSize={10}

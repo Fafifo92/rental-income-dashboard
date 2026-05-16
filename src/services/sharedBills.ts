@@ -161,6 +161,7 @@ export type PendingSharedBill = {
   vendor: VendorRow;
   yearMonth: string;
   propertiesCount: number;
+  propertyIds: string[];
   estimatedAmount: number;
   isCurrentMonth: boolean;
 };
@@ -217,6 +218,7 @@ export const listPendingSharedBills = async (
         vendor: v,
         yearMonth: ym,
         propertiesCount: props.length,
+        propertyIds: props.map(vp => vp.property_id),
         estimatedAmount: estimated,
         isCurrentMonth: ym === nowYm,
       });

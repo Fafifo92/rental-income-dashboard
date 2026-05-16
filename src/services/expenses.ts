@@ -369,6 +369,14 @@ export const deleteExpense = async (id: string): Promise<ServiceResult<null>> =>
   return { data: null, error: null };
 };
 
+/** Elimina TODAS las filas de un grupo compartido (expense_group_id). */
+export const deleteExpenseGroup = async (groupId: string): Promise<ServiceResult<null>> => {
+  if (!groupId) return { data: null, error: 'Falta el grupo' };
+  const { error } = await supabase.from('expenses').delete().eq('expense_group_id', groupId);
+  if (error) return { data: null, error: error.message };
+  return { data: null, error: null };
+};
+
 /**
  * Actualiza TODAS las filas que comparten un `expense_group_id` (gasto
  * compartido entre varias propiedades). Pensado para cambiar el estado, la
@@ -383,16 +391,10 @@ export const updateExpenseGroup = async (
   patch: Partial<Pick<Expense, 'status' | 'bank_account_id' | 'date' | 'description'>>,
 ): Promise<ServiceResult<Expense[]>> => {
   if (!groupId) return { data: null, error: 'Falta el grupo' };
-  if (patch.status === 'paid' && !patch.bank_account_id) {
-    // permitir si las filas existentes ya tienen banco; verificar.
-    const { data: existing } = await supabase
-      .from('expenses')
-      .select('id, bank_account_id')
-      .eq('expense_group_id', groupId);
-    const missing = (existing ?? []).some(r => !r.bank_account_id);
-    if (missing) {
-      return { data: null, error: 'Para marcar el grupo como pagado, indica la cuenta bancaria que pagó la factura completa.' };
-    }
+  // Only validate bank_account when it is being explicitly set to null/empty while status=paid.
+  // If bank_account_id is not in the patch, the DB keeps the existing value — no need to validate.
+  if (patch.status === 'paid' && 'bank_account_id' in patch && !patch.bank_account_id) {
+    return { data: null, error: 'Para marcar el grupo como pagado, indica la cuenta bancaria que pagó la factura completa.' };
   }
 
   const { data, error } = await supabase

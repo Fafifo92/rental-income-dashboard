@@ -22,6 +22,7 @@ import { reportDamage, listInventoryItems } from '@/services/inventory';
 import type { BookingRow, InventoryItemRow } from '@/types/database';
 import { useBackdropClose } from '@/lib/useBackdropClose';
 import MoneyInput from '@/components/MoneyInput';
+import { formatCurrency } from '@/lib/utils';
 
 const STRUCTURAL_SUGGESTIONS = [
   'Pared', 'Piso', 'Techo', 'Puerta', 'Ventana', 'Cerradura',
@@ -57,6 +58,7 @@ export default function DamageReportModal({
   const [chargeFromGuest, setChargeFromGuest] = useState<number | null>(null);
   const [chargeFromPlatform, setChargeFromPlatform] = useState<number | null>(null);
   const [description, setDescription] = useState('');
+  const [damagedUnits, setDamagedUnits] = useState(1);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -74,15 +76,24 @@ export default function DamageReportModal({
   );
 
   // Pre-cargar costo cuando se selecciona un item con purchase_price.
+  // Si el item tiene múltiples unidades, sugiere el costo proporcional a las unidades dañadas.
   useEffect(() => {
-    if (mode === 'inventory' && selectedItem?.purchase_price && (repairCost === null || repairCost === 0)) {
-      setRepairCost(Number(selectedItem.purchase_price));
-    }
-  }, [mode, selectedItem]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (mode !== 'inventory' || !selectedItem?.purchase_price) return;
+    if (repairCost !== null && repairCost > 0) return;
+    const price = Number(selectedItem.purchase_price);
+    const qty = Number(selectedItem.quantity) || 1;
+    setRepairCost(qty > 1 && damagedUnits > 0 ? Math.round((price / qty) * damagedUnits) : price);
+  }, [mode, selectedItem, damagedUnits]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const subjectLabel = mode === 'inventory'
     ? (selectedItem?.name ?? '')
     : (structuralLabel === 'Otro' ? structuralCustom.trim() : structuralLabel);
+
+  const itemQty = Number(selectedItem?.quantity) || 1;
+  const hasMultipleUnits = mode === 'inventory' && !!selectedItem && itemQty > 1;
+  const unitCost = hasMultipleUnits && selectedItem?.purchase_price
+    ? Math.round(Number(selectedItem.purchase_price) / itemQty)
+    : null;
 
   const canSubmit =
     !!repairCost && repairCost > 0 &&
@@ -104,6 +115,7 @@ export default function DamageReportModal({
       charge_amount: (chargeFromGuest ?? 0) + (chargeFromPlatform ?? 0) || null,
       charge_from_guest: chargeFromGuest,
       charge_from_platform: chargeFromPlatform,
+      damaged_units: hasMultipleUnits ? damagedUnits : undefined,
     });
     setSaving(false);
     if (res.error) { setErr(res.error); return; }
@@ -137,7 +149,11 @@ export default function DamageReportModal({
             <p className="font-semibold">Al guardar:</p>
             <ul className="list-disc ml-4 space-y-0.5">
               <li>Se crea un <strong>gasto pendiente</strong> "Reparación …" vinculado a esta reserva.</li>
-              <li>Si el daño es de inventario, el item queda <strong>marcado como dañado</strong>.</li>
+              <li>
+                {hasMultipleUnits
+                  ? <>Se descuentan <strong>{damagedUnits} {damagedUnits === 1 ? 'unidad' : 'unidades'}</strong> del stock del item. Al pagar el gasto, se restauran automáticamente.</>
+                  : <>Si el daño es de inventario, el item queda <strong>marcado como dañado</strong>.</>}
+              </li>
               <li>Si activas el cobro, se agrega un <strong>cobro por daño</strong> a la reserva.</li>
               <li>Si ya hay un daño pendiente igual, no se duplicará.</li>
             </ul>
@@ -178,7 +194,7 @@ export default function DamageReportModal({
                 </div>
               ) : (
                 <select
-                  required value={itemId} onChange={e => setItemId(e.target.value)}
+                  required value={itemId} onChange={e => { setItemId(e.target.value); setDamagedUnits(1); setRepairCost(null); }}
                   className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
                 >
                   <option value="">— Selecciona un item del inventario —</option>
@@ -217,12 +233,55 @@ export default function DamageReportModal({
             </div>
           )}
 
+          {hasMultipleUnits && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                ¿Cuántas unidades se dañaron? *
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={1}
+                  max={itemQty}
+                  value={damagedUnits}
+                  onChange={e => {
+                    const v = Math.max(1, Math.min(itemQty, parseInt(e.target.value) || 1));
+                    setDamagedUnits(v);
+                    setRepairCost(null);
+                  }}
+                  className="w-24 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-center font-mono"
+                />
+                <span className="text-sm text-slate-500">
+                  de <strong>{itemQty}</strong> {selectedItem!.unit || 'unidades'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 mt-1.5">
+                <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-amber-400 rounded-full transition-all"
+                    style={{ width: `${Math.round((damagedUnits / itemQty) * 100)}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-slate-500 shrink-0">
+                  {Math.round((damagedUnits / itemQty) * 100)}% del stock
+                </span>
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Costo estimado de reparación / reposición *</label>
             <MoneyInput value={repairCost} onChange={setRepairCost} required placeholder="0" />
-            <p className="text-[10px] text-slate-400 mt-1">
-              Se registrará como gasto <strong>pendiente</strong>. Cuando lo arregles editas el monto real y lo marcas pagado.
-            </p>
+            {hasMultipleUnits && unitCost !== null ? (
+              <p className="text-[10px] text-slate-400 mt-1">
+                💡 Sugerido para {damagedUnits} {damagedUnits === 1 ? 'unidad' : 'unidades'}: <strong>{formatCurrency(unitCost * damagedUnits)}</strong>
+                {' '}(${unitCost.toLocaleString('es-CO')} c/u) · Al reparar/pagar el gasto, las unidades se restauran automáticamente.
+              </p>
+            ) : (
+              <p className="text-[10px] text-slate-400 mt-1">
+                Se registrará como gasto <strong>pendiente</strong>. Cuando lo arregles editas el monto real y lo marcas pagado.
+              </p>
+            )}
           </div>
 
           <div>

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ExpensesList from './ExpensesList';
 import DamageExpenseEditModal from './DamageExpenseEditModal';
 import ExpenseDetailModal from './ExpenseDetailModal';
+import GroupExpenseEditModal from './GroupExpenseEditModal';
 import FilterBar from './FilterBar';
 import { type ExpenseTypeChoice } from './ExpenseTypeChooser';
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
@@ -18,6 +19,7 @@ import {
   updateExpense,
   updateExpenseGroup,
   deleteExpense,
+  deleteExpenseGroup,
   type ExpenseFilters,
 } from '@/services/expenses';
 import { deleteBookingAdjustment } from '@/services/bookingAdjustments';
@@ -25,7 +27,7 @@ import { getUpcomingAndOverdueSchedules, getSchedulesDoneNeedingExpense, complet
 import { listInventoryItems } from '@/services/inventory';
 import { listProperties } from '@/services/properties';
 import { getBooking } from '@/services/bookings';
-import type { Expense } from '@/types';
+import type { Expense, GroupedExpense } from '@/types';
 import { type BookingRow, type ExpenseSection, type ExpenseSubcategory, type MaintenanceScheduleRow, type InventoryItemRow } from '@/types/database';
 import { useAuth } from '@/lib/useAuth';
 import { usePropertyFilter } from '@/lib/usePropertyFilter';
@@ -52,6 +54,7 @@ export default function ExpensesClient() {
   const [showInventoryMaintenanceForm, setShowInventoryMaintenanceForm] = useState(false);
   const [invMaintPrefillSchedule, setInvMaintPrefillSchedule] = useState<MaintenanceScheduleRow | null>(null);
   const [editing, setEditing] = useState<Expense | null>(null);
+  const [editingGroup, setEditingGroup] = useState<GroupedExpense | null>(null);
   const [viewing, setViewing] = useState<Expense | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
   const [filters, setFilters] = useState<ExpenseFilters>(EMPTY_FILTERS);
@@ -285,6 +288,51 @@ export default function ExpensesClient() {
     }
   };
 
+  const handleEditGroup = (group: GroupedExpense) => {
+    setEditingGroup(group);
+  };
+
+  const handleSaveGroup = async (
+    sharedPatch: Partial<Pick<Expense, 'status' | 'bank_account_id' | 'date' | 'description'>>,
+    childAmounts: { id: string; amount: number }[],
+  ): Promise<boolean> => {
+    const gid = editingGroup?.expense_group_id;
+    if (!gid) return false;
+
+    // 1. Update shared fields across all group members
+    const result = await updateExpenseGroup(gid, sharedPatch);
+    if (result.error) { toast.error(result.error); return false; }
+
+    // 2. Update individual amounts where changed
+    for (const { id, amount } of childAmounts) {
+      const res = await updateExpense(id, { amount });
+      if (res.error) { toast.error(res.error); return false; }
+    }
+
+    // 3. Sync local state
+    const amountMap = new Map(childAmounts.map(c => [c.id, c.amount]));
+    setExpenses(prev => prev.map(e => {
+      if (e.expense_group_id !== gid) return e;
+      return { ...e, ...sharedPatch, ...(amountMap.has(e.id) ? { amount: amountMap.get(e.id)! } : {}) };
+    }));
+    setEditingGroup(null);
+    toast.success('Grupo actualizado');
+    return true;
+  };
+
+  const handleDeleteGroup = async (group: GroupedExpense) => {
+    const gid = group.expense_group_id;
+    if (!gid) return;
+    if (dbConnected) {
+      const result = await deleteExpenseGroup(gid);
+      if (result.error) { toast.error(result.error); return; }
+    }
+    setExpenses(prev => prev.filter(e => e.expense_group_id !== gid));
+    setEditingGroup(null);
+    dispatchRecurringChange();
+    toast.success('Grupo eliminado');
+  };
+
   /**
    * Routing inteligente para "Cuentas por Pagar".
    * - Aseo / Insumos pendientes → /aseo (liquidación canónica).
@@ -498,7 +546,9 @@ export default function ExpensesClient() {
           bankAccounts={bankAccounts}
           propertyMap={propertyMap}
           onDelete={handleDeleteRequest}
+          onDeleteGroup={handleDeleteGroup}
           onEdit={handleEdit}
+          onEditGroup={handleEditGroup}
           onView={setViewing}
         />
       </main>
@@ -576,6 +626,17 @@ export default function ExpensesClient() {
             onClose={() => setViewing(null)}
             onEdit={handleEdit}
             onViewBooking={handleViewBooking}
+          />
+        )}
+
+        {editingGroup && (
+          <GroupExpenseEditModal
+            groupExpense={editingGroup}
+            bankAccounts={bankAccounts}
+            propertyMap={propertyMap}
+            onClose={() => setEditingGroup(null)}
+            onSave={handleSaveGroup}
+            onDelete={() => handleDeleteGroup(editingGroup)}
           />
         )}
 

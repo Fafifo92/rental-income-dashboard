@@ -45,8 +45,15 @@ export function DamageReportModal({
   const [chargeBack, setChargeBack] = useState(false);
   const [chargeAmount, setChargeAmount] = useState<number | null>(null);
   const [description, setDescription] = useState('');
+  const [damagedUnits, setDamagedUnits] = useState(1);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const itemQty = Number(item.quantity) || 1;
+  const hasMultipleUnits = itemQty > 1;
+  const unitCost = hasMultipleUnits && item.purchase_price
+    ? Math.round(Number(item.purchase_price) / itemQty)
+    : null;
 
   useEffect(() => {
     (async () => {
@@ -83,6 +90,13 @@ export function DamageReportModal({
     : /direct|directo/i.test(selectedSource) ? 'huésped (reserva directa)'
     : `la plataforma (${selectedSource})`;
 
+  // Pre-llenar costo proporcional cuando cambia el número de unidades dañadas.
+  useEffect(() => {
+    if (!item.purchase_price || !hasMultipleUnits) return;
+    if (repairCost !== null && repairCost > 0) return;
+    setRepairCost(Math.round((Number(item.purchase_price) / itemQty) * damagedUnits));
+  }, [damagedUnits]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -98,6 +112,7 @@ export function DamageReportModal({
       description: description.trim() || null,
       charge_to_guest: chargeBack && !!bookingId,
       charge_amount: charge,
+      damaged_units: hasMultipleUnits ? damagedUnits : undefined,
     });
     setSaving(false);
     if (res.error) { setErr(res.error); return; }
@@ -130,7 +145,14 @@ export function DamageReportModal({
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-[11px] text-blue-800 space-y-1">
             <p className="font-semibold">Al guardar se hará automáticamente:</p>
             <ul className="list-disc ml-4 space-y-0.5">
-              <li>El item queda marcado como <strong>Dañado</strong>.</li>
+              {hasMultipleUnits ? (
+                <li>Se descuentan <strong>{damagedUnits} {damagedUnits === 1 ? 'unidad' : 'unidades'}</strong> del stock
+                  {itemQty - damagedUnits > 0 && <> · quedan <strong>{itemQty - damagedUnits} {item.unit || 'unidades'}</strong> disponibles</>}.
+                  Al pagar el gasto, las unidades se restauran automáticamente.
+                </li>
+              ) : (
+                <li>El item queda marcado como <strong>Dañado</strong>.</li>
+              )}
               <li>Se crea un <strong>gasto pendiente</strong> "Reparación inventario" con el costo estimado.</li>
               <li>Si lo atribuyes a una reserva, queda <strong>vinculado</strong> a esa reserva (opcional).</li>
               <li>Si activas el cobro al huésped, se crea un <strong>cobro por daño</strong> en la reserva.</li>
@@ -156,12 +178,60 @@ export function DamageReportModal({
             </p>
           </div>
 
+          {hasMultipleUnits && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                ¿Cuántas unidades se dañaron? *
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={1}
+                  max={itemQty}
+                  value={damagedUnits}
+                  onChange={e => {
+                    const v = Math.max(1, Math.min(itemQty, parseInt(e.target.value) || 1));
+                    setDamagedUnits(v);
+                    setRepairCost(null);
+                  }}
+                  className="w-24 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-500 outline-none text-center font-mono"
+                />
+                <span className="text-sm text-slate-500">
+                  de <strong>{itemQty}</strong> {item.unit || 'unidades'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 mt-1.5">
+                <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-rose-400 rounded-full transition-all"
+                    style={{ width: `${Math.round((damagedUnits / itemQty) * 100)}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-slate-500 shrink-0">
+                  {Math.round((damagedUnits / itemQty) * 100)}% del stock
+                </span>
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Costo estimado de reparación / reposición *</label>
-            <MoneyInput value={repairCost} onChange={setRepairCost} required placeholder="0" />
-            <p className="text-[10px] text-slate-400 mt-1">
-              Pre-cargado con el precio de compra si existe. Usa coma para centavos.
-            </p>
+            <MoneyInput
+              value={repairCost}
+              onChange={v => { setRepairCost(v); }}
+              required
+              placeholder="0"
+            />
+            {hasMultipleUnits && unitCost !== null ? (
+              <p className="text-[10px] text-slate-400 mt-1">
+                💡 Sugerido para {damagedUnits} {damagedUnits === 1 ? 'unidad' : 'unidades'}: <strong>{formatCurrency(unitCost * damagedUnits)}</strong>
+                {' '}(${unitCost.toLocaleString('es-CO')} c/u)
+              </p>
+            ) : (
+              <p className="text-[10px] text-slate-400 mt-1">
+                Pre-cargado con el precio de compra si existe. Usa coma para centavos.
+              </p>
+            )}
           </div>
 
           {bookingId && (
@@ -247,8 +317,12 @@ export function ItemRepairModal({
   const [bankAccountId, setBankAccountId] = useState<string>('');
   const [date, setDate] = useState(todayISO());
   const [notes, setNotes] = useState('');
+  const [repairedUnits, setRepairedUnits] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Show unit-restore field when item has unit tracking (unit label set) or quantity is tracked.
+  const hasUnitTracking = item.unit !== null || item.quantity !== null;
 
   useEffect(() => {
     listBankAccounts().then(r => { if (r.data) setBankAccounts(r.data); });
@@ -289,10 +363,11 @@ export function ItemRepairModal({
     }
 
     // 2. Registrar movimiento 'repaired' — también actualiza status del item a 'good'
+    const restoreQty = repairedUnits && repairedUnits > 0 ? repairedUnits : 0;
     const movRes = await registerInventoryMovement({
       item_id: item.id,
       type: 'repaired',
-      quantity_delta: 0,
+      quantity_delta: restoreQty,
       new_status: 'good',
       notes: notes.trim() || null,
       related_expense_id: expRes.data.id,
@@ -335,7 +410,11 @@ export function ItemRepairModal({
             <p className="font-semibold">Al guardar se hará automáticamente:</p>
             <ul className="list-disc ml-4 space-y-0.5">
               <li>Se registra el <strong>gasto de reparación</strong> en /gastos.</li>
-              <li>El item queda marcado como <strong>Bueno ✓</strong> y se registra el movimiento de reparación.</li>
+              <li>
+                {repairedUnits && repairedUnits > 0
+                  ? <>Se restauran <strong>{repairedUnits} {item.unit || 'unidades'}</strong> al stock del item y queda marcado como <strong>Bueno ✓</strong>.</>
+                  : <>El item queda marcado como <strong>Bueno ✓</strong> y se registra el movimiento de reparación.</>}
+              </li>
             </ul>
           </div>
 
@@ -381,6 +460,28 @@ export function ItemRepairModal({
               className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
             />
           </div>
+
+          {hasUnitTracking && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                Unidades reparadas / repuestas (opcional)
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={1}
+                  value={repairedUnits ?? ''}
+                  onChange={e => setRepairedUnits(e.target.value ? Math.max(1, parseInt(e.target.value)) : null)}
+                  placeholder="—"
+                  className="w-24 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-green-500 outline-none text-center font-mono"
+                />
+                {item.unit && <span className="text-sm text-slate-500">{item.unit}</span>}
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">
+                Si se repusieron unidades dañadas, indícalo para restaurar el stock. Déjalo vacío si es un item único.
+              </p>
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">

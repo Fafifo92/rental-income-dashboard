@@ -294,6 +294,12 @@ export interface ReportDamageInput {
   /** Cobro a la plataforma (Airbnb resolution center, Booking.com, etc.). */
   charge_from_platform?: number | null;
   date?: string;
+  /**
+   * Número de unidades dañadas. Solo aplica cuando el item tiene quantity > 1 y se quiere
+   * descontar únicamente las unidades afectadas (no el item completo). Si es null/undefined
+   * se usa la lógica legacy: quantity_delta=0 y status='damaged' para el item entero.
+   */
+  damaged_units?: number | null;
 }
 
 export interface ReportDamageResult {
@@ -408,31 +414,73 @@ export const reportItemDamage = async (
     expenseId = exp.data.id;
   }
 
-  // 3. Inventory movement + actualizar status del item — solo si hay item de inventario.
+  // 3. Inventory movement + actualizar status/cantidad del item.
   let movementId: string | null = null;
   if (input.item_id) {
-    const mov = await supabase
-      .from('inventory_movements')
-      .insert({
-        owner_id: user.id,
-        item_id: input.item_id,
-        type: 'damaged',
-        quantity_delta: 0,
-        new_status: 'damaged',
-        notes: input.description,
-        related_booking_id: input.booking_id,
-        related_expense_id: expenseId,
-      })
-      .select()
-      .single();
-    if (mov.error) return { data: null, error: mov.error.message };
-    movementId = mov.data.id;
+    const damagedQty =
+      typeof input.damaged_units === 'number' && input.damaged_units > 0
+        ? input.damaged_units
+        : null;
 
-    const upd = await supabase
-      .from('inventory_items')
-      .update({ status: 'damaged' })
-      .eq('id', input.item_id);
-    if (upd.error) return { data: null, error: upd.error.message };
+    if (damagedQty !== null) {
+      // Multi-unit: descontar solo las unidades afectadas y calcular nuevo status.
+      const { data: curItem, error: fetchErr } = await supabase
+        .from('inventory_items')
+        .select('quantity')
+        .eq('id', input.item_id)
+        .single();
+      if (fetchErr || !curItem) return { data: null, error: fetchErr?.message ?? 'Item no encontrado' };
+
+      const remaining = Math.max(0, (Number(curItem.quantity) || 0) - damagedQty);
+      const computedStatus: InventoryItemStatus = remaining === 0 ? 'damaged' : 'good';
+
+      const mov = await supabase
+        .from('inventory_movements')
+        .insert({
+          owner_id: user.id,
+          item_id: input.item_id,
+          type: 'damaged',
+          quantity_delta: -damagedQty,
+          new_status: computedStatus,
+          notes: input.description,
+          related_booking_id: input.booking_id,
+          related_expense_id: expenseId,
+        })
+        .select()
+        .single();
+      if (mov.error) return { data: null, error: mov.error.message };
+      movementId = mov.data.id;
+
+      const upd = await supabase
+        .from('inventory_items')
+        .update({ quantity: remaining, status: computedStatus })
+        .eq('id', input.item_id);
+      if (upd.error) return { data: null, error: upd.error.message };
+    } else {
+      // Legacy (item único o sin tracking de unidades): marcar el item completo como dañado.
+      const mov = await supabase
+        .from('inventory_movements')
+        .insert({
+          owner_id: user.id,
+          item_id: input.item_id,
+          type: 'damaged',
+          quantity_delta: 0,
+          new_status: 'damaged',
+          notes: input.description,
+          related_booking_id: input.booking_id,
+          related_expense_id: expenseId,
+        })
+        .select()
+        .single();
+      if (mov.error) return { data: null, error: mov.error.message };
+      movementId = mov.data.id;
+
+      const upd = await supabase
+        .from('inventory_items')
+        .update({ status: 'damaged' })
+        .eq('id', input.item_id);
+      if (upd.error) return { data: null, error: upd.error.message };
+    }
   }
 
   return {
@@ -465,7 +513,7 @@ export const markDamageRepairedFromExpense = async (
   // Encontrar movimientos `damaged` ligados a este expense
   const { data: damagedMovs, error: e1 } = await supabase
     .from('inventory_movements')
-    .select('id, item_id')
+    .select('id, item_id, quantity_delta')
     .eq('related_expense_id', expenseId)
     .eq('type', 'damaged');
   if (e1) return { data: null, error: e1.message };
@@ -486,22 +534,37 @@ export const markDamageRepairedFromExpense = async (
   let movementsCreated = 0;
   let itemsUpdated = 0;
   for (const mov of damagedMovs) {
-    const { error: e2 } = await supabase.from('inventory_movements').insert({
-      owner_id: user.id,
-      item_id: mov.item_id,
-      type: 'repaired',
-      quantity_delta: 0,
-      new_status: 'good',
-      notes: 'Reparación marcada automáticamente al pagar el gasto.',
-      related_expense_id: expenseId,
-      related_booking_id: null,
-    });
-    if (!e2) movementsCreated++;
-    const { error: e3 } = await supabase
-      .from('inventory_items')
-      .update({ status: 'good' })
-      .eq('id', mov.item_id);
-    if (!e3) itemsUpdated++;
+    const restoreQty = Math.abs(Number(mov.quantity_delta) || 0);
+    if (restoreQty > 0) {
+      // Multi-unit: restaurar las unidades descontadas al registrar el daño.
+      const movRes = await registerInventoryMovement({
+        item_id: mov.item_id,
+        type: 'repaired',
+        quantity_delta: restoreQty,
+        new_status: 'good',
+        notes: 'Reparación marcada automáticamente al pagar el gasto.',
+        related_expense_id: expenseId,
+      });
+      if (!movRes.error) { movementsCreated++; itemsUpdated++; }
+    } else {
+      // Legacy: solo cambio de status sin modificar cantidad.
+      const { error: e2 } = await supabase.from('inventory_movements').insert({
+        owner_id: user.id,
+        item_id: mov.item_id,
+        type: 'repaired',
+        quantity_delta: 0,
+        new_status: 'good',
+        notes: 'Reparación marcada automáticamente al pagar el gasto.',
+        related_expense_id: expenseId,
+        related_booking_id: null,
+      });
+      if (!e2) movementsCreated++;
+      const { error: e3 } = await supabase
+        .from('inventory_items')
+        .update({ status: 'good' })
+        .eq('id', mov.item_id);
+      if (!e3) itemsUpdated++;
+    }
   }
 
   return { data: { items: itemsUpdated, movements: movementsCreated }, error: null };
