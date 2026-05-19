@@ -77,8 +77,9 @@ export default function BookingsClient() {
         b => b.guest_name.toLowerCase().includes(q) || b.confirmation_code.toLowerCase().includes(q),
       );
     }
-    if (f.dateFrom) demo = demo.filter(b => b.start_date >= f.dateFrom!);
-    if (f.dateTo)   demo = demo.filter(b => b.start_date <= f.dateTo!);
+    const dateField = f.dateField === 'checkout' ? 'end_date' : 'start_date';
+    if (f.dateFrom) demo = demo.filter(b => b[dateField] >= f.dateFrom!);
+    if (f.dateTo)   demo = demo.filter(b => b[dateField] <= f.dateTo!);
     if (f.channel)  demo = demo.filter(b => b.channel === f.channel);
     return demo;
   }, []);

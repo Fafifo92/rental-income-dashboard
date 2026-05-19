@@ -34,6 +34,8 @@ export interface DisplayBooking {
   deposit_status?: 'none' | 'received' | 'partial_return' | 'returned';
   deposit_returned_amount?: number | null;
   deposit_return_date?: string | null;
+  /** Bruto base ± ajustes: +ingresos adicionales −descuentos. */
+  adjusted_gross?: number;
 }
 
 export interface BookingForm {

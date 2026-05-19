@@ -13,7 +13,8 @@ import {
 import type { BankAccountRow, BookingPaymentRow, BookingAdjustmentRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
-import { subMoney } from '@/lib/money';
+import { addMoney, subMoney } from '@/lib/money';
+import { ADJ_KIND_LABEL } from '@/components/features/bookingDetail/constants';
 import { todayISO, formatDateDisplay } from '@/lib/dateUtils';
 import MoneyInput from '@/components/MoneyInput';
 import { Trash2, Plus, AlertCircle, CheckCircle2, RotateCcw } from 'lucide-react';
@@ -129,17 +130,33 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
   // ══════════════════════════════════════════════════════════════════════
   // SECTION B — COBROS POR DAÑOS
   // ══════════════════════════════════════════════════════════════════════
-  const [damageAdjs, setDamageAdjs]   = useState<BookingAdjustmentRow[]>([]);
-  const [savingAdjId, setSavingAdjId] = useState<string | null>(null);
-  const [adjAccounts, setAdjAccounts] = useState<Record<string, string>>({});
+  const [damageAdjs, setDamageAdjs]         = useState<BookingAdjustmentRow[]>([]);
+  const [incomeAdjs, setIncomeAdjs]         = useState<BookingAdjustmentRow[]>([]);
+  const [totalDiscounts, setTotalDiscounts] = useState(0);
+  const [savingAdjId, setSavingAdjId]       = useState<string | null>(null);
+  const [adjAccounts, setAdjAccounts]       = useState<Record<string, string>>({});
+  const [adjAccountsIncome, setAdjAccountsIncome] = useState<Record<string, string>>({});
 
   const loadAdjustments = useCallback(async () => {
     const res = await listBookingAdjustments(booking.id);
-    const damages = (res.data ?? []).filter(a => a.kind === 'damage_charge');
+    const all = res.data ?? [];
+
+    const damages = all.filter(a => a.kind === 'damage_charge');
     setDamageAdjs(damages);
-    const initial: Record<string, string> = {};
-    for (const adj of damages) initial[adj.id] = adj.bank_account_id ?? '';
-    setAdjAccounts(initial);
+    const initialDmg: Record<string, string> = {};
+    for (const adj of damages) initialDmg[adj.id] = adj.bank_account_id ?? '';
+    setAdjAccounts(initialDmg);
+
+    const income = all.filter(a => a.kind !== 'discount' && a.kind !== 'damage_charge');
+    setIncomeAdjs(income);
+    const initialInc: Record<string, string> = {};
+    for (const adj of income) initialInc[adj.id] = adj.bank_account_id ?? '';
+    setAdjAccountsIncome(initialInc);
+
+    const totalDisc = all
+      .filter(a => a.kind === 'discount')
+      .reduce((s, a) => s + (Number(a.amount) || 0), 0);
+    setTotalDiscounts(totalDisc);
   }, [booking.id]);
 
   useEffect(() => {
@@ -155,7 +172,20 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
     await loadAdjustments();
   };
 
+  const handleSaveIncomeAdjAccount = async (adjId: string) => {
+    const accountId = adjAccountsIncome[adjId] ?? '';
+    setSavingAdjId(adjId);
+    await updateBookingAdjustment(adjId, { bank_account_id: accountId || null });
+    setSavingAdjId(null);
+    await loadAdjustments();
+  };
+
   const totalDamageReceived = damageAdjs
+    .filter(a => a.bank_account_id)
+    .reduce((s, a) => s + Number(a.amount), 0);
+
+  const totalIncomeAdjs = incomeAdjs.reduce((s, a) => s + Number(a.amount), 0);
+  const totalIncomeReceived = incomeAdjs
     .filter(a => a.bank_account_id)
     .reduce((s, a) => s + Number(a.amount), 0);
 
@@ -366,7 +396,7 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
               {/* ═══ CHIPS financieros ═══ */}
               <div className="flex gap-3">
                 {[
-                  { label: 'Bruto', value: bruto, color: 'bg-slate-50 text-slate-700 border-slate-200' },
+                { label: 'Bruto', value: addMoney(bruto, totalIncomeAdjs) - totalDiscounts, color: 'bg-slate-50 text-slate-700 border-slate-200' },
                   { label: 'Fees', value: feesVal, color: 'bg-amber-50 text-amber-700 border-amber-200' },
                   { label: 'Neto', value: netoVal, color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
                 ].map(chip => (
@@ -603,6 +633,82 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
                   )}
                 </AnimatePresence>
               </div>
+
+              {/* ════════════════════════════════════════
+                  SECCIÓN A2: INGRESOS ADICIONALES
+              ════════════════════════════════════════ */}
+              {incomeAdjs.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-bold text-slate-700">💵 Ingresos adicionales</h4>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                      totalIncomeReceived > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {totalIncomeReceived > 0 ? `${formatCurrency(totalIncomeReceived)} recibido` : 'Sin cuenta asignada'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 -mt-1">
+                    Ingresos extra cobrados al huésped. Selecciona la cuenta donde llegó cada pago.
+                  </p>
+                  <div className="space-y-2">
+                    {incomeAdjs.map(adj => {
+                      const isSaving = savingAdjId === adj.id;
+                      const hasAccount = !!adj.bank_account_id;
+                      const localAccount = adjAccountsIncome[adj.id] ?? '';
+                      const isDirty = localAccount !== (adj.bank_account_id ?? '');
+                      return (
+                        <div key={adj.id}
+                          className={`rounded-xl border p-3 space-y-2 ${
+                            hasAccount ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className={`text-sm font-semibold ${hasAccount ? 'text-emerald-800' : 'text-rose-800'}`}>
+                                {formatCurrency(Number(adj.amount))}
+                              </p>
+                              <p className="text-[11px] text-slate-600 truncate mt-0.5">
+                                {ADJ_KIND_LABEL[adj.kind]}{adj.description ? ` · ${adj.description}` : ''}
+                              </p>
+                              <p className="text-[10px] text-slate-400">{fmtDate(adj.date)}</p>
+                            </div>
+                            {hasAccount && !isDirty && (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            <select
+                              value={localAccount}
+                              onChange={e => setAdjAccountsIncome(prev => ({ ...prev, [adj.id]: e.target.value }))}
+                              className="flex-1 px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                            >
+                              <option value="">— Cuenta donde llegó el dinero —</option>
+                              {bankAccounts.map(a => (
+                                <option key={a.id} value={a.id}>{a.name}{a.bank && !a.is_cash ? ` (${a.bank})` : ''}</option>
+                              ))}
+                            </select>
+                            {isDirty && (
+                              <button
+                                onClick={() => handleSaveIncomeAdjAccount(adj.id)}
+                                disabled={isSaving}
+                                className="px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+                              >
+                                {isSaving ? '…' : 'Guardar'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {totalIncomeReceived > 0 && (
+                    <div className="flex justify-between items-center text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                      <span>Total ingresos adicionales recibidos</span>
+                      <span>{formatCurrency(totalIncomeReceived)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* ════════════════════════════════════════
                   SECCIÓN B: COBROS POR DAÑOS

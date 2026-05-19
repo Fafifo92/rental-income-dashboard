@@ -3,7 +3,19 @@ import type { ParsedBooking } from '@/services/etl';
 import { todayISO as todayISOFromUtils } from '@/lib/dateUtils';
 import type { DisplayBooking } from './types';
 
-export const fromRow = (row: BookingWithListingRow): DisplayBooking => ({
+const INCOME_KINDS = new Set(['extra_income', 'extra_guest_fee', 'platform_refund']);
+
+export const fromRow = (row: BookingWithListingRow): DisplayBooking => {
+  const base = Number(row.gross_revenue ?? row.total_revenue ?? 0);
+  const adjs = row.booking_adjustments ?? [];
+  const adjusted_gross = adjs.reduce((s, a) => {
+    const v = Number(a.amount) || 0;
+    if (a.kind === 'discount') return s - v;
+    if (INCOME_KINDS.has(a.kind)) return s + v;
+    return s;
+  }, base);
+
+  return {
   id: row.id,
   confirmation_code: row.confirmation_code,
   guest_name: row.guest_name ?? '—',
@@ -34,7 +46,9 @@ export const fromRow = (row: BookingWithListingRow): DisplayBooking => ({
   deposit_status: (row.deposit_status ?? 'none') as DisplayBooking['deposit_status'],
   deposit_returned_amount: row.deposit_returned_amount !== null && row.deposit_returned_amount !== undefined ? Number(row.deposit_returned_amount) : null,
   deposit_return_date: row.deposit_return_date ?? null,
-});
+  adjusted_gross,
+  };
+};
 
 export const fromDemo = (b: ParsedBooking, i: number): DisplayBooking => ({
   id: `demo-${i}`,

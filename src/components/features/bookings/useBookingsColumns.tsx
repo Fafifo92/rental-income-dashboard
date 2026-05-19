@@ -94,13 +94,14 @@ export function useBookingsColumns({ onView, onEdit, onPayout, onDelete, pending
         );
       },
     }),
-    helper.accessor('total_revenue', {
+    helper.accessor('adjusted_gross', {
       header: 'Bruto',
       meta: { align: 'right' },
       sortingFn: 'basic',
-      cell: info => (
-        <span className="font-semibold text-slate-800 whitespace-nowrap">{formatCurrency(info.getValue())}</span>
-      ),
+      cell: info => {
+        const v = info.getValue() ?? info.row.original.total_revenue;
+        return <span className="font-semibold text-slate-800 whitespace-nowrap">{formatCurrency(v)}</span>;
+      },
     }),
     helper.accessor('net_payout', {
       header: 'Neto al banco',
