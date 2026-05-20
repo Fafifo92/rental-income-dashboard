@@ -303,9 +303,19 @@ export default function BookingDetailModal({
     cleaner_id: string; fee: number; status: 'pending' | 'done' | 'paid';
     done_date: string | null; notes: string | null;
     supplies_amount: number; reimburse_to_cleaner: boolean;
+    paid_date: string | null;
+    bank_account_id: string | null;
   }) => {
-    const res = await createCleaning({ ...payload, booking_id: booking.id, paid_date: null });
-    if (!res.error) await load();
+    const { bank_account_id, ...rest } = payload;
+    const res = await createCleaning(
+      { ...rest, booking_id: booking.id },
+      { bankAccountId: bank_account_id },
+    );
+    if (res.error) {
+      toast.error(res.error);
+      return;
+    }
+    await load();
   }, [booking.id, load]);
 
   const setCleaningStatus = useCallback(async (
@@ -919,6 +929,7 @@ export default function BookingDetailModal({
           {showAddCleaning && (
             <CleaningFormModal
               cleaners={cleaners}
+              banks={bankAccounts}
               defaultFee={property?.default_cleaning_fee ?? null}
               defaultDate={booking.end_date || todayISO()}
               onClose={() => setShowAddCleaning(false)}

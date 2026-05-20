@@ -12,13 +12,12 @@ import { useAuth } from '@/lib/useAuth';
 import { usePropertyFilter } from '@/lib/usePropertyFilter';
 import { useBookingsList } from '@/lib/hooks/useBookingsList';
 import { useReferenceData } from '@/lib/hooks/useReferenceData';
-import DataTable from './DataTable';
 import CSVUploader from './CSVUploader';
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
 import BookingPayoutModal from './BookingPayoutModal';
 import ConfirmDeleteChallenge from './ConfirmDeleteChallenge';
 import { parseMoney } from '@/lib/money';
-import { getBookingStatus, inferOperationalFlags, type DerivedBookingStatus } from '@/lib/bookingStatus';
+import { inferOperationalFlags } from '@/lib/bookingStatus';
 import { toast } from '@/lib/toast';
 import BookingsExportModal from './BookingsExportModal';
 
@@ -31,6 +30,7 @@ import { useBookingsColumns } from './bookings/useBookingsColumns';
 import BookingsKPICards, { buildBookingKPIs } from './bookings/BookingsKPICards';
 import BookingsFilterBar from './bookings/BookingsFilterBar';
 import BookingFormModal from './bookings/BookingFormModal';
+import BookingsStatusAccordion from './bookings/BookingsStatusAccordion';
 
 const BookingDetailModal = lazy(() => import('./BookingDetailModal'));
 
@@ -52,9 +52,7 @@ export default function BookingsClient() {
   const [deleteTarget, setDeleteTarget] = useState<DisplayBooking | null>(null);
   const [payoutTarget, setPayoutTarget] = useState<DisplayBooking | null>(null);
   const [detailTarget, setDetailTarget] = useState<DisplayBooking | null>(null);
-  const [statusFilter, setStatusFilter] = useState<DerivedBookingStatus | 'all'>('all');
-  const [pendingCleaningIds, setPendingCleaningIds] = useState<Set<string>>(new Set());
-  const [showExportModal, setShowExportModal] = useState(false);
+  const [pendingCleaningIds, setPendingCleaningIds] = useState<Set<string>>(new Set());const [showExportModal, setShowExportModal] = useState(false);
 
   // Deep-link: capture ?booking=<id> at mount and clear from URL immediately
   const [deepLinkBookingId] = useState<string | null>(() => {
@@ -466,19 +464,7 @@ export default function BookingsClient() {
   });
 
   // ── Derived values (must be before any early returns) ────────────────────
-  const enrichedBookings = useMemo(() => {
-    if (statusFilter === 'all') return bookings;
-    return bookings.filter(b => {
-      const derived = getBookingStatus({
-        start_date: b.start_date,
-        end_date: b.end_date,
-        checkin_done: b.checkin_done,
-        checkout_done: b.checkout_done,
-        status: b.status,
-      });
-      return derived === statusFilter;
-    });
-  }, [bookings, statusFilter]);
+  const enrichedBookings = bookings;
 
   const { kpis, incompleteCount } = useMemo(
     () => buildBookingKPIs(enrichedBookings),
@@ -488,7 +474,6 @@ export default function BookingsClient() {
   const handleClearFilters = useCallback(() => {
     setFilters(EMPTY_FILTERS);
     setSearch('');
-    setStatusFilter('all');
   }, []);
 
   const handleCloseFormModal = useCallback(() => {
@@ -567,43 +552,15 @@ export default function BookingsClient() {
         applySearch={applySearch}
         filters={filters}
         setFilters={setFilters}
-        statusFilter={statusFilter}
-        setStatusFilter={setStatusFilter}
         onClear={handleClearFilters}
       />
 
-      {/* Table */}
-      <DataTable<DisplayBooking>
-        columns={columns} data={enrichedBookings} loading={loading}
-        showSearch={false} defaultPageSize={25} skeletonRows={8}
-        emptyIcon="" emptyTitle="Sin reservas importadas"
-        emptyDescription={
-          <span>
-            <button onClick={openNewBookingModal} className="text-blue-600 hover:underline font-medium mr-2">
-              + Añadir manualmente
-            </button>
-            o{' '}
-            <a href="/dashboard" className="text-blue-600 hover:underline font-medium">importar desde Airbnb →</a>
-          </span>
-        }
-        renderFooter={filteredData => {
-          const comp   = filteredData.filter(b => !b.status.toLowerCase().includes('cancel'));
-          const rev    = comp.reduce((s, b) => s + b.total_revenue, 0);
-          const net    = comp.reduce((s, b) => s + (b.net_payout ?? 0), 0);
-          const nights = comp.reduce((s, b) => s + b.num_nights, 0);
-          return (
-            <tr className="border-t bg-slate-50">
-              <td colSpan={2} className="px-5 py-4 text-sm font-semibold text-slate-600">
-                {filteredData.length} reserva{filteredData.length !== 1 ? 's' : ''}
-              </td>
-              <td className="px-5 py-4 text-xs font-semibold text-slate-600">{nights} noches</td>
-              <td />
-              <td className="px-5 py-4 text-right font-bold text-slate-900 whitespace-nowrap">{formatCurrency(rev)}</td>
-              <td className="px-5 py-4 text-right font-bold text-emerald-700 whitespace-nowrap">{net > 0 ? formatCurrency(net) : '—'}</td>
-              <td />
-            </tr>
-          );
-        }}
+      {/* Accordion by status */}
+      <BookingsStatusAccordion
+        bookings={enrichedBookings}
+        columns={columns}
+        loading={loading}
+        onAddBooking={openNewBookingModal}
       />
 
       {/* ── CSVUploader modal ───────────────────────────────────────────────── */}
@@ -681,7 +638,7 @@ export default function BookingsClient() {
             defaultPropertyIds={propertyIds}
             defaultDateFrom={filters.dateFrom}
             defaultDateTo={filters.dateTo}
-            defaultStatusFilter={statusFilter}
+            defaultStatusFilter="all"
             onClose={() => setShowExportModal(false)}
           />
         )}

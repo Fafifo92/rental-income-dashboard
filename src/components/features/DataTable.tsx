@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -9,8 +9,9 @@ import {
   type ColumnDef,
   type SortingState,
   type RowData,
+  type ColumnOrderState,
 } from '@tanstack/react-table';
-import { ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 // Extend TanStack meta types for per-column alignment and extra td classes
@@ -44,6 +45,10 @@ interface DataTableProps<T extends object> {
   skeletonRows?: number;
   /** Optional extra CSS classes per row based on the row data. */
   getRowClassName?: (row: T) => string;
+  /** Initial column order by column ID. Enables drag-to-reorder on headers. */
+  initialColumnOrder?: string[];
+  /** Enables column resize handles on header cells. */
+  enableResizing?: boolean;
 }
 
 export default function DataTable<T extends object>({
@@ -59,16 +64,32 @@ export default function DataTable<T extends object>({
   renderFooter,
   skeletonRows = 5,
   getRowClassName,
+  initialColumnOrder,
+  enableResizing = false,
 }: DataTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: defaultPageSize });
 
+  // Column ordering — initialised once from prop or natural column order
+  const [columnOrder, setColumnOrder] = useState<ColumnOrderState>(() => {
+    if (initialColumnOrder && initialColumnOrder.length > 0) return initialColumnOrder;
+    return columns.map(c => {
+      if ('accessorKey' in c && c.accessorKey) return String(c.accessorKey);
+      return (c as any).id ?? '';
+    }).filter(Boolean);
+  });
+
+  // Drag-to-reorder refs (avoid triggering re-renders during drag)
+  const draggingId = useRef<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+
   const table = useReactTable({
     data,
     columns,
-    state: { sorting, globalFilter, pagination },
+    state: { sorting, globalFilter, pagination, columnOrder },
     onSortingChange: setSorting,
+    onColumnOrderChange: setColumnOrder,
     onGlobalFilterChange: (v: string) => {
       setGlobalFilter(v);
       setPagination(p => ({ ...p, pageIndex: 0 }));
@@ -78,13 +99,31 @@ export default function DataTable<T extends object>({
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    autoResetPageIndex: false, // prevent page reset when data changes (e.g. expanding a group row)
+    autoResetPageIndex: false,
+    // Resizing
+    columnResizeMode: 'onChange',
+    enableColumnResizing: enableResizing,
   });
 
   const filteredRows = table.getFilteredRowModel().rows;
   const pageRows = table.getRowModel().rows;
   const pageCount = table.getPageCount();
   const { pageIndex, pageSize } = table.getState().pagination;
+
+  const enableReorder = (initialColumnOrder?.length ?? 0) > 0;
+
+  function reorderColumn(fromId: string, toId: string) {
+    setColumnOrder(prev => {
+      const order = [...prev];
+      const from = order.indexOf(fromId);
+      const to = order.indexOf(toId);
+      if (from !== -1 && to !== -1) {
+        order.splice(from, 1);
+        order.splice(to, 0, fromId);
+      }
+      return order;
+    });
+  }
 
   return (
     <motion.div
@@ -129,33 +168,68 @@ export default function DataTable<T extends object>({
         </div>
       )}
 
-      {/* Table — overflow-x para que columnas sobrantes hagan scroll horizontal en mobile */}
+      {/* Table — overflow-x para scroll horizontal en mobile */}
       <div className="overflow-x-auto thin-scroll">
-        <table className="w-full text-sm min-w-[640px] sm:min-w-0">
+        <table
+          className="text-sm min-w-[640px] sm:min-w-0 w-full"
+          style={enableResizing ? { width: table.getTotalSize() } : undefined}
+        >
           <thead>
             {table.getHeaderGroups().map(headerGroup => (
               <tr key={headerGroup.id} className="border-b bg-slate-50">
                 {headerGroup.headers.map(header => {
                   const canSort = header.column.getCanSort();
                   const align = header.column.columnDef.meta?.align ?? 'left';
+                  const isDragOver = dragOverId === header.id;
+
                   return (
                     <th
                       key={header.id}
                       colSpan={header.colSpan}
+                      style={enableResizing ? { width: header.getSize(), position: 'relative' } : undefined}
+                      draggable={enableReorder}
+                      onDragStart={enableReorder ? () => { draggingId.current = header.id; } : undefined}
+                      onDragOver={enableReorder ? e => { e.preventDefault(); setDragOverId(header.id); } : undefined}
+                      onDrop={enableReorder ? e => {
+                        e.preventDefault();
+                        if (draggingId.current && draggingId.current !== header.id) {
+                          reorderColumn(draggingId.current, header.id);
+                        }
+                        draggingId.current = null;
+                        setDragOverId(null);
+                      } : undefined}
+                      onDragEnd={enableReorder ? () => { draggingId.current = null; setDragOverId(null); } : undefined}
                       onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
                       className={[
-                        'px-5 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap select-none',
+                        'px-3 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap select-none',
                         align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left',
                         canSort ? 'cursor-pointer hover:bg-slate-100 hover:text-slate-700 transition-colors' : '',
-                      ]
-                        .filter(Boolean)
-                        .join(' ')}
+                        enableReorder ? 'cursor-grab active:cursor-grabbing' : '',
+                        isDragOver ? 'bg-blue-50 border-l-2 border-blue-400' : '',
+                      ].filter(Boolean).join(' ')}
                     >
                       {header.isPlaceholder ? null : (
                         <span className="inline-flex items-center gap-1">
+                          {enableReorder && (
+                            <GripVertical size={12} className="text-slate-300 shrink-0 -ml-1" />
+                          )}
                           {flexRender(header.column.columnDef.header, header.getContext())}
                           {canSort && <SortIcon sorted={header.column.getIsSorted()} />}
                         </span>
+                      )}
+                      {/* Resize handle */}
+                      {enableResizing && header.column.getCanResize() && (
+                        <div
+                          onMouseDown={e => { e.stopPropagation(); header.getResizeHandler()(e); }}
+                          onTouchStart={e => { e.stopPropagation(); header.getResizeHandler()(e); }}
+                          onClick={e => e.stopPropagation()}
+                          className={[
+                            'absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none touch-none transition-colors',
+                            header.column.getIsResizing()
+                              ? 'bg-blue-400'
+                              : 'bg-transparent hover:bg-slate-300',
+                          ].join(' ')}
+                        />
                       )}
                     </th>
                   );
@@ -168,7 +242,7 @@ export default function DataTable<T extends object>({
               Array.from({ length: skeletonRows }).map((_, i) => (
                 <tr key={i}>
                   {columns.map((_, j) => (
-                    <td key={j} className="px-5 py-4">
+                    <td key={j} className="px-3 py-4">
                       <div
                         className="h-4 bg-slate-100 rounded animate-pulse"
                         style={{ width: `${50 + (j % 5) * 8}%` }}
@@ -196,13 +270,12 @@ export default function DataTable<T extends object>({
                     return (
                       <td
                         key={cell.id}
+                        style={enableResizing ? { width: cell.column.getSize() } : undefined}
                         className={[
-                          'px-5 py-3.5',
+                          'px-3 py-3.5',
                           align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : '',
                           extraClass,
-                        ]
-                          .filter(Boolean)
-                          .join(' ')}
+                        ].filter(Boolean).join(' ')}
                       >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </td>

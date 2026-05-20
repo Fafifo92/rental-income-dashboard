@@ -233,9 +233,64 @@ export const listAllCleaningsEnriched = async (options?: {
   return { data: rows, error: null };
 };
 
+/**
+ * Crea un booking_cleaning. Si `input.status === 'paid'`, se exige también
+ * `paid_date` y `bankAccountId`, y la creación se delega a la RPC
+ * `rpc_create_cleaning_with_payment` que en la misma transacción inserta el
+ * expense respaldatorio (fee + opcional insumos). De este modo es imposible
+ * dejar un cleaning marcado como pagado sin gasto contable.
+ */
 export const createCleaning = async (
   input: Omit<BookingCleaning, 'id' | 'created_at'>,
+  options?: { bankAccountId?: string | null },
 ): Promise<ServiceResult<BookingCleaning>> => {
+  const bankAccountId = options?.bankAccountId ?? null;
+
+  if (input.status === 'paid') {
+    if (!input.paid_date) {
+      return { data: null, error: 'Para marcar el aseo como pagado debes indicar la fecha de pago.' };
+    }
+    if (!bankAccountId) {
+      return { data: null, error: 'Para marcar el aseo como pagado debes indicar la cuenta bancaria de salida.' };
+    }
+
+    const { data: rpcData, error: rpcErr } = await (supabase.rpc as unknown as (
+      fn: string,
+      params: Record<string, unknown>,
+    ) => Promise<{ data: { cleaning_id: string; expense_ids: string[] }[] | { cleaning_id: string; expense_ids: string[] } | null; error: { message: string } | null }>)(
+      'rpc_create_cleaning_with_payment',
+      {
+        p_booking_id:           input.booking_id,
+        p_cleaner_id:           input.cleaner_id,
+        p_fee:                  input.fee,
+        p_status:               input.status,
+        p_done_date:            input.done_date,
+        p_notes:                input.notes,
+        p_supplies_amount:      input.supplies_amount,
+        p_reimburse_to_cleaner: input.reimburse_to_cleaner,
+        p_paid_date:            input.paid_date,
+        p_bank_account_id:      bankAccountId,
+      },
+    );
+    if (rpcErr) return { data: null, error: rpcErr.message };
+
+    const cleaningId =
+      (Array.isArray(rpcData) ? rpcData[0]?.cleaning_id : rpcData?.cleaning_id) ?? null;
+    if (!cleaningId) {
+      return { data: null, error: 'La RPC no devolvió el aseo creado.' };
+    }
+
+    const { data: row, error: selErr } = await supabase
+      .from('booking_cleanings')
+      .select('*')
+      .eq('id', cleaningId)
+      .single();
+    if (selErr || !row) {
+      return { data: null, error: selErr?.message ?? 'No se pudo cargar el aseo recién creado.' };
+    }
+    return { data: toCleaning(row as BookingCleaningRow), error: null };
+  }
+
   const { data, error } = await supabase
     .from('booking_cleanings')
     .insert(input)

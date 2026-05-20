@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import type { Vendor } from '@/services/vendors';
+import type { BankAccountRow } from '@/types/database';
 import MoneyInput from '@/components/MoneyInput';
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 
 export default function CleaningFormModal({
-  cleaners, defaultFee, defaultDate, onClose, onSave,
+  cleaners, banks = [], defaultFee, defaultDate, onClose, onSave,
 }: {
   cleaners: Vendor[];
+  banks?: BankAccountRow[];
   defaultFee: number | null;
   defaultDate: string;
   onClose: () => void;
@@ -17,12 +19,16 @@ export default function CleaningFormModal({
     status: 'pending' | 'done' | 'paid';
     done_date: string | null; notes: string | null;
     supplies_amount: number; reimburse_to_cleaner: boolean;
+    paid_date: string | null;
+    bank_account_id: string | null;
   }) => void;
 }) {
   const [cleanerId, setCleanerId] = useState<string>('');
   const [fee, setFee] = useState<number | null>(defaultFee ?? null);
   const [status, setStatus] = useState<'pending' | 'done' | 'paid'>('pending');
   const [doneDate, setDoneDate] = useState<string>(defaultDate);
+  const [paidDate, setPaidDate] = useState<string>(defaultDate);
+  const [bankAccountId, setBankAccountId] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [suppliesAmount, setSuppliesAmount] = useState<number | null>(null);
   const [reimburse, setReimburse] = useState<boolean>(false);
@@ -45,6 +51,16 @@ export default function CleaningFormModal({
       setError('Monto de insumos inválido.');
       return;
     }
+    if (status === 'paid') {
+      if (!paidDate) {
+        setError('Indica la fecha en la que se pagó este aseo.');
+        return;
+      }
+      if (!bankAccountId) {
+        setError('Indica de qué cuenta saliste a pagar este aseo.');
+        return;
+      }
+    }
     setSaving(true);
     await onSave({
       cleaner_id: cleanerId,
@@ -54,6 +70,8 @@ export default function CleaningFormModal({
       notes: notes.trim() || null,
       supplies_amount: suppliesNum,
       reimburse_to_cleaner: suppliesNum > 0 && reimburse,
+      paid_date: status === 'paid' ? paidDate : null,
+      bank_account_id: status === 'paid' ? bankAccountId : null,
     });
     setSaving(false);
   };
@@ -144,6 +162,49 @@ export default function CleaningFormModal({
               />
             </div>
           )}
+          {status === 'paid' && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 space-y-2">
+              <p className="text-xs font-semibold text-emerald-800">Datos del pago</p>
+              <p className="text-[11px] text-emerald-700/80 leading-snug">
+                Al marcar como pagado se registrará automáticamente el gasto contable y se descontará de la cuenta seleccionada.
+              </p>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  Fecha de pago <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={paidDate}
+                  onChange={e => setPaidDate(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  Cuenta de pago <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={bankAccountId}
+                  onChange={e => setBankAccountId(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                >
+                  <option value="">— Selecciona la cuenta —</option>
+                  {banks.map(b => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}{b.bank ? ` — ${b.bank}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {banks.length === 0 && (
+                  <p className="text-[11px] text-amber-700 mt-1">
+                    No tienes cuentas bancarias. <a href="/cuentas" className="underline font-semibold">Agregar →</a>
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Notas</label>
             <textarea
@@ -186,7 +247,7 @@ export default function CleaningFormModal({
               className="flex-1 py-2.5 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
               Cancelar
             </button>
-            <button type="submit" disabled={saving || fee == null}
+            <button type="submit" disabled={saving || fee == null || (status === 'paid' && (!paidDate || !bankAccountId))}
               className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
               {saving ? 'Guardando…' : 'Guardar'}
             </button>

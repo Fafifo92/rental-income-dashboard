@@ -1,6 +1,5 @@
 import { motion } from 'framer-motion';
 import type { BookingFilters } from '@/services/bookings';
-import type { DerivedBookingStatus } from '@/lib/bookingStatus';
 
 interface Props {
   search: string;
@@ -8,15 +7,13 @@ interface Props {
   applySearch: () => void;
   filters: BookingFilters;
   setFilters: React.Dispatch<React.SetStateAction<BookingFilters>>;
-  statusFilter: DerivedBookingStatus | 'all';
-  setStatusFilter: (v: DerivedBookingStatus | 'all') => void;
   onClear: () => void;
 }
 
 export default function BookingsFilterBar({
-  search, setSearch, applySearch, filters, setFilters, statusFilter, setStatusFilter, onClear,
+  search, setSearch, applySearch, filters, setFilters, onClear,
 }: Props) {
-  const hasFilters = !!(filters.dateFrom || filters.dateTo || filters.search || filters.channel || statusFilter !== 'all');
+  const hasFilters = !!(filters.dateFrom || filters.dateTo || filters.search || filters.channel);
 
   return (
     <motion.div
@@ -78,21 +75,6 @@ export default function BookingsFilterBar({
           <option value="vrbo">Vrbo</option>
           <option value="direct">Directo</option>
           <option value="other">Otro</option>
-        </select>
-      </div>
-      <div className="min-w-[140px]">
-        <label className="block text-xs font-medium text-slate-500 mb-1.5">Estado</label>
-        <select
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value as DerivedBookingStatus | 'all')}
-          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-        >
-          <option value="all">Todas</option>
-          <option value="upcoming">Próximas</option>
-          <option value="in_progress">En curso</option>
-          <option value="completed">Completadas</option>
-          <option value="past_unverified">Sin verificar</option>
-          <option value="cancelled">Canceladas</option>
         </select>
       </div>
       {hasFilters && (

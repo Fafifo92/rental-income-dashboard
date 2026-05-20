@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table';
-import { CalendarCheck, Pencil, HandCoins, Trash2 } from 'lucide-react';
+import { CalendarCheck, Pencil, HandCoins, Trash2, LogIn, LogOut } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { formatDateDisplay } from '@/lib/dateUtils';
-import { getBookingStatus, statusUI } from '@/lib/bookingStatus';
+import { getBookingStatus } from '@/lib/bookingStatus';
 import type { DisplayBooking } from './types';
 
 const helper = createColumnHelper<DisplayBooking>();
@@ -16,30 +16,76 @@ interface ColumnHandlers {
   pendingCleaningIds?: Set<string>;
 }
 
+/** Orden predeterminado de columnas en la tabla de reservas. */
+export const BOOKING_COLUMN_ORDER = [
+  'checkin_status',
+  'start_date',
+  'end_date',
+  'guest_name',
+  'channel',
+  'adjusted_gross',
+  'net_payout',
+  'actions',
+] as const;
+
 export function useBookingsColumns({ onView, onEdit, onPayout, onDelete, pendingCleaningIds }: ColumnHandlers) {
   return useMemo<ColumnDef<DisplayBooking, any>[]>(() => [
-    helper.accessor('status', {
-      header: 'Estado',
+    // ── Col 1: Estado de check-in / check-out ──────────────────────────────
+    helper.display({
+      id: 'checkin_status',
+      header: 'Registro',
+      meta: { align: 'center' },
       cell: info => {
-        const row = info.row.original;
+        const b = info.row.original;
         const derived = getBookingStatus({
-          start_date: row.start_date,
-          end_date: row.end_date,
-          checkin_done: row.checkin_done,
-          checkout_done: row.checkout_done,
-          status: row.status,
+          start_date: b.start_date,
+          end_date: b.end_date,
+          checkin_done: b.checkin_done,
+          checkout_done: b.checkout_done,
+          status: b.status,
         });
-        const ui = statusUI[derived];
+        if (derived === 'cancelled') {
+          return <span className="text-slate-300 text-xs select-none">—</span>;
+        }
         return (
-          <span
-            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border whitespace-nowrap ${ui.className}`}
-            title={info.getValue() || ui.label}
-          >
-            {ui.label}
-          </span>
+          <div className="flex items-center justify-center gap-1.5">
+            <span title={`Check-in: ${b.checkin_done ? 'completado' : 'pendiente'}`}>
+              <LogIn
+                className={`w-4 h-4 transition-colors ${b.checkin_done ? 'text-emerald-500' : 'text-slate-200'}`}
+              />
+            </span>
+            <span title={`Check-out: ${b.checkout_done ? 'completado' : 'pendiente'}`}>
+              <LogOut
+                className={`w-4 h-4 transition-colors ${b.checkout_done ? 'text-emerald-500' : 'text-slate-200'}`}
+              />
+            </span>
+          </div>
         );
       },
     }),
+    // ── Col 2: Check-in ────────────────────────────────────────────────────
+    helper.accessor('start_date', {
+      header: 'Check-in',
+      meta: { className: 'whitespace-nowrap' },
+      cell: info => (
+        <span className="text-sm text-slate-700">{formatDateDisplay(info.getValue())}</span>
+      ),
+    }),
+    // ── Col 3: Check-out ───────────────────────────────────────────────────
+    helper.accessor('end_date', {
+      header: 'Check-out',
+      meta: { className: 'whitespace-nowrap' },
+      cell: info => {
+        const b = info.row.original;
+        return (
+          <div className="flex flex-col text-xs">
+            <span className="text-slate-700">{formatDateDisplay(b.end_date)}</span>
+            <span className="text-slate-400">{b.num_nights} noche{b.num_nights !== 1 ? 's' : ''}</span>
+          </div>
+        );
+      },
+    }),
+    // ── Col 4: Huésped ─────────────────────────────────────────────────────
     helper.accessor('guest_name', {
       header: 'Huésped',
       cell: info => {
@@ -58,19 +104,6 @@ export function useBookingsColumns({ onView, onEdit, onPayout, onDelete, pending
                 </span>
               )}
             </div>
-          </div>
-        );
-      },
-    }),
-    helper.accessor('start_date', {
-      header: 'Estadía',
-      meta: { className: 'whitespace-nowrap' },
-      cell: info => {
-        const b = info.row.original;
-        return (
-          <div className="flex flex-col text-xs">
-            <span className="text-slate-700">{formatDateDisplay(b.start_date)} → {formatDateDisplay(b.end_date)}</span>
-            <span className="text-slate-400">{b.num_nights} noche{b.num_nights !== 1 ? 's' : ''}</span>
           </div>
         );
       },
