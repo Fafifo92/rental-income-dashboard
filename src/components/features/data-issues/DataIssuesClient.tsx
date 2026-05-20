@@ -22,15 +22,43 @@ import {
   fetchDataIssuesSummary,
   listExpensesPaidWithoutAccount,
   listOrphanPaidCleanings,
+  listOverlappingBookings,
+  listBookingsWithoutPayoutAccount,
+  listInconsistentPayouts,
+  listInvalidExpenses,
+  listPaidCleaningsWithoutCleaner,
+  listDoneCleaningsWithoutDate,
+  listInvalidBookingDates,
+  listDuplicateConfirmationCodes,
   assignBankAccountToExpenses,
   repairOrphanCleaningWithExpense,
   revertCleaningToPending,
   type DataIssuesSummary,
   type OrphanExpense,
   type OrphanCleaning,
+  type OverlapPair,
+  type BookingOrphanIncome,
+  type InconsistentPayout,
+  type InvalidExpense,
+  type CleaningWithoutCleaner,
+  type CleaningDoneWithoutDate,
+  type InvalidBookingDates,
+  type DuplicateCodeGroup,
 } from '@/services/dataIssues';
+import {
+  SectionOverlaps,
+  SectionOrphanIncomes,
+  SectionInconsistentPayouts,
+  SectionInvalidExpenses,
+  SectionPaidCleaningsNoCleaner,
+  SectionDoneCleaningsNoDate,
+  SectionInvalidBookingDates,
+  SectionDuplicateCodes,
+} from './SectionsV2';
 
 const BookingDetailModal = lazy(() => import('../BookingDetailModal'));
+
+type TabKey = 'resumen' | 'reservas' | 'aseos' | 'gastos';
 
 // Forma mínima que el BookingDetailModal necesita (subset de BookingLite).
 interface BookingForModal {
@@ -61,6 +89,15 @@ export default function DataIssuesClient() {
   const [orphanExpenses, setOrphanExpenses] = useState<OrphanExpense[]>([]);
   const [orphanCleaningsPaid, setOrphanCleaningsPaid] = useState<OrphanCleaning[]>([]);
   const [orphanCleaningsNoDate, setOrphanCleaningsNoDate] = useState<OrphanCleaning[]>([]);
+  const [overlaps, setOverlaps] = useState<OverlapPair[]>([]);
+  const [orphanIncomes, setOrphanIncomes] = useState<BookingOrphanIncome[]>([]);
+  const [inconsistentPayouts, setInconsistentPayouts] = useState<InconsistentPayout[]>([]);
+  const [invalidExpenses, setInvalidExpenses] = useState<InvalidExpense[]>([]);
+  const [paidCleaningsNoCleaner, setPaidCleaningsNoCleaner] = useState<CleaningWithoutCleaner[]>([]);
+  const [doneCleaningsNoDate, setDoneCleaningsNoDate] = useState<CleaningDoneWithoutDate[]>([]);
+  const [invalidBookingDates, setInvalidBookingDates] = useState<InvalidBookingDates[]>([]);
+  const [duplicateCodes, setDuplicateCodes] = useState<DuplicateCodeGroup[]>([]);
+  const [activeTab, setActiveTab] = useState<TabKey>('resumen');
 
   // Estado del modal de detalle de reserva
   const [viewingBooking, setViewingBooking] = useState<BookingForModal | null>(null);
@@ -99,24 +136,37 @@ export default function DataIssuesClient() {
   const load = async () => {
     setLoading(true);
     setError(null);
-    const [s, b, e, c, p] = await Promise.all([
+    const [s, b, e, c, p, ov, oi, ip, ie, pcnc, dcnd, ibd, dc] = await Promise.all([
       fetchDataIssuesSummary(),
       listBankAccounts(),
       listExpensesPaidWithoutAccount(),
       listOrphanPaidCleanings(),
       listProperties(),
+      listOverlappingBookings(),
+      listBookingsWithoutPayoutAccount(),
+      listInconsistentPayouts(),
+      listInvalidExpenses(),
+      listPaidCleaningsWithoutCleaner(),
+      listDoneCleaningsWithoutDate(),
+      listInvalidBookingDates(),
+      listDuplicateConfirmationCodes(),
     ]);
-    if (s.error) setError(s.error);
-    if (b.error) setError(prev => prev ?? b.error);
-    if (e.error) setError(prev => prev ?? e.error);
-    if (c.error) setError(prev => prev ?? c.error);
-    if (p.error) setError(prev => prev ?? p.error);
+    const firstErr = [s, b, e, c, p, ov, oi, ip, ie, pcnc, dcnd, ibd, dc].find(r => r.error)?.error;
+    if (firstErr) setError(firstErr);
     setSummary(s.data);
     setBanks((b.data ?? []).filter(x => x.is_active !== false));
     setProperties(p.data ?? []);
     setOrphanExpenses(e.data ?? []);
     setOrphanCleaningsPaid(c.data?.withPaidDate ?? []);
     setOrphanCleaningsNoDate(c.data?.withoutPaidDate ?? []);
+    setOverlaps(ov.data ?? []);
+    setOrphanIncomes(oi.data ?? []);
+    setInconsistentPayouts(ip.data ?? []);
+    setInvalidExpenses(ie.data ?? []);
+    setPaidCleaningsNoCleaner(pcnc.data ?? []);
+    setDoneCleaningsNoDate(dcnd.data ?? []);
+    setInvalidBookingDates(ibd.data ?? []);
+    setDuplicateCodes(dc.data ?? []);
     setLoading(false);
   };
 
@@ -126,17 +176,40 @@ export default function DataIssuesClient() {
     if (!summary) return false;
     return summary.expenses_paid_without_account_count === 0
       && summary.cleanings_paid_without_expense_count === 0
-      && summary.cleanings_paid_without_date_count === 0;
+      && summary.cleanings_paid_without_date_count === 0
+      && summary.overlapping_bookings_count === 0
+      && summary.bookings_without_payout_account_count === 0
+      && summary.inconsistent_payouts_count === 0
+      && summary.invalid_expenses_count === 0
+      && summary.paid_cleanings_without_cleaner_count === 0
+      && summary.done_cleanings_without_date_count === 0
+      && summary.invalid_booking_dates_count === 0
+      && summary.duplicate_codes_count === 0;
   }, [summary]);
+
+  const counts = {
+    reservas: (summary?.overlapping_bookings_count ?? 0)
+      + (summary?.bookings_without_payout_account_count ?? 0)
+      + (summary?.inconsistent_payouts_count ?? 0)
+      + (summary?.invalid_booking_dates_count ?? 0)
+      + (summary?.duplicate_codes_count ?? 0),
+    aseos: (summary?.cleanings_paid_without_expense_count ?? 0)
+      + (summary?.cleanings_paid_without_date_count ?? 0)
+      + (summary?.paid_cleanings_without_cleaner_count ?? 0)
+      + (summary?.done_cleanings_without_date_count ?? 0),
+    gastos: (summary?.expenses_paid_without_account_count ?? 0)
+      + (summary?.invalid_expenses_count ?? 0),
+  };
 
   return (
     <div className="space-y-6">
       <header className="space-y-1">
-        <h1 className="text-2xl font-bold text-slate-800">🛠️ Manejo de errores</h1>
+        <h1 className="text-2xl font-bold text-slate-800">Manejo de errores</h1>
         <p className="text-sm text-slate-500 max-w-3xl">
-          Esta página detecta inconsistencias de datos heredadas que no pueden
-          repararse desde la UI normal. Resuélvelas para que tus saldos y
-          reportes sean confiables.
+          Esta página detecta inconsistencias de datos que no pueden repararse
+          desde la UI normal (reservas duplicadas, gastos sin cuenta,
+          aseos huérfanos, etc.). Resuélvelas para que tus saldos y reportes
+          sean confiables.
         </p>
       </header>
 
@@ -148,28 +221,96 @@ export default function DataIssuesClient() {
         </div>
       )}
 
-      <SectionExpensesWithoutAccount
-        items={orphanExpenses}
-        banks={banks}
-        onReload={load}
-        onOpenBooking={openBooking}
-        openingBookingId={openingBookingId}
+      <TabsBar
+        active={activeTab}
+        onChange={setActiveTab}
+        counts={counts}
       />
 
-      <SectionOrphanCleaningsPaid
-        items={orphanCleaningsPaid}
-        banks={banks}
-        onReload={load}
-        onOpenBooking={openBooking}
-        openingBookingId={openingBookingId}
-      />
+      {activeTab === 'resumen' && (
+        <ResumenTab summary={summary} loading={loading} onJump={setActiveTab} />
+      )}
 
-      <SectionOrphanCleaningsNoDate
-        items={orphanCleaningsNoDate}
-        onReload={load}
-        onOpenBooking={openBooking}
-        openingBookingId={openingBookingId}
-      />
+      {activeTab === 'reservas' && (
+        <div className="space-y-6">
+          <SectionOverlaps
+            items={overlaps}
+            onReload={load}
+            onOpenBooking={openBooking}
+            openingBookingId={openingBookingId}
+          />
+          <SectionOrphanIncomes
+            items={orphanIncomes}
+            banks={banks}
+            onReload={load}
+            onOpenBooking={openBooking}
+            openingBookingId={openingBookingId}
+          />
+          <SectionInconsistentPayouts
+            items={inconsistentPayouts}
+            onReload={load}
+            onOpenBooking={openBooking}
+            openingBookingId={openingBookingId}
+          />
+          <SectionInvalidBookingDates
+            items={invalidBookingDates}
+            onOpenBooking={openBooking}
+            openingBookingId={openingBookingId}
+          />
+          <SectionDuplicateCodes
+            items={duplicateCodes}
+            onReload={load}
+            onOpenBooking={openBooking}
+            openingBookingId={openingBookingId}
+          />
+        </div>
+      )}
+
+      {activeTab === 'aseos' && (
+        <div className="space-y-6">
+          <SectionOrphanCleaningsPaid
+            items={orphanCleaningsPaid}
+            banks={banks}
+            onReload={load}
+            onOpenBooking={openBooking}
+            openingBookingId={openingBookingId}
+          />
+          <SectionOrphanCleaningsNoDate
+            items={orphanCleaningsNoDate}
+            onReload={load}
+            onOpenBooking={openBooking}
+            openingBookingId={openingBookingId}
+          />
+          <SectionPaidCleaningsNoCleaner
+            items={paidCleaningsNoCleaner}
+            onReload={load}
+            onOpenBooking={openBooking}
+            openingBookingId={openingBookingId}
+          />
+          <SectionDoneCleaningsNoDate
+            items={doneCleaningsNoDate}
+            onReload={load}
+            onOpenBooking={openBooking}
+            openingBookingId={openingBookingId}
+          />
+        </div>
+      )}
+
+      {activeTab === 'gastos' && (
+        <div className="space-y-6">
+          <SectionExpensesWithoutAccount
+            items={orphanExpenses}
+            banks={banks}
+            onReload={load}
+            onOpenBooking={openBooking}
+            openingBookingId={openingBookingId}
+          />
+          <SectionInvalidExpenses
+            items={invalidExpenses}
+            onReload={load}
+          />
+        </div>
+      )}
 
       {viewingBooking && (
         <Suspense fallback={null}>
@@ -181,6 +322,128 @@ export default function DataIssuesClient() {
           />
         </Suspense>
       )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+function TabsBar({
+  active, onChange, counts,
+}: {
+  active: TabKey;
+  onChange: (t: TabKey) => void;
+  counts: { reservas: number; aseos: number; gastos: number };
+}) {
+  const tabs: Array<{ key: TabKey; label: string; count?: number }> = [
+    { key: 'resumen', label: 'Resumen' },
+    { key: 'reservas', label: 'Reservas', count: counts.reservas },
+    { key: 'aseos', label: 'Aseos', count: counts.aseos },
+    { key: 'gastos', label: 'Gastos', count: counts.gastos },
+  ];
+  return (
+    <div className="border-b border-slate-200 flex flex-wrap gap-1">
+      {tabs.map(t => {
+        const isActive = active === t.key;
+        return (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => onChange(t.key)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
+              isActive
+                ? 'border-blue-600 text-blue-700'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            {t.label}
+            {typeof t.count === 'number' && t.count > 0 && (
+              <span className={`ml-2 px-1.5 py-0.5 text-[10px] rounded-full font-semibold ${
+                isActive ? 'bg-blue-100 text-blue-700' : 'bg-rose-100 text-rose-700'
+              }`}>
+                {t.count}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ResumenTab({
+  summary, loading, onJump,
+}: {
+  summary: DataIssuesSummary | null;
+  loading: boolean;
+  onJump: (t: TabKey) => void;
+}) {
+  if (loading || !summary) {
+    return <div className="text-sm text-slate-500">Cargando…</div>;
+  }
+  const cards: Array<{ tab: TabKey; title: string; rows: Array<{ label: string; count: number }> }> = [
+    {
+      tab: 'reservas',
+      title: 'Reservas',
+      rows: [
+        { label: 'Solapadas', count: summary.overlapping_bookings_count },
+        { label: 'Sin cuenta de pago', count: summary.bookings_without_payout_account_count },
+        { label: 'Pagos parciales', count: summary.inconsistent_payouts_count },
+        { label: 'Fechas inválidas', count: summary.invalid_booking_dates_count },
+        { label: 'Códigos duplicados', count: summary.duplicate_codes_count },
+      ],
+    },
+    {
+      tab: 'aseos',
+      title: 'Aseos',
+      rows: [
+        { label: 'Pagados sin gasto', count: summary.cleanings_paid_without_expense_count },
+        { label: 'Pagados sin fecha', count: summary.cleanings_paid_without_date_count },
+        { label: 'Pagados sin aseador', count: summary.paid_cleanings_without_cleaner_count },
+        { label: 'Realizados sin fecha', count: summary.done_cleanings_without_date_count },
+      ],
+    },
+    {
+      tab: 'gastos',
+      title: 'Gastos',
+      rows: [
+        { label: 'Pagados sin cuenta', count: summary.expenses_paid_without_account_count },
+        { label: 'Monto inválido (≤ 0)', count: summary.invalid_expenses_count },
+      ],
+    },
+  ];
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {cards.map(c => {
+        const total = c.rows.reduce((acc, r) => acc + r.count, 0);
+        return (
+          <button
+            key={c.tab}
+            type="button"
+            onClick={() => onJump(c.tab)}
+            className={`text-left rounded-xl border p-4 transition hover:shadow-sm ${
+              total === 0
+                ? 'border-emerald-200 bg-emerald-50/40'
+                : 'border-rose-200 bg-rose-50/30 hover:border-rose-300'
+            }`}
+          >
+            <div className="flex items-baseline justify-between">
+              <h3 className="text-sm font-semibold text-slate-700">{c.title}</h3>
+              <span className={`text-xl font-bold ${total === 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                {total}
+              </span>
+            </div>
+            <ul className="mt-2 space-y-1 text-xs text-slate-600">
+              {c.rows.map(r => (
+                <li key={r.label} className="flex justify-between">
+                  <span>{r.label}</span>
+                  <span className={r.count > 0 ? 'font-semibold text-rose-700' : 'text-slate-400'}>{r.count}</span>
+                </li>
+              ))}
+            </ul>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -200,29 +463,30 @@ function SummaryBanner({
   if (allClean) {
     return (
       <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-800">
-        ✅ ¡Sin inconsistencias detectadas! Todos los gastos pagados están
-        atribuidos a una cuenta y todos los aseos pagados tienen su gasto
-        contable.
+        Sin inconsistencias detectadas. Reservas, aseos y gastos están limpios.
       </div>
     );
   }
+  const totalReservas = summary.overlapping_bookings_count
+    + summary.bookings_without_payout_account_count
+    + summary.inconsistent_payouts_count
+    + summary.invalid_booking_dates_count
+    + summary.duplicate_codes_count;
+  const totalAseos = summary.cleanings_paid_without_expense_count
+    + summary.cleanings_paid_without_date_count
+    + summary.paid_cleanings_without_cleaner_count
+    + summary.done_cleanings_without_date_count;
+  const totalGastos = summary.expenses_paid_without_account_count
+    + summary.invalid_expenses_count;
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <Tile label="Reservas con problemas" count={totalReservas} tone={totalReservas > 0 ? 'rose' : 'emerald'} />
+      <Tile label="Aseos con problemas" count={totalAseos} tone={totalAseos > 0 ? 'amber' : 'emerald'} />
       <Tile
-        label="Gastos pagados sin cuenta"
-        count={summary.expenses_paid_without_account_count}
+        label="Gastos con problemas"
+        count={totalGastos}
         amount={summary.expenses_paid_without_account_amount}
-        tone="rose"
-      />
-      <Tile
-        label="Aseos pagados sin respaldo"
-        count={summary.cleanings_paid_without_expense_count}
-        tone="amber"
-      />
-      <Tile
-        label="Aseos paid sin fecha"
-        count={summary.cleanings_paid_without_date_count}
-        tone="amber"
+        tone={totalGastos > 0 ? 'rose' : 'emerald'}
       />
     </div>
   );
@@ -230,11 +494,13 @@ function SummaryBanner({
 
 function Tile({ label, count, amount, tone }: {
   label: string; count: number; amount?: number;
-  tone: 'rose' | 'amber';
+  tone: 'rose' | 'amber' | 'emerald';
 }) {
   const colors = tone === 'rose'
     ? 'border-rose-200 bg-rose-50/50 text-rose-700'
-    : 'border-amber-200 bg-amber-50/50 text-amber-700';
+    : tone === 'amber'
+      ? 'border-amber-200 bg-amber-50/50 text-amber-700'
+      : 'border-emerald-200 bg-emerald-50/50 text-emerald-700';
   return (
     <div className={`rounded-xl border p-4 ${colors}`}>
       <div className="text-xs uppercase tracking-wide font-semibold opacity-80">{label}</div>
