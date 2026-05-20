@@ -48,23 +48,67 @@ export interface OrphanExpense {
   booking_id: string | null;
   expense_group_id: string | null;
   property_name: string | null;
+  // Contexto de reserva (cuando aplica) — para mostrar "Reserva" clickeable y fecha real.
+  confirmation_code: string | null;
+  booking_end_date: string | null;
+  /** done_date del booking_cleaning ligado (cuando este gasto es de aseo). */
+  cleaning_done_date: string | null;
 }
 
 export const listExpensesPaidWithoutAccount = async (): Promise<ServiceResult<OrphanExpense[]>> => {
   const { data, error } = await supabase
     .from('expenses')
     .select(`
-      id, date, amount, category, subcategory, description, vendor,
+      id, date, amount, category, subcategory, description, vendor, vendor_id,
       booking_id, expense_group_id,
-      property:properties ( name )
+      property:properties ( name ),
+      booking:bookings ( confirmation_code, end_date )
     `)
     .eq('status', 'paid')
     .is('bank_account_id', null)
     .order('date', { ascending: false });
   if (error) return { data: null, error: error.message };
-  const rows: OrphanExpense[] = ((data ?? []) as unknown as Array<Record<string, unknown>>).map(r => {
-    const propertyRel = r.property as { name: string | null } | { name: string | null }[] | null | undefined;
+
+  type Raw = Record<string, unknown> & {
+    booking_id: string | null;
+    vendor_id: string | null;
+    category: string;
+    property?: { name: string | null } | { name: string | null }[] | null;
+    booking?: { confirmation_code: string | null; end_date: string | null }
+      | { confirmation_code: string | null; end_date: string | null }[]
+      | null;
+  };
+  const rawRows = (data ?? []) as unknown as Raw[];
+
+  // Para gastos de aseo (category='Aseo' o 'Insumos de aseo'), buscar el booking_cleaning
+  // correspondiente y traer su done_date — esa es la fecha "real" que el usuario espera ver.
+  const cleaningKeys = rawRows
+    .filter(r => (r.category === 'Aseo' || r.category === 'Insumos de aseo')
+      && r.booking_id && r.vendor_id)
+    .map(r => ({ booking_id: r.booking_id as string, cleaner_id: r.vendor_id as string }));
+
+  const doneDateMap = new Map<string, string>(); // key: `${booking_id}__${cleaner_id}`
+  if (cleaningKeys.length > 0) {
+    const bookingIds = Array.from(new Set(cleaningKeys.map(k => k.booking_id)));
+    const cleanerIds = Array.from(new Set(cleaningKeys.map(k => k.cleaner_id)));
+    const { data: cleanings } = await supabase
+      .from('booking_cleanings')
+      .select('booking_id, cleaner_id, done_date')
+      .in('booking_id', bookingIds)
+      .in('cleaner_id', cleanerIds);
+    for (const c of (cleanings ?? []) as Array<{ booking_id: string; cleaner_id: string; done_date: string | null }>) {
+      if (c.done_date) doneDateMap.set(`${c.booking_id}__${c.cleaner_id}`, c.done_date);
+    }
+  }
+
+  const rows: OrphanExpense[] = rawRows.map(r => {
+    const propertyRel = r.property;
     const propertyName = Array.isArray(propertyRel) ? propertyRel[0]?.name ?? null : propertyRel?.name ?? null;
+    const bookingRel = r.booking;
+    const booking = Array.isArray(bookingRel) ? bookingRel[0] ?? null : bookingRel ?? null;
+    const bId = (r.booking_id as string | null) ?? null;
+    const vId = (r.vendor_id as string | null) ?? null;
+    const cleaningDone = (bId && vId) ? (doneDateMap.get(`${bId}__${vId}`) ?? null) : null;
     return {
       id: r.id as string,
       date: r.date as string,
@@ -73,9 +117,12 @@ export const listExpensesPaidWithoutAccount = async (): Promise<ServiceResult<Or
       subcategory: (r.subcategory as string | null) ?? null,
       description: (r.description as string | null) ?? null,
       vendor: (r.vendor as string | null) ?? null,
-      booking_id: (r.booking_id as string | null) ?? null,
+      booking_id: bId,
       expense_group_id: (r.expense_group_id as string | null) ?? null,
       property_name: propertyName,
+      confirmation_code: booking?.confirmation_code ?? null,
+      booking_end_date: booking?.end_date ?? null,
+      cleaning_done_date: cleaningDone,
     };
   });
   return { data: rows, error: null };
@@ -104,8 +151,10 @@ export interface OrphanCleaning {
   supplies_amount: number;
   reimburse_to_cleaner: boolean;
   paid_date: string | null;
+  done_date: string | null;
   confirmation_code: string | null;
   property_name: string | null;
+  booking_end_date: string | null;
 }
 
 /**
@@ -119,10 +168,11 @@ export const listOrphanPaidCleanings = async (): Promise<ServiceResult<{
   const { data, error } = await supabase
     .from('booking_cleanings')
     .select(`
-      id, booking_id, cleaner_id, fee, supplies_amount, reimburse_to_cleaner, paid_date,
+      id, booking_id, cleaner_id, fee, supplies_amount, reimburse_to_cleaner, paid_date, done_date,
       cleaner:vendors ( name ),
       booking:bookings (
         confirmation_code,
+        end_date,
         listing:listings ( property:properties ( name ) )
       )
     `)
@@ -133,6 +183,7 @@ export const listOrphanPaidCleanings = async (): Promise<ServiceResult<{
     cleaner: { name: string | null } | { name: string | null }[] | null;
     booking: {
       confirmation_code: string | null;
+      end_date: string | null;
       listing: { property: { name: string | null } | { name: string | null }[] | null } | { property: unknown }[] | null;
     } | null;
   };
@@ -175,8 +226,10 @@ export const listOrphanPaidCleanings = async (): Promise<ServiceResult<{
       supplies_amount: Number(r.supplies_amount ?? 0),
       reimburse_to_cleaner: !!r.reimburse_to_cleaner,
       paid_date: r.paid_date,
+      done_date: r.done_date,
       confirmation_code: bookingRel?.confirmation_code ?? null,
       property_name: propertyName,
+      booking_end_date: bookingRel?.end_date ?? null,
     };
   };
 

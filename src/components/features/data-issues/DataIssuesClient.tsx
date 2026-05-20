@@ -10,12 +10,14 @@
  *      a) con paid_date  →  generar el expense faltante (pide cuenta).
  *      b) sin paid_date  →  revertir a status='pending'.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/toast';
 import { formatCurrency } from '@/lib/utils';
 import { formatDateDisplay } from '@/lib/dateUtils';
 import { listBankAccounts } from '@/services/bankAccounts';
-import type { BankAccountRow } from '@/types/database';
+import { listProperties } from '@/services/properties';
+import { getBooking } from '@/services/bookings';
+import type { BankAccountRow, PropertyRow } from '@/types/database';
 import {
   fetchDataIssuesSummary,
   listExpensesPaidWithoutAccount,
@@ -28,30 +30,90 @@ import {
   type OrphanCleaning,
 } from '@/services/dataIssues';
 
+const BookingDetailModal = lazy(() => import('../BookingDetailModal'));
+
+// Forma mínima que el BookingDetailModal necesita (subset de BookingLite).
+interface BookingForModal {
+  id: string;
+  confirmation_code: string;
+  guest_name: string | null;
+  start_date: string;
+  end_date: string;
+  num_nights: number;
+  total_revenue: number;
+  status: string | null;
+  channel: string | null;
+  gross_revenue: number | null;
+  channel_fees: number | null;
+  net_payout: number | null;
+  payout_date: string | null;
+  listing_id: string | null;
+  property_id: string | null;
+  notes: string | null;
+}
+
 export default function DataIssuesClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<DataIssuesSummary | null>(null);
   const [banks, setBanks] = useState<BankAccountRow[]>([]);
+  const [properties, setProperties] = useState<PropertyRow[]>([]);
   const [orphanExpenses, setOrphanExpenses] = useState<OrphanExpense[]>([]);
   const [orphanCleaningsPaid, setOrphanCleaningsPaid] = useState<OrphanCleaning[]>([]);
   const [orphanCleaningsNoDate, setOrphanCleaningsNoDate] = useState<OrphanCleaning[]>([]);
 
+  // Estado del modal de detalle de reserva
+  const [viewingBooking, setViewingBooking] = useState<BookingForModal | null>(null);
+  const [openingBookingId, setOpeningBookingId] = useState<string | null>(null);
+
+  const openBooking = async (bookingId: string) => {
+    setOpeningBookingId(bookingId);
+    const res = await getBooking(bookingId);
+    setOpeningBookingId(null);
+    if (res.error || !res.data) {
+      toast.error(res.error ?? 'No se encontró la reserva.');
+      return;
+    }
+    const b = res.data;
+    const listing = (b as { listings?: { id: string; property_id: string | null } | null }).listings ?? null;
+    setViewingBooking({
+      id: b.id,
+      confirmation_code: b.confirmation_code ?? '',
+      guest_name: b.guest_name ?? null,
+      start_date: b.start_date,
+      end_date: b.end_date,
+      num_nights: b.num_nights ?? 0,
+      total_revenue: Number(b.total_revenue ?? 0),
+      status: b.status ?? null,
+      channel: (b as { channel?: string | null }).channel ?? null,
+      gross_revenue: b.gross_revenue !== null && b.gross_revenue !== undefined ? Number(b.gross_revenue) : null,
+      channel_fees: b.channel_fees !== null && b.channel_fees !== undefined ? Number(b.channel_fees) : null,
+      net_payout: b.net_payout !== null && b.net_payout !== undefined ? Number(b.net_payout) : null,
+      payout_date: (b as { payout_date?: string | null }).payout_date ?? null,
+      listing_id: b.listing_id ?? null,
+      property_id: listing?.property_id ?? null,
+      notes: (b as { notes?: string | null }).notes ?? null,
+    });
+  };
+
   const load = async () => {
     setLoading(true);
     setError(null);
-    const [s, b, e, c] = await Promise.all([
+    const [s, b, e, c, p] = await Promise.all([
       fetchDataIssuesSummary(),
       listBankAccounts(),
       listExpensesPaidWithoutAccount(),
       listOrphanPaidCleanings(),
+      listProperties(),
     ]);
     if (s.error) setError(s.error);
     if (b.error) setError(prev => prev ?? b.error);
     if (e.error) setError(prev => prev ?? e.error);
     if (c.error) setError(prev => prev ?? c.error);
+    if (p.error) setError(prev => prev ?? p.error);
     setSummary(s.data);
     setBanks((b.data ?? []).filter(x => x.is_active !== false));
+    setProperties(p.data ?? []);
     setOrphanExpenses(e.data ?? []);
     setOrphanCleaningsPaid(c.data?.withPaidDate ?? []);
     setOrphanCleaningsNoDate(c.data?.withoutPaidDate ?? []);
@@ -90,18 +152,35 @@ export default function DataIssuesClient() {
         items={orphanExpenses}
         banks={banks}
         onReload={load}
+        onOpenBooking={openBooking}
+        openingBookingId={openingBookingId}
       />
 
       <SectionOrphanCleaningsPaid
         items={orphanCleaningsPaid}
         banks={banks}
         onReload={load}
+        onOpenBooking={openBooking}
+        openingBookingId={openingBookingId}
       />
 
       <SectionOrphanCleaningsNoDate
         items={orphanCleaningsNoDate}
         onReload={load}
+        onOpenBooking={openBooking}
+        openingBookingId={openingBookingId}
       />
+
+      {viewingBooking && (
+        <Suspense fallback={null}>
+          <BookingDetailModal
+            booking={viewingBooking}
+            properties={properties}
+            bankAccounts={banks}
+            onClose={() => setViewingBooking(null)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
@@ -168,11 +247,43 @@ function Tile({ label, count, amount, tone }: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper compartido: celda clickeable que abre el modal de la reserva.
+// ─────────────────────────────────────────────────────────────────────────────
+function BookingCell({
+  bookingId, code, onOpen, opening,
+}: {
+  bookingId: string | null;
+  code: string | null;
+  onOpen: (id: string) => void;
+  opening: boolean;
+}) {
+  if (!bookingId) return <span className="text-slate-400">—</span>;
+  const label = code ?? bookingId.slice(0, 8);
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(bookingId)}
+      disabled={opening}
+      className="font-mono text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50"
+      title="Ver detalles de la reserva"
+    >
+      {opening ? '…' : label}
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 1) Gastos pagados sin cuenta
 // ─────────────────────────────────────────────────────────────────────────────
 function SectionExpensesWithoutAccount({
-  items, banks, onReload,
-}: { items: OrphanExpense[]; banks: BankAccountRow[]; onReload: () => Promise<void> }) {
+  items, banks, onReload, onOpenBooking, openingBookingId,
+}: {
+  items: OrphanExpense[];
+  banks: BankAccountRow[];
+  onReload: () => Promise<void>;
+  onOpenBooking: (id: string) => void;
+  openingBookingId: string | null;
+}) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBank, setBulkBank] = useState<string>('');
   const [working, setWorking] = useState(false);
@@ -250,7 +361,9 @@ function SectionExpensesWithoutAccount({
           <thead className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
             <tr>
               <th className="px-3 py-2 w-10"></th>
-              <th className="px-3 py-2 text-left">Fecha</th>
+              <th className="px-3 py-2 text-left" title="Fecha registrada en el gasto (paid_date cuando aplica)">Fecha gasto</th>
+              <th className="px-3 py-2 text-left" title="Para gastos de aseo: fecha en que se realizó el turno (done_date)">Fecha aseo</th>
+              <th className="px-3 py-2 text-left">Reserva</th>
               <th className="px-3 py-2 text-left">Propiedad</th>
               <th className="px-3 py-2 text-left">Concepto</th>
               <th className="px-3 py-2 text-right">Monto</th>
@@ -268,6 +381,19 @@ function SectionExpensesWithoutAccount({
                   />
                 </td>
                 <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{formatDateDisplay(i.date)}</td>
+                <td className="px-3 py-2 text-slate-600 whitespace-nowrap">
+                  {i.cleaning_done_date
+                    ? formatDateDisplay(i.cleaning_done_date)
+                    : <span className="text-slate-300">—</span>}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap">
+                  <BookingCell
+                    bookingId={i.booking_id}
+                    code={i.confirmation_code}
+                    onOpen={onOpenBooking}
+                    opening={openingBookingId === i.booking_id}
+                  />
+                </td>
                 <td className="px-3 py-2 text-slate-700">{i.property_name ?? '—'}</td>
                 <td className="px-3 py-2 text-slate-600 max-w-md truncate" title={i.description ?? ''}>
                   <span className="font-medium text-slate-800">{i.category}</span>
@@ -322,8 +448,14 @@ function SectionExpensesWithoutAccount({
 // 2a) Aseos paid CON paid_date pero SIN expense → crear expense
 // ─────────────────────────────────────────────────────────────────────────────
 function SectionOrphanCleaningsPaid({
-  items, banks, onReload,
-}: { items: OrphanCleaning[]; banks: BankAccountRow[]; onReload: () => Promise<void> }) {
+  items, banks, onReload, onOpenBooking, openingBookingId,
+}: {
+  items: OrphanCleaning[];
+  banks: BankAccountRow[];
+  onReload: () => Promise<void>;
+  onOpenBooking: (id: string) => void;
+  openingBookingId: string | null;
+}) {
   const [bankByRow, setBankByRow] = useState<Record<string, string>>({});
   const [workingId, setWorkingId] = useState<string | null>(null);
 
@@ -373,7 +505,14 @@ function SectionOrphanCleaningsPaid({
                 <tr key={i.id} className="border-t border-slate-100">
                   <td className="px-3 py-2 whitespace-nowrap">{i.paid_date ? formatDateDisplay(i.paid_date) : '—'}</td>
                   <td className="px-3 py-2">{i.property_name ?? '—'}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{i.confirmation_code ?? '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <BookingCell
+                      bookingId={i.booking_id}
+                      code={i.confirmation_code}
+                      onOpen={onOpenBooking}
+                      opening={openingBookingId === i.booking_id}
+                    />
+                  </td>
                   <td className="px-3 py-2">{i.cleaner_name ?? '—'}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(total)}</td>
                   <td className="px-3 py-2">
@@ -413,8 +552,13 @@ function SectionOrphanCleaningsPaid({
 // 2b) Aseos paid SIN paid_date → revertir a pending
 // ─────────────────────────────────────────────────────────────────────────────
 function SectionOrphanCleaningsNoDate({
-  items, onReload,
-}: { items: OrphanCleaning[]; onReload: () => Promise<void> }) {
+  items, onReload, onOpenBooking, openingBookingId,
+}: {
+  items: OrphanCleaning[];
+  onReload: () => Promise<void>;
+  onOpenBooking: (id: string) => void;
+  openingBookingId: string | null;
+}) {
   const [workingId, setWorkingId] = useState<string | null>(null);
   const [bulkWorking, setBulkWorking] = useState(false);
 
@@ -481,7 +625,14 @@ function SectionOrphanCleaningsNoDate({
               return (
                 <tr key={i.id} className="border-t border-slate-100">
                   <td className="px-3 py-2">{i.property_name ?? '—'}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{i.confirmation_code ?? '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <BookingCell
+                      bookingId={i.booking_id}
+                      code={i.confirmation_code}
+                      onOpen={onOpenBooking}
+                      opening={openingBookingId === i.booking_id}
+                    />
+                  </td>
                   <td className="px-3 py-2">{i.cleaner_name ?? '—'}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(total)}</td>
                   <td className="px-3 py-2 text-right">
