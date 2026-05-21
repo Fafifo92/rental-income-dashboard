@@ -1,20 +1,31 @@
 /**
  * services/creditPools.ts
  *
- * Bolsas de créditos (típicamente seguros de responsabilidad civil que se compran
- * por bolsa con X créditos). Los créditos se descuentan automáticamente al hacer
- * check-in de cada reserva (manual o automático nocturno).
+ * Bolsas de créditos (seguros prepagados, asistencias, etc.) que se compran
+ * en tandas y se consumen automáticamente al hacer check-in de cada reserva.
  *
- * Reglas:
- *   - Solo descuenta sobre reservas con start_date >= pool.activated_at
- *     (no sobre pasadas ni importadas con fecha previa).
- *   - Idempotente por (pool_id, booking_id): nunca dobla el descuento.
- *   - Si la bolsa activa no tiene créditos suficientes, se crea un gasto
- *     pendiente "Recarga de créditos" sugiriendo al usuario comprar otra bolsa.
+ * Modelo:
+ *   - Cada **recarga es una bolsa nueva** (fila independiente en credit_pools).
+ *     NO se promedia precio: cada bolsa conserva su credits_total y total_price
+ *     originales, y el precio/crédito de cada consumption se congela en
+ *     `unit_price_snapshot` para blindar reportes históricos.
+ *   - Consumo **FIFO** por vendor: la bolsa más antigua activa con saldo se
+ *     consume primero. Si una bolsa se agota mid-reserva, el resto se cobra a
+ *     la siguiente bolsa elegible (split → 2 consumption rows).
+ *   - **Scoping por propiedad**:
+ *       · Si la bolsa tiene `vendor_id` → cobertura = `vendor_properties` del
+ *         vendor (una sola fuente: la lista del proveedor).
+ *       · Si NO tiene vendor → cobertura = `credit_pool_properties` propio.
+ *   - **Idempotencia**: una misma reserva no consume dos veces del mismo vendor
+ *     (suma de consumption.credits_used por vendor ≥ requested → skip).
+ *   - **Backfill**: cuando nace una bolsa, recorre las reservas elegibles con
+ *     start_date ∈ [activated_at, hoy] de las propiedades cubiertas que aún no
+ *     hayan sido cubiertas por otra bolsa del mismo vendor.
  */
 
 import { supabase } from '@/lib/supabase/client';
 import { todayISO } from '@/lib/dateUtils';
+import { calcUnitsForBooking, unitPriceOf } from '@/lib/creditPoolCalc';
 import type { ServiceResult } from './expenses';
 import type {
   CreditPoolRow,
@@ -45,6 +56,14 @@ export interface CreateCreditPoolInput {
   activated_at: string;
   expires_at?: string | null;
   notes?: string | null;
+  /** Liga la bolsa al expense de compra (opcional). */
+  expense_id?: string | null;
+  /**
+   * Cobertura por propiedad SOLO se aplica si la bolsa NO tiene vendor_id.
+   * Si tiene vendor_id, la cobertura se hereda de vendor_properties (este
+   * campo se ignora silenciosamente para evitar inconsistencias).
+   */
+  property_ids?: string[];
 }
 
 export const createCreditPool = async (
@@ -69,10 +88,21 @@ export const createCreditPool = async (
       expires_at: input.expires_at ?? null,
       status: 'active',
       notes: input.notes ?? null,
+      expense_id: input.expense_id ?? null,
     })
     .select()
     .single();
   if (error) return { data: null, error: error.message };
+
+  // Cobertura propia solo si NO hay vendor
+  if (!input.vendor_id && input.property_ids && input.property_ids.length > 0) {
+    const rows = input.property_ids.map(pid => ({
+      pool_id: data.id,
+      property_id: pid,
+    }));
+    await supabase.from('credit_pool_properties').insert(rows);
+  }
+
   return { data, error: null };
 };
 
@@ -111,67 +141,169 @@ export const listConsumptionsForPool = async (
   return { data: data ?? [], error: null };
 };
 
-// ─── Lógica de consumo ───────────────────────────────────────────────────────
+// ─── Cobertura por propiedad ─────────────────────────────────────────────────
 
 /**
- * Calcula cuántas "unidades" base consume una reserva según la regla del pool.
- * - per_person_per_night  → (adultos + niños·child_weight) × noches
- * - per_person_per_booking → (adultos + niños·child_weight)
- * - per_booking            → 1
+ * Devuelve los property_ids cubiertos por una bolsa.
+ * - Si tiene vendor_id → usa vendor_properties del vendor.
+ * - Si no tiene vendor → usa credit_pool_properties propio.
  */
-export const calcUnitsForBooking = (
-  booking: Pick<BookingRow, 'num_adults' | 'num_children' | 'num_nights'>,
-  rule: CreditPoolConsumptionRule,
-  childWeight: number,
-): number => {
-  const adults = Math.max(0, booking.num_adults ?? 1);
-  const children = Math.max(0, booking.num_children ?? 0);
-  const nights = Math.max(1, booking.num_nights ?? 1);
-  const people = adults + children * childWeight;
-  switch (rule) {
-    case 'per_person_per_night':  return people * nights;
-    case 'per_person_per_booking': return people;
-    case 'per_booking':            return 1;
+export const resolvePoolProperties = async (
+  pool: Pick<CreditPoolRow, 'id' | 'vendor_id'>,
+): Promise<string[]> => {
+  if (pool.vendor_id) {
+    const { data } = await supabase
+      .from('vendor_properties')
+      .select('property_id')
+      .eq('vendor_id', pool.vendor_id);
+    return (data ?? []).map(r => r.property_id);
   }
+  const { data } = await supabase
+    .from('credit_pool_properties')
+    .select('property_id')
+    .eq('pool_id', pool.id);
+  return (data ?? []).map(r => r.property_id);
 };
 
 /**
- * Devuelve el pool activo aplicable a una reserva: status='active', con
- * créditos disponibles y activated_at <= booking.start_date. Si hay varios,
- * usa el más reciente (último activado).
+ * Sobrescribe la cobertura por propiedad de una bolsa SIN vendor.
+ * Si la bolsa tiene vendor, no hace nada (la cobertura se gestiona en el vendor).
  */
-export const findActivePoolForBooking = async (
-  bookingStartDate: string,
-): Promise<ServiceResult<CreditPoolRow | null>> => {
-  const { data, error } = await supabase
+export const setCreditPoolProperties = async (
+  poolId: string,
+  propertyIds: string[],
+): Promise<ServiceResult<true>> => {
+  const { data: pool } = await supabase
+    .from('credit_pools')
+    .select('vendor_id')
+    .eq('id', poolId)
+    .single();
+  if (pool?.vendor_id) {
+    return { data: null, error: 'Esta bolsa hereda cobertura del proveedor. Edita las propiedades en el proveedor.' };
+  }
+  const del = await supabase.from('credit_pool_properties').delete().eq('pool_id', poolId);
+  if (del.error) return { data: null, error: del.error.message };
+  if (propertyIds.length > 0) {
+    const ins = await supabase
+      .from('credit_pool_properties')
+      .insert(propertyIds.map(pid => ({ pool_id: poolId, property_id: pid })));
+    if (ins.error) return { data: null, error: ins.error.message };
+  }
+  return { data: true, error: null };
+};
+
+// ─── Cálculo de unidades y precio (re-exportados desde lib pura) ─────────────
+
+export { calcUnitsForBooking, unitPriceOf } from '@/lib/creditPoolCalc';
+
+// ─── Lookup FIFO con scope por propiedad ─────────────────────────────────────
+
+interface FindPoolsOptions {
+  bookingStartDate: string;
+  propertyId: string;
+  vendorId?: string | null;
+}
+
+/**
+ * Devuelve todas las bolsas elegibles para una reserva+propiedad, ordenadas
+ * FIFO (más antigua activación primero). Filtra por cobertura.
+ */
+export const findActivePoolsForBookingProperty = async (
+  opts: FindPoolsOptions,
+): Promise<ServiceResult<CreditPoolRow[]>> => {
+  let q = supabase
     .from('credit_pools')
     .select('*')
     .eq('status', 'active')
-    .lte('activated_at', bookingStartDate)
-    .order('activated_at', { ascending: false });
+    .lte('activated_at', opts.bookingStartDate)
+    .order('activated_at', { ascending: true });
+  if (opts.vendorId !== undefined) {
+    if (opts.vendorId === null) q = q.is('vendor_id', null);
+    else q = q.eq('vendor_id', opts.vendorId);
+  }
+  const { data, error } = await q;
   if (error) return { data: null, error: error.message };
-  const usable = (data ?? []).find(p => Number(p.credits_total) - Number(p.credits_used) > 0);
-  return { data: usable ?? null, error: null };
+
+  const candidates = (data ?? []).filter(
+    p => Number(p.credits_total) - Number(p.credits_used) > 0,
+  );
+
+  // Filtrar por cobertura (resolución por bolsa)
+  const out: CreditPoolRow[] = [];
+  for (const pool of candidates) {
+    const covered = await resolvePoolProperties(pool);
+    if (covered.length === 0) continue; // bolsa sin cobertura → no consume
+    if (covered.includes(opts.propertyId)) out.push(pool);
+  }
+  return { data: out, error: null };
 };
 
 /**
- * Realiza el descuento de créditos para una reserva al hacer check-in.
- * Es idempotente: si ya existe consumption para (pool, booking) no hace nada.
- *
- * Reglas:
- *   - Si booking.start_date < pool.activated_at → NO descuenta (devuelve skipped).
- *   - Si no hay pool activo aplicable → no descuenta (devuelve skipped).
- *   - Si el pool no tiene suficientes créditos → marca pool='depleted',
- *     descuenta lo que pueda y crea un gasto pendiente sugiriendo recarga.
+ * Wrapper legacy: primera bolsa elegible (la más antigua activa con saldo).
+ * Mantiene la firma anterior para no romper consumidores.
  */
+export const findActivePoolForBooking = async (
+  bookingStartDate: string,
+  propertyId?: string,
+): Promise<ServiceResult<CreditPoolRow | null>> => {
+  if (!propertyId) {
+    // Comportamiento legacy sin scoping (no debería usarse en nuevo código).
+    const { data, error } = await supabase
+      .from('credit_pools')
+      .select('*')
+      .eq('status', 'active')
+      .lte('activated_at', bookingStartDate)
+      .order('activated_at', { ascending: true });
+    if (error) return { data: null, error: error.message };
+    const usable = (data ?? []).find(p => Number(p.credits_total) - Number(p.credits_used) > 0);
+    return { data: usable ?? null, error: null };
+  }
+  const res = await findActivePoolsForBookingProperty({ bookingStartDate, propertyId });
+  if (res.error) return { data: null, error: res.error };
+  return { data: (res.data ?? [])[0] ?? null, error: null };
+};
+
+// ─── Consumo (con split FIFO + snapshot + idempotencia por vendor) ───────────
+
 export interface ConsumeResult {
   consumed: boolean;
-  skipped?: 'no_pool' | 'pre_activation' | 'already_consumed';
-  pool_id?: string;
+  skipped?: 'no_pool' | 'pre_activation' | 'already_consumed' | 'no_coverage';
+  pool_ids?: string[];
   units?: number;
   credits_used?: number;
+  credits_missing?: number;
   insufficient?: boolean;
 }
+
+/**
+ * Suma cuántos créditos ya consumió una reserva agrupados por vendor (null
+ * cuenta como su propio bucket). Sirve para idempotencia entre recargas.
+ */
+const sumConsumedByVendorForBooking = async (
+  bookingId: string,
+): Promise<Map<string | 'null', number>> => {
+  const { data } = await supabase
+    .from('credit_pool_consumptions')
+    .select('credits_used, pool_id')
+    .eq('booking_id', bookingId);
+  const rows = (data ?? []) as Array<{ credits_used: number; pool_id: string }>;
+  if (rows.length === 0) return new Map();
+  const poolIds = [...new Set(rows.map(r => r.pool_id))];
+  const { data: poolsData } = await supabase
+    .from('credit_pools')
+    .select('id, vendor_id')
+    .in('id', poolIds);
+  const vendorByPool = new Map<string, string | null>();
+  for (const p of (poolsData ?? []) as Array<{ id: string; vendor_id: string | null }>) {
+    vendorByPool.set(p.id, p.vendor_id);
+  }
+  const m = new Map<string | 'null', number>();
+  for (const row of rows) {
+    const key: string | 'null' = vendorByPool.get(row.pool_id) ?? 'null';
+    m.set(key, (m.get(key) ?? 0) + Number(row.credits_used));
+  }
+  return m;
+};
 
 export const consumeCreditsForCheckin = async (
   bookingId: string,
@@ -179,7 +311,7 @@ export const consumeCreditsForCheckin = async (
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 
-  // 1) Cargar reserva
+  // 1) Reserva + propiedad
   const { data: booking, error: bErr } = await supabase
     .from('bookings')
     .select('id, start_date, end_date, num_adults, num_children, num_nights, status, listing_id')
@@ -189,109 +321,322 @@ export const consumeCreditsForCheckin = async (
   if ((booking.status ?? '').toLowerCase().includes('cancel')) {
     return { data: { consumed: false, skipped: 'no_pool' }, error: null };
   }
-
-  // 2) Buscar pool activo aplicable
-  const poolRes = await findActivePoolForBooking(booking.start_date);
-  if (poolRes.error) return { data: null, error: poolRes.error };
-  const pool = poolRes.data;
-  if (!pool) {
+  const { data: listing } = await supabase
+    .from('listings')
+    .select('property_id')
+    .eq('id', booking.listing_id)
+    .maybeSingle();
+  const propertyId = listing?.property_id as string | undefined;
+  if (!propertyId) {
     return { data: { consumed: false, skipped: 'no_pool' }, error: null };
   }
 
-  // 3) Validar fecha: no descontar sobre reservas previas a la activación
-  if (booking.start_date < pool.activated_at) {
-    return { data: { consumed: false, skipped: 'pre_activation', pool_id: pool.id }, error: null };
+  // 2) Bolsas elegibles (FIFO)
+  const poolsRes = await findActivePoolsForBookingProperty({
+    bookingStartDate: booking.start_date,
+    propertyId,
+  });
+  if (poolsRes.error) return { data: null, error: poolsRes.error };
+  const pools = poolsRes.data ?? [];
+  if (pools.length === 0) {
+    return { data: { consumed: false, skipped: 'no_pool' }, error: null };
   }
 
-  // 4) Idempotencia
-  const { data: existing } = await supabase
-    .from('credit_pool_consumptions')
-    .select('id')
-    .eq('pool_id', pool.id)
-    .eq('booking_id', booking.id)
-    .maybeSingle();
-  if (existing) {
-    return { data: { consumed: false, skipped: 'already_consumed', pool_id: pool.id }, error: null };
+  // Validar activación: ya filtramos por activated_at <= start_date, así que ok.
+
+  // 3) Agrupar por vendor para idempotencia
+  const consumedByVendor = await sumConsumedByVendorForBooking(booking.id);
+
+  // 4) Procesar la reserva contra cada bolsa elegible (FIFO),
+  //    cobrando solo lo que falta por cubrir según la regla de cada bolsa.
+  const usedPoolIds: string[] = [];
+  let totalUnits = 0;
+  let totalCreditsUsed = 0;
+  let totalMissing = 0;
+  let anyConsumed = false;
+
+  // Agrupamos bolsas por vendor para no consumir dos veces lo mismo.
+  // Iteramos en orden FIFO (ya viene ordenado).
+  const handledVendorKeys = new Set<string | 'null'>();
+  for (const pool of pools) {
+    const vendorKey: string | 'null' = pool.vendor_id ?? 'null';
+    if (handledVendorKeys.has(vendorKey)) continue;
+
+    const units = calcUnitsForBooking(booking, pool.consumption_rule, Number(pool.child_weight));
+    const requested = units * Number(pool.credits_per_unit);
+    const alreadyByVendor = consumedByVendor.get(vendorKey) ?? 0;
+    const remaining = requested - alreadyByVendor;
+
+    if (remaining <= 0) {
+      // Esta reserva ya está cubierta para este vendor → marcamos y seguimos
+      handledVendorKeys.add(vendorKey);
+      continue;
+    }
+
+    // Repartir 'remaining' entre las bolsas de este vendor (FIFO).
+    const vendorPools = pools.filter(p => (p.vendor_id ?? 'null') === vendorKey);
+    let toCover = remaining;
+    for (const p of vendorPools) {
+      if (toCover <= 0) break;
+
+      // Idempotencia por (pool, booking)
+      const { data: existing } = await supabase
+        .from('credit_pool_consumptions')
+        .select('id, credits_used')
+        .eq('pool_id', p.id)
+        .eq('booking_id', booking.id)
+        .maybeSingle();
+      if (existing) continue;
+
+      const available = Number(p.credits_total) - Number(p.credits_used);
+      if (available <= 0) continue;
+      const toUse = Math.min(toCover, available);
+      const snapshot = unitPriceOf(p);
+
+      const { error: cErr } = await supabase
+        .from('credit_pool_consumptions')
+        .insert({
+          owner_id: user.id,
+          pool_id: p.id,
+          booking_id: booking.id,
+          units: units * (toUse / requested), // unidades proporcionales
+          credits_used: toUse,
+          occurred_at: todayISO(),
+          unit_price_snapshot: snapshot,
+          notes: vendorPools.length > 1 ? `Split FIFO con otras bolsas de ${vendorKey === 'null' ? 'la cobertura' : 'este proveedor'}.` : null,
+        });
+      if (cErr) return { data: null, error: cErr.message };
+
+      const newUsed = Number(p.credits_used) + toUse;
+      const newStatus = newUsed >= Number(p.credits_total) ? 'depleted' : p.status;
+      await supabase.from('credit_pools')
+        .update({ credits_used: newUsed, status: newStatus })
+        .eq('id', p.id);
+
+      usedPoolIds.push(p.id);
+      totalCreditsUsed += toUse;
+      totalUnits += units * (toUse / requested);
+      anyConsumed = true;
+      toCover -= toUse;
+    }
+
+    if (toCover > 0) {
+      // Quedó sin cubrir → sugerir recarga
+      totalMissing += toCover;
+      const refPool = vendorPools[0];
+      const unitPrice = unitPriceOf(refPool);
+      const suggested = Math.round(toCover * unitPrice);
+      await supabase.from('expenses').insert({
+        owner_id: user.id,
+        property_id: null,
+        category: 'Seguros',
+        type: 'variable' as const,
+        amount: suggested,
+        currency: 'COP',
+        date: todayISO(),
+        description: `Recarga sugerida de créditos · ${refPool.name} (faltan ${toCover.toFixed(0)} créditos)`,
+        status: 'pending' as const,
+        bank_account_id: null,
+        booking_id: null,
+        vendor: refPool.name,
+        person_in_charge: null,
+        adjustment_id: null,
+        vendor_id: refPool.vendor_id ?? null,
+        shared_bill_id: null,
+        subcategory: null,
+        expense_group_id: null,
+      });
+    }
+
+    handledVendorKeys.add(vendorKey);
   }
 
-  // 5) Calcular unidades y créditos
-  const units = calcUnitsForBooking(booking, pool.consumption_rule, Number(pool.child_weight));
-  const requested = units * Number(pool.credits_per_unit);
-  const available = Number(pool.credits_total) - Number(pool.credits_used);
-  const toUse = Math.min(requested, available);
-  const insufficient = requested > available;
-
-  // 6) Insertar consumption + actualizar pool
-  const { error: cErr } = await supabase
-    .from('credit_pool_consumptions')
-    .insert({
-      owner_id: user.id,
-      pool_id: pool.id,
-      booking_id: booking.id,
-      units,
-      credits_used: toUse,
-      occurred_at: todayISO(),
-      notes: insufficient ? 'Saldo insuficiente: se consumió el remanente.' : null,
-    });
-  if (cErr) return { data: null, error: cErr.message };
-
-  const newUsed = Number(pool.credits_used) + toUse;
-  const newStatus = newUsed >= Number(pool.credits_total) ? 'depleted' : pool.status;
-  await supabase
-    .from('credit_pools')
-    .update({ credits_used: newUsed, status: newStatus })
-    .eq('id', pool.id);
-
-  // 7) Si no alcanzó, crear gasto pendiente sugiriendo recarga
-  if (insufficient) {
-    const missingCredits = requested - toUse;
-    const unitPrice = Number(pool.credits_total) > 0
-      ? Number(pool.total_price) / Number(pool.credits_total)
-      : 0;
-    const suggested = Math.round(missingCredits * unitPrice);
-    await supabase.from('expenses').insert({
-      owner_id: user.id,
-      property_id: null,
-      category: 'Seguros',
-      type: 'variable' as const,
-      amount: suggested,
-      currency: 'COP',
-      date: todayISO(),
-      description: `Recarga sugerida de créditos · ${pool.name} (faltan ${missingCredits.toFixed(0)} créditos)`,
-      status: 'pending' as const,
-      bank_account_id: null,
-      booking_id: null,
-      vendor: pool.name,
-      person_in_charge: null,
-      adjustment_id: null,
-      vendor_id: pool.vendor_id ?? null,
-      shared_bill_id: null,
-      subcategory: null,
-      expense_group_id: null,
-    });
+  if (!anyConsumed) {
+    return { data: { consumed: false, skipped: 'already_consumed' }, error: null };
   }
 
   return {
     data: {
       consumed: true,
-      pool_id: pool.id,
-      units,
-      credits_used: toUse,
-      insufficient,
+      pool_ids: usedPoolIds,
+      units: totalUnits,
+      credits_used: totalCreditsUsed,
+      credits_missing: totalMissing,
+      insufficient: totalMissing > 0,
     },
     error: null,
   };
 };
 
-// ─── Auto check-in nocturno (lazy en frontend) ───────────────────────────────
+// ─── Backfill al crear/recargar una bolsa ────────────────────────────────────
 
 /**
- * Recorre las reservas del usuario cuya fecha de check-in ya pasó (o es hoy)
- * y aún no tienen checkin_done. Marca check-in y dispara el consumo del pool.
- *
- * Diseñado para ejecutarse al cargar la app (BookingsClient u otro punto).
- * Está protegido: si no hay reservas pendientes, no hace nada.
+ * Recorre reservas no canceladas con start_date en [pool.activated_at, hoy] de
+ * las propiedades cubiertas por la bolsa y dispara `consumeCreditsForCheckin`.
+ * La idempotencia por vendor evita duplicar consumos cuando otra bolsa del
+ * mismo vendor ya cubrió la reserva.
  */
+export const backfillConsumptionsForPool = async (
+  poolId: string,
+): Promise<{ processed: number; consumed: number; errors: string[] }> => {
+  const errors: string[] = [];
+  const { data: pool, error: pErr } = await supabase
+    .from('credit_pools')
+    .select('*')
+    .eq('id', poolId)
+    .single();
+  if (pErr || !pool) return { processed: 0, consumed: 0, errors: [pErr?.message ?? 'pool not found'] };
+
+  const covered = await resolvePoolProperties(pool);
+  if (covered.length === 0) return { processed: 0, consumed: 0, errors: [] };
+
+  const { data: listings } = await supabase
+    .from('listings')
+    .select('id, property_id')
+    .in('property_id', covered);
+  const listingIds = (listings ?? []).map(l => l.id);
+  if (listingIds.length === 0) return { processed: 0, consumed: 0, errors: [] };
+
+  const today = todayISO();
+  const { data: bookings, error: bErr } = await supabase
+    .from('bookings')
+    .select('id, status, checkin_done')
+    .in('listing_id', listingIds)
+    .gte('start_date', pool.activated_at)
+    .lte('start_date', today)
+    .limit(1000);
+  if (bErr) return { processed: 0, consumed: 0, errors: [bErr.message] };
+
+  let processed = 0, consumed = 0;
+  for (const b of bookings ?? []) {
+    if ((b.status ?? '').toLowerCase().includes('cancel')) continue;
+    if (!b.checkin_done) {
+      const upd = await supabase.from('bookings').update({ checkin_done: true }).eq('id', b.id);
+      if (upd.error) { errors.push(`${b.id}: ${upd.error.message}`); continue; }
+    }
+    processed++;
+    const cr = await consumeCreditsForCheckin(b.id);
+    if (cr.error) errors.push(`${b.id}: ${cr.error}`);
+    else if (cr.data?.consumed) consumed++;
+  }
+  return { processed, consumed, errors };
+};
+
+// ─── Atribución de costo por propiedad ───────────────────────────────────────
+
+export interface PoolCostByPropertyRow {
+  property_id: string;
+  pool_id: string;
+  vendor_id: string | null;
+  pool_name: string;
+  credits: number;
+  cost_cop: number;
+  consumptions: number;
+}
+
+/**
+ * Agrega el costo en COP de las bolsas atribuido a cada propiedad en un rango.
+ * Usa unit_price_snapshot cuando existe; si no, deriva del pool actual.
+ *
+ * Nota: este resultado es INFORMATIVO y no se persiste en `expenses` para
+ * evitar doble contabilidad — el COP real ya salió por el expense de compra
+ * de la bolsa.
+ */
+export const getCreditPoolCostByProperty = async (opts: {
+  from?: string;
+  to?: string;
+  propertyId?: string;
+  vendorId?: string;
+} = {}): Promise<ServiceResult<PoolCostByPropertyRow[]>> => {
+  let q = supabase
+    .from('credit_pool_consumptions')
+    .select('id, units, credits_used, occurred_at, unit_price_snapshot, pool_id, booking_id');
+  if (opts.from) q = q.gte('occurred_at', opts.from);
+  if (opts.to)   q = q.lte('occurred_at', opts.to);
+  const { data: rawConsumptions, error } = await q;
+  if (error) return { data: null, error: error.message };
+
+  type ConsRow = {
+    credits_used: number;
+    unit_price_snapshot: number | null;
+    pool_id: string;
+    booking_id: string;
+  };
+  const consumptions = (rawConsumptions ?? []) as ConsRow[];
+  if (consumptions.length === 0) return { data: [], error: null };
+
+  const poolIds = [...new Set(consumptions.map(r => r.pool_id))];
+  const bookingIds = [...new Set(consumptions.map(r => r.booking_id))];
+
+  const { data: poolsData } = await supabase
+    .from('credit_pools')
+    .select('id, name, vendor_id, total_price, credits_total')
+    .in('id', poolIds);
+  const poolsById = new Map<string, { id: string; name: string; vendor_id: string | null; total_price: number; credits_total: number }>();
+  for (const p of (poolsData ?? []) as Array<{ id: string; name: string; vendor_id: string | null; total_price: number; credits_total: number }>) {
+    poolsById.set(p.id, p);
+  }
+
+  const { data: bookingsData } = await supabase
+    .from('bookings')
+    .select('id, listing_id')
+    .in('id', bookingIds);
+  const listingIds = [...new Set((bookingsData ?? []).map(b => b.listing_id))];
+  const bookingListing = new Map<string, string>();
+  for (const b of (bookingsData ?? []) as Array<{ id: string; listing_id: string }>) {
+    bookingListing.set(b.id, b.listing_id);
+  }
+
+  const { data: listingsData } = await supabase
+    .from('listings')
+    .select('id, property_id')
+    .in('id', listingIds);
+  const listingProperty = new Map<string, string>();
+  for (const l of (listingsData ?? []) as Array<{ id: string; property_id: string }>) {
+    listingProperty.set(l.id, l.property_id);
+  }
+
+  const buckets = new Map<string, PoolCostByPropertyRow>();
+  for (const r of consumptions) {
+    const pool = poolsById.get(r.pool_id);
+    if (!pool) continue;
+    const listingId = bookingListing.get(r.booking_id);
+    if (!listingId) continue;
+    const propertyId = listingProperty.get(listingId);
+    if (!propertyId) continue;
+
+    if (opts.propertyId && opts.propertyId !== propertyId) continue;
+    if (opts.vendorId && opts.vendorId !== pool.vendor_id) continue;
+
+    const credits = Number(r.credits_used);
+    const unitPrice = r.unit_price_snapshot != null
+      ? Number(r.unit_price_snapshot)
+      : (Number(pool.credits_total) > 0 ? Number(pool.total_price) / Number(pool.credits_total) : 0);
+    const cost = credits * unitPrice;
+
+    const key = `${propertyId}::${pool.id}`;
+    const existing = buckets.get(key);
+    if (existing) {
+      existing.credits += credits;
+      existing.cost_cop += cost;
+      existing.consumptions += 1;
+    } else {
+      buckets.set(key, {
+        property_id: propertyId,
+        pool_id: pool.id,
+        vendor_id: pool.vendor_id,
+        pool_name: pool.name,
+        credits,
+        cost_cop: cost,
+        consumptions: 1,
+      });
+    }
+  }
+  return { data: [...buckets.values()], error: null };
+};
+
+// ─── Auto check-in nocturno (lazy en frontend) ───────────────────────────────
+
 export const runAutoCheckins = async (): Promise<{
   processed: number;
   consumed: number;
@@ -325,4 +670,49 @@ export const runAutoCheckins = async (): Promise<{
     else if (cr.data?.consumed) consumed++;
   }
   return { processed, consumed, errors };
+};
+
+// ─── Cotizador (sin escribir nada) ───────────────────────────────────────────
+
+export interface QuoteForBookingResult {
+  pool: CreditPoolRow | null;
+  units: number;
+  credits: number;
+  unit_price: number;
+  cost_cop: number;
+}
+
+/**
+ * Cotiza cuánto costaría la bolsa para una reserva (sin escribir). Devuelve
+ * pool=null si no hay bolsa elegible.
+ */
+export const quoteBookingPoolCost = async (opts: {
+  bookingStartDate: string;
+  propertyId: string;
+  num_adults: number;
+  num_children: number;
+  num_nights: number;
+}): Promise<ServiceResult<QuoteForBookingResult>> => {
+  const res = await findActivePoolsForBookingProperty({
+    bookingStartDate: opts.bookingStartDate,
+    propertyId: opts.propertyId,
+  });
+  if (res.error) return { data: null, error: res.error };
+  const pool = (res.data ?? [])[0] ?? null;
+  if (!pool) {
+    return { data: { pool: null, units: 0, credits: 0, unit_price: 0, cost_cop: 0 }, error: null };
+  }
+  const units = calcUnitsForBooking(opts, pool.consumption_rule, Number(pool.child_weight));
+  const credits = units * Number(pool.credits_per_unit);
+  const unit_price = unitPriceOf(pool);
+  return {
+    data: {
+      pool,
+      units,
+      credits,
+      unit_price,
+      cost_cop: credits * unit_price,
+    },
+    error: null,
+  };
 };
