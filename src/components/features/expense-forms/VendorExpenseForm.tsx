@@ -7,13 +7,21 @@
  * ajustarla. Property obligatoria. Si el vendor cubre múltiples propiedades
  * (utilities/admin compartidas), redirigimos al usuario a usar el flujo de
  * Shared Bills desde /vendors.
+ *
+ * Bolsa de créditos: si el vendor es kind='insurance', aparece un bloque para
+ * registrar la recarga (créditos comprados, fecha de activación, regla). Al
+ * guardar el expense, también se crea una bolsa nueva y se hace backfill de
+ * consumos para reservas elegibles. Modelo FIFO: cada recarga = bolsa nueva,
+ * no se promedia precio.
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { Expense } from '@/types';
-import type { PropertyRow, BankAccountRow, VendorKind, PropertyGroupRow, PropertyTagRow, PropertyTagAssignmentRow } from '@/types/database';
+import type { PropertyRow, BankAccountRow, VendorKind, PropertyGroupRow, PropertyTagRow, PropertyTagAssignmentRow, CreditPoolConsumptionRule, CreditPoolRow } from '@/types/database';
 import { listVendors, type Vendor } from '@/services/vendors';
 import { listPropertyGroups } from '@/services/propertyGroups';
 import { listPropertyTags, listAllTagAssignments } from '@/services/propertyTags';
+import { listCreditPools, createCreditPool, backfillConsumptionsForPool } from '@/services/creditPools';
+import { formatCurrency } from '@/lib/utils';
 import PropertyMultiSelect from '@/components/PropertyMultiSelect';
 import {
   FormShell, BankPicker, MoneyField, DateField,
@@ -75,6 +83,16 @@ export default function VendorExpenseForm({
   const [tags, setTags] = useState<PropertyTagRow[]>([]);
   const [tagAssigns, setTagAssigns] = useState<PropertyTagAssignmentRow[]>([]);
 
+  // ── Bolsa de créditos (solo si vendor.kind === 'insurance') ───────────────
+  const [poolEnabled, setPoolEnabled] = useState(false);
+  const [poolCredits, setPoolCredits] = useState<string>('');
+  const [poolRule, setPoolRule] = useState<CreditPoolConsumptionRule>('per_person_per_night');
+  const [poolCreditsPerUnit, setPoolCreditsPerUnit] = useState<string>('1');
+  const [poolChildWeight, setPoolChildWeight] = useState<string>('1');
+  const [poolActivatedAt, setPoolActivatedAt] = useState<string>(todayISO());
+  const [poolExpiresAt, setPoolExpiresAt] = useState<string>('');
+  const [latestPool, setLatestPool] = useState<CreditPoolRow | null>(null);
+
   useEffect(() => {
     const currentVendorId = initial?.vendor_id ?? null;
     listVendors().then(res => {
@@ -101,6 +119,47 @@ export default function VendorExpenseForm({
     }
   }, [selectedVendor]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Cuando el vendor es de seguros, cargar la última bolsa para heredar reglas
+  // y activar el bloque por defecto.
+  useEffect(() => {
+    if (isEditMode || !selectedVendor) {
+      setPoolEnabled(false);
+      setLatestPool(null);
+      return;
+    }
+    if (selectedVendor.kind !== 'insurance') {
+      setPoolEnabled(false);
+      setLatestPool(null);
+      return;
+    }
+    setPoolEnabled(true);
+    listCreditPools().then(res => {
+      if (res.error) return;
+      const ofVendor = (res.data ?? [])
+        .filter(p => p.vendor_id === selectedVendor.id)
+        .sort((a, b) => (a.activated_at < b.activated_at ? 1 : -1));
+      const latest = ofVendor[0] ?? null;
+      setLatestPool(latest);
+      if (latest) {
+        setPoolRule(latest.consumption_rule);
+        setPoolCreditsPerUnit(String(latest.credits_per_unit));
+        setPoolChildWeight(String(latest.child_weight));
+        if (!poolCredits) setPoolCredits(String(latest.credits_total));
+      }
+    });
+  }, [selectedVendor, isEditMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Mantener fecha de activación = fecha del pago si el usuario no la cambia.
+  useEffect(() => {
+    setPoolActivatedAt(date);
+  }, [date]);
+
+  const poolUnitPrice = useMemo(() => {
+    const credits = Number(poolCredits);
+    if (!amount || !credits || credits <= 0) return 0;
+    return amount / credits;
+  }, [amount, poolCredits]);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs: Record<string, string> = {};
@@ -108,6 +167,17 @@ export default function VendorExpenseForm({
     if (selectedPropertyIds.length === 0) errs.property = 'Selecciona al menos una propiedad';
     if (!amount || amount <= 0) errs.amount = 'Indica el monto';
     if (status === 'paid' && !bankId) errs.bank = 'Marca la cuenta bancaria si está pagado';
+    // Bolsa: si está habilitada, los créditos son obligatorios para poder
+    // calcular el precio/crédito. Sin ellos la bolsa no puede consumirse.
+    if (poolEnabled && selectedVendor?.kind === 'insurance') {
+      const credits = Number(poolCredits);
+      if (!Number.isFinite(credits) || credits <= 0) {
+        errs.poolCredits = 'Indica los créditos comprados — sin ellos no se puede crear la bolsa';
+      }
+      if (!amount || amount <= 0) {
+        errs.amount = 'El monto del pago define el precio por crédito — es obligatorio';
+      }
+    }
     setErrors(errs);
     if (Object.keys(errs).length || !selectedVendor) return;
 
@@ -164,6 +234,32 @@ export default function VendorExpenseForm({
         });
       }
     }
+
+    // Si es vendor de seguros y la bolsa está habilitada, crear la recarga
+    // como bolsa nueva (FIFO) y disparar el backfill de consumos.
+    if (!isEditMode && poolEnabled && selectedVendor?.kind === 'insurance') {
+      const credits = Number(poolCredits);
+      if (Number.isFinite(credits) && credits > 0 && amount && amount > 0) {
+        const poolName = latestPool?.name ?? selectedVendor.name;
+        const res = await createCreditPool({
+          vendor_id: selectedVendor.id,
+          name: poolName,
+          credits_total: credits,
+          total_price: amount,
+          consumption_rule: poolRule,
+          credits_per_unit: Number(poolCreditsPerUnit) || 1,
+          child_weight: Number(poolChildWeight) || 1,
+          activated_at: poolActivatedAt || date,
+          expires_at: poolExpiresAt || null,
+          notes: latestPool ? `Recarga de bolsa (FIFO). Bolsa anterior: ${latestPool.id}` : 'Bolsa inicial.',
+        });
+        if (res.data?.id) {
+          // Fire-and-forget: el backfill puede tardar y no debe bloquear.
+          backfillConsumptionsForPool(res.data.id).catch(() => undefined);
+        }
+      }
+    }
+
     setSaving(false);
   };
 
@@ -289,6 +385,113 @@ export default function VendorExpenseForm({
         <MoneyField label="Monto" value={amount} onChange={setAmount} required error={errors.amount} />
         <DateField value={date} onChange={setDate} required />
       </div>
+
+      {!isEditMode && selectedVendor?.kind === 'insurance' && (
+        <div className="border border-amber-200 rounded-xl bg-amber-50/60 p-4 space-y-3">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={poolEnabled}
+              onChange={e => setPoolEnabled(e.target.checked)}
+              className="w-4 h-4 accent-amber-600"
+            />
+            <span className="text-sm font-semibold text-amber-900">
+              🪙 Este pago carga la bolsa de créditos
+            </span>
+          </label>
+          <p className="text-[11px] text-amber-700">
+            El sistema creará una bolsa nueva por esta recarga (modelo FIFO: las
+            bolsas viejas se consumen primero, las nuevas conservan su precio).
+            Las propiedades cubiertas son las del proveedor. Tras guardar, se
+            recalculan los consumos de reservas elegibles.
+          </p>
+          {poolEnabled && (
+            <div className="space-y-3 pt-1">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Créditos comprados *</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={poolCredits}
+                    onChange={e => setPoolCredits(e.target.value)}
+                    placeholder="Ej: 1000"
+                    className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none ${errors.poolCredits ? 'border-red-400' : 'border-slate-200'}`}
+                  />
+                  {errors.poolCredits && <p className="text-xs text-red-500 mt-1">{errors.poolCredits}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Precio por crédito</label>
+                  <div className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-700 font-mono">
+                    {poolUnitPrice > 0 ? formatCurrency(poolUnitPrice) : '—'}
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Regla de consumo</label>
+                  <select
+                    value={poolRule}
+                    onChange={e => setPoolRule(e.target.value as CreditPoolConsumptionRule)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                  >
+                    <option value="per_person_per_night">Por persona y noche</option>
+                    <option value="per_person_per_booking">Por persona (toda la reserva)</option>
+                    <option value="per_booking">Por reserva (fijo)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Créditos por unidad</label>
+                  <input
+                    type="number" min={0.01} step={0.01}
+                    value={poolCreditsPerUnit}
+                    onChange={e => setPoolCreditsPerUnit(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Activar desde</label>
+                  <input
+                    type="date"
+                    value={poolActivatedAt}
+                    onChange={e => setPoolActivatedAt(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Vence (opcional)</label>
+                  <input
+                    type="date"
+                    value={poolExpiresAt}
+                    onChange={e => setPoolExpiresAt(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+              </div>
+              {poolRule !== 'per_booking' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Peso de niños (0–1)</label>
+                  <input
+                    type="number" min={0} max={1} step={0.1}
+                    value={poolChildWeight}
+                    onChange={e => setPoolChildWeight(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+              )}
+              {latestPool && (
+                <p className="text-[11px] text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                  Última bolsa de este proveedor: <b>{latestPool.credits_used}</b>/{latestPool.credits_total} créditos usados
+                  ({latestPool.status === 'depleted' ? 'agotada' : latestPool.status})
+                  — la nueva bolsa coexistirá hasta que la anterior se agote.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <StatusPicker value={status} onChange={setStatus} />
 

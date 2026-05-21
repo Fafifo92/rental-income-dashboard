@@ -72,6 +72,18 @@ export const createCreditPool = async (
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 
+  // Guardar integridad: sin precio y créditos completos, la bolsa no puede
+  // calcular unit_price_snapshot ni atribuir costos correctamente.
+  if (!input.credits_total || input.credits_total <= 0) {
+    return { data: null, error: 'La bolsa requiere al menos 1 crédito total.' };
+  }
+  if (!input.total_price || input.total_price <= 0) {
+    return { data: null, error: 'El precio total es obligatorio — define el costo por crédito.' };
+  }
+  if (!input.credits_per_unit || input.credits_per_unit <= 0) {
+    return { data: null, error: 'Créditos por unidad debe ser mayor a 0.' };
+  }
+
   const { data, error } = await supabase
     .from('credit_pools')
     .insert({
@@ -224,8 +236,13 @@ export const findActivePoolsForBookingProperty = async (
   const { data, error } = await q;
   if (error) return { data: null, error: error.message };
 
-  const candidates = (data ?? []).filter(
-    p => Number(p.credits_total) - Number(p.credits_used) > 0,
+  const candidates = (data ?? []).filter(p =>
+    // Saldo disponible
+    Number(p.credits_total) - Number(p.credits_used) > 0 &&
+    // La ecuación debe estar completa: sin precio no se puede calcular
+    // unit_price_snapshot y la atribución de costos sería $0 (silenciosamente rota).
+    Number(p.total_price) > 0 &&
+    Number(p.credits_per_unit) > 0,
   );
 
   // Filtrar por cobertura (resolución por bolsa)
@@ -255,7 +272,11 @@ export const findActivePoolForBooking = async (
       .lte('activated_at', bookingStartDate)
       .order('activated_at', { ascending: true });
     if (error) return { data: null, error: error.message };
-    const usable = (data ?? []).find(p => Number(p.credits_total) - Number(p.credits_used) > 0);
+    const usable = (data ?? []).find(p =>
+      Number(p.credits_total) - Number(p.credits_used) > 0 &&
+      Number(p.total_price) > 0 &&
+      Number(p.credits_per_unit) > 0,
+    );
     return { data: usable ?? null, error: null };
   }
   const res = await findActivePoolsForBookingProperty({ bookingStartDate, propertyId });

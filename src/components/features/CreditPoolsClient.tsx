@@ -20,12 +20,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/useAuth';
 import { toast } from '@/lib/toast';
 import { listVendors, type Vendor } from '@/services/vendors';
+import { listProperties } from '@/services/properties';
 import {
   listCreditPools, createCreditPool, updateCreditPool, archiveCreditPool,
-  listConsumptionsForPool,
+  listConsumptionsForPool, resolvePoolProperties, setCreditPoolProperties,
+  unitPriceOf, calcUnitsForBooking,
 } from '@/services/creditPools';
 import type {
   CreditPoolRow, CreditPoolConsumptionRow, CreditPoolConsumptionRule,
+  PropertyRow,
 } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import MoneyInput from '@/components/MoneyInput';
@@ -68,6 +71,8 @@ export default function CreditPoolsClient() {
   const authStatus = useAuth();
   const [pools, setPools] = useState<CreditPoolRow[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [properties, setProperties] = useState<PropertyRow[]>([]);
+  const [propsByPool, setPropsByPool] = useState<Map<string, string[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'active' | 'archived'>('active');
 
@@ -77,15 +82,27 @@ export default function CreditPoolsClient() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [historyTarget, setHistoryTarget] = useState<CreditPoolRow | null>(null);
+  const [calcTarget, setCalcTarget] = useState<CreditPoolRow | null>(null);
+  const [propsTarget, setPropsTarget] = useState<CreditPoolRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [pRes, vRes] = await Promise.all([
+    const [pRes, vRes, prRes] = await Promise.all([
       listCreditPools(),
       listVendors(),
+      listProperties(),
     ]);
     if (pRes.data) setPools(pRes.data);
     if (vRes.data) setVendors(vRes.data);
+    if (prRes.data) setProperties(prRes.data);
+
+    // Cargar cobertura por bolsa (en paralelo).
+    if (pRes.data) {
+      const entries = await Promise.all(
+        pRes.data.map(async (p) => [p.id, await resolvePoolProperties(p)] as const),
+      );
+      setPropsByPool(new Map(entries));
+    }
     setLoading(false);
   }, []);
 
@@ -127,7 +144,8 @@ export default function CreditPoolsClient() {
     if (!form.name.trim()) { setErr('El nombre es obligatorio.'); return; }
     const credits = Number(form.credits_total);
     if (!Number.isFinite(credits) || credits <= 0) { setErr('Créditos totales debe ser mayor a 0.'); return; }
-    const price = Number(form.total_price) || 0;
+    const price = Number(form.total_price);
+    if (!Number.isFinite(price) || price <= 0) { setErr('El precio total es obligatorio — sin él no se puede calcular el costo por crédito.'); return; }
     const cpu = Number(form.credits_per_unit);
     if (!Number.isFinite(cpu) || cpu <= 0) { setErr('Créditos por unidad debe ser mayor a 0.'); return; }
     const cw = Number(form.child_weight);
@@ -220,79 +238,17 @@ export default function CreditPoolsClient() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filteredPools.map(p => {
-            const remaining = Number(p.credits_total) - Number(p.credits_used);
-            const pct = Number(p.credits_total) > 0
-              ? Math.min(100, Math.round((Number(p.credits_used) / Number(p.credits_total)) * 100))
-              : 0;
-            const vendor = vendors.find(v => v.id === p.vendor_id);
-            return (
-              <div key={p.id} className={`bg-white border rounded-2xl p-4 shadow-sm ${
-                p.status === 'archived' ? 'border-slate-200 opacity-70' :
-                p.status === 'depleted' ? 'border-red-300' : 'border-amber-200'
-              }`}>
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-bold text-slate-800 truncate">{p.name}</h3>
-                    {vendor && <p className="text-xs text-slate-500">{vendor.name}</p>}
-                  </div>
-                  <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                    p.status === 'active'    ? 'bg-emerald-100 text-emerald-700' :
-                    p.status === 'depleted'  ? 'bg-red-100 text-red-700' :
-                    'bg-slate-100 text-slate-500'
-                  }`}>
-                    {p.status === 'active' ? 'Activa' : p.status === 'depleted' ? 'Agotada' : 'Archivada'}
-                  </span>
-                </div>
-
-                {/* barra de progreso */}
-                <div className="mb-3">
-                  <div className="flex justify-between text-xs text-slate-600 mb-1">
-                    <span>{Number(p.credits_used).toLocaleString('es-CO')} usados</span>
-                    <span><b>{remaining.toLocaleString('es-CO')}</b> restantes</span>
-                  </div>
-                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full ${pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1 text-xs text-slate-600">
-                  <p>📐 Regla: <b>{RULE_LABELS[p.consumption_rule]}</b></p>
-                  <p>💱 {Number(p.credits_per_unit)} créditos/unidad · niños ×{Number(p.child_weight)}</p>
-                  <p>📅 Activada: {p.activated_at}{p.expires_at ? ` · Expira ${p.expires_at}` : ''}</p>
-                  <p>💰 Precio: {formatCurrency(Number(p.total_price))}</p>
-                </div>
-
-                <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
-                  <button
-                    onClick={() => setHistoryTarget(p)}
-                    className="flex-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 py-1.5 rounded"
-                  >
-                    📜 Historial
-                  </button>
-                  <button
-                    onClick={() => openEdit(p)}
-                    className="flex-1 text-xs font-semibold text-amber-700 hover:bg-amber-50 py-1.5 rounded"
-                  >
-                    ✏️ Editar
-                  </button>
-                  {p.status !== 'archived' && (
-                    <button
-                      onClick={() => onArchive(p)}
-                      className="flex-1 text-xs font-semibold text-slate-500 hover:bg-slate-50 py-1.5 rounded"
-                    >
-                      Archivar
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <PoolsGrouped
+          pools={filteredPools}
+          vendors={vendors}
+          properties={properties}
+          propsByPool={propsByPool}
+          onEdit={openEdit}
+          onArchive={onArchive}
+          onHistory={(p) => setHistoryTarget(p)}
+          onCalc={(p) => setCalcTarget(p)}
+          onEditProps={(p) => setPropsTarget(p)}
+        />
       )}
 
       {/* MODAL CREAR/EDITAR */}
@@ -465,6 +421,29 @@ export default function CreditPoolsClient() {
           />
         )}
       </AnimatePresence>
+
+      {/* MODAL CALCULADORA */}
+      <AnimatePresence>
+        {calcTarget && (
+          <PoolCalcModal
+            pool={calcTarget}
+            onClose={() => setCalcTarget(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* MODAL EDITAR PROPIEDADES (sólo bolsas sin vendor) */}
+      <AnimatePresence>
+        {propsTarget && (
+          <PoolPropertiesModal
+            pool={propsTarget}
+            properties={properties}
+            currentIds={propsByPool.get(propsTarget.id) ?? []}
+            onClose={() => setPropsTarget(null)}
+            onSaved={async () => { setPropsTarget(null); await load(); }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -535,6 +514,367 @@ function PoolHistoryModal({ pool, onClose }: {
             className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">
             Cerrar
           </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─── Grid agrupado por vendor ────────────────────────────────────────────────
+
+function PoolsGrouped({
+  pools, vendors, properties, propsByPool,
+  onEdit, onArchive, onHistory, onCalc, onEditProps,
+}: {
+  pools: CreditPoolRow[];
+  vendors: Vendor[];
+  properties: PropertyRow[];
+  propsByPool: Map<string, string[]>;
+  onEdit: (p: CreditPoolRow) => void;
+  onArchive: (p: CreditPoolRow) => void;
+  onHistory: (p: CreditPoolRow) => void;
+  onCalc: (p: CreditPoolRow) => void;
+  onEditProps: (p: CreditPoolRow) => void;
+}) {
+  // Agrupa por vendor_id (null = "Sin proveedor"); ordena bolsas por
+  // activated_at asc (FIFO: la más antigua primero, la próxima a consumirse).
+  const groups = useMemo(() => {
+    const byVendor = new Map<string, CreditPoolRow[]>();
+    for (const p of pools) {
+      const key = p.vendor_id ?? '__none__';
+      const arr = byVendor.get(key);
+      if (arr) arr.push(p); else byVendor.set(key, [p]);
+    }
+    for (const arr of byVendor.values()) {
+      arr.sort((a, b) => a.activated_at.localeCompare(b.activated_at));
+    }
+    return [...byVendor.entries()];
+  }, [pools]);
+
+  const propsById = useMemo(
+    () => new Map(properties.map(p => [p.id, p.name] as const)),
+    [properties],
+  );
+
+  return (
+    <div className="space-y-6">
+      {groups.map(([vendorKey, vendorPools]) => {
+        const vendor = vendorKey === '__none__' ? null : vendors.find(v => v.id === vendorKey);
+        const totalCredits = vendorPools.reduce((s, p) => s + Number(p.credits_total), 0);
+        const usedCredits = vendorPools.reduce((s, p) => s + Number(p.credits_used), 0);
+        const totalCop = vendorPools.reduce((s, p) => s + Number(p.total_price), 0);
+        return (
+          <section key={vendorKey} className="bg-slate-50/60 border border-slate-200 rounded-2xl p-3 sm:p-4">
+            <header className="flex flex-wrap items-baseline justify-between gap-2 mb-3 px-1">
+              <h2 className="text-sm font-bold text-slate-800">
+                {vendor ? <>🏢 {vendor.name}</> : <>🪙 Bolsas sin proveedor</>}
+                <span className="text-xs font-normal text-slate-500 ml-2">
+                  {vendorPools.length} bolsa{vendorPools.length !== 1 ? 's' : ''}
+                </span>
+              </h2>
+              <div className="text-xs text-slate-600">
+                <b>{usedCredits.toLocaleString('es-CO')}</b>/{totalCredits.toLocaleString('es-CO')} créditos · {formatCurrency(totalCop)} invertido
+              </div>
+            </header>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {vendorPools.map((p, idx) => (
+                <PoolCard
+                  key={p.id}
+                  pool={p}
+                  fifoOrder={idx + 1}
+                  fifoTotal={vendorPools.filter(x => x.status === 'active').length}
+                  propertyIds={propsByPool.get(p.id) ?? []}
+                  propertyNames={propsById}
+                  inheritedFromVendor={!!p.vendor_id}
+                  onEdit={() => onEdit(p)}
+                  onArchive={() => onArchive(p)}
+                  onHistory={() => onHistory(p)}
+                  onCalc={() => onCalc(p)}
+                  onEditProps={() => onEditProps(p)}
+                />
+              ))}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function PoolCard({
+  pool: p, fifoOrder, fifoTotal, propertyIds, propertyNames,
+  inheritedFromVendor,
+  onEdit, onArchive, onHistory, onCalc, onEditProps,
+}: {
+  pool: CreditPoolRow;
+  fifoOrder: number;
+  fifoTotal: number;
+  propertyIds: string[];
+  propertyNames: Map<string, string>;
+  inheritedFromVendor: boolean;
+  onEdit: () => void;
+  onArchive: () => void;
+  onHistory: () => void;
+  onCalc: () => void;
+  onEditProps: () => void;
+}) {
+  const remaining = Number(p.credits_total) - Number(p.credits_used);
+  const pct = Number(p.credits_total) > 0
+    ? Math.min(100, Math.round((Number(p.credits_used) / Number(p.credits_total)) * 100))
+    : 0;
+  const unitPrice = unitPriceOf(p);
+
+  return (
+    <div className={`bg-white border rounded-2xl p-4 shadow-sm ${
+      p.status === 'archived' ? 'border-slate-200 opacity-70' :
+      p.status === 'depleted' ? 'border-red-300' : 'border-amber-200'
+    }`}>
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex-1 min-w-0">
+          <h3 className="font-bold text-slate-800 truncate">{p.name}</h3>
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            {p.status === 'active' && fifoTotal > 1 && (
+              <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-sky-100 text-sky-700"
+                title="Orden FIFO: las bolsas más antiguas se consumen primero">
+                FIFO #{fifoOrder}
+              </span>
+            )}
+            <span className="text-[10px] text-slate-500">{p.activated_at}</span>
+          </div>
+        </div>
+        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+          p.status === 'active'    ? 'bg-emerald-100 text-emerald-700' :
+          p.status === 'depleted'  ? 'bg-red-100 text-red-700' :
+          'bg-slate-100 text-slate-500'
+        }`}>
+          {p.status === 'active' ? 'Activa' : p.status === 'depleted' ? 'Agotada' : 'Archivada'}
+        </span>
+      </div>
+
+      {/* barra de progreso */}
+      <div className="mb-3">
+        <div className="flex justify-between text-xs text-slate-600 mb-1">
+          <span>{Number(p.credits_used).toLocaleString('es-CO')} usados</span>
+          <span><b>{remaining.toLocaleString('es-CO')}</b> restantes</span>
+        </div>
+        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+          <div
+            className={`h-full ${pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1 text-xs text-slate-600">
+        <p>📐 {RULE_LABELS[p.consumption_rule]} · {Number(p.credits_per_unit)} créd/unidad{p.consumption_rule !== 'per_booking' ? ` · niños ×${Number(p.child_weight)}` : ''}</p>
+        <p>💰 {formatCurrency(Number(p.total_price))} total · <b className="text-amber-700">{formatCurrency(unitPrice)} / crédito</b></p>
+        {p.expires_at && <p>⏳ Expira {p.expires_at}</p>}
+        {/* Advertencia: bolsa incompleta — no puede consumirse */}
+        {(Number(p.total_price) <= 0 || Number(p.credits_per_unit) <= 0) && (
+          <p className="mt-1 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
+            ⚠️ Bolsa incompleta — falta el precio o créditos/unidad. No descontará créditos hasta que se complete.
+          </p>
+        )}
+      </div>
+
+      {/* Propiedades cubiertas */}
+      <div className="mt-3 pt-3 border-t border-slate-100">
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+            Propiedades cubiertas
+            {inheritedFromVendor && (
+              <span className="ml-1.5 text-slate-400 normal-case font-normal" title="Heredadas del proveedor">
+                (del proveedor)
+              </span>
+            )}
+          </p>
+          {!inheritedFromVendor && (
+            <button onClick={onEditProps} className="text-[10px] text-amber-700 hover:underline font-semibold">
+              Editar
+            </button>
+          )}
+        </div>
+        {propertyIds.length === 0 ? (
+          <p className="text-[11px] italic text-rose-600">
+            {inheritedFromVendor
+              ? 'El proveedor no tiene propiedades asignadas — esta bolsa no consumirá créditos.'
+              : 'Sin propiedades — agrega al menos una para que se descuenten créditos.'}
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-1">
+            {propertyIds.slice(0, 6).map(pid => (
+              <span key={pid} className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                {propertyNames.get(pid) ?? pid.slice(0, 8)}
+              </span>
+            ))}
+            {propertyIds.length > 6 && (
+              <span className="text-[10px] text-slate-500">+{propertyIds.length - 6} más</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
+        <button onClick={onCalc} className="flex-1 text-xs font-semibold text-amber-700 hover:bg-amber-50 py-1.5 rounded">
+          🧮 Calcular
+        </button>
+        <button onClick={onHistory} className="flex-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 py-1.5 rounded">
+          📜 Historial
+        </button>
+        <button onClick={onEdit} className="flex-1 text-xs font-semibold text-amber-700 hover:bg-amber-50 py-1.5 rounded">
+          ✏️ Editar
+        </button>
+        {p.status !== 'archived' && (
+          <button onClick={onArchive} className="flex-1 text-xs font-semibold text-slate-500 hover:bg-slate-50 py-1.5 rounded">
+            Archivar
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Modal calculadora ────────────────────────────────────────────────────────
+
+function PoolCalcModal({ pool, onClose }: { pool: CreditPoolRow; onClose: () => void }) {
+  const [adults, setAdults] = useState('2');
+  const [children, setChildren] = useState('0');
+  const [nights, setNights] = useState('3');
+  const unitPrice = unitPriceOf(pool);
+  const units = calcUnitsForBooking(
+    { num_adults: Number(adults) || 0, num_children: Number(children) || 0, num_nights: Number(nights) || 1 },
+    pool.consumption_rule,
+    Number(pool.child_weight),
+  );
+  const credits = units * Number(pool.credits_per_unit);
+  const cost = credits * unitPrice;
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+      {...makeBackdropHandlers(onClose)}
+    >
+      <motion.div
+        initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
+        onClick={e => e.stopPropagation()}
+        onMouseDown={e => e.stopPropagation()}
+        onMouseUp={e => e.stopPropagation()}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6"
+      >
+        <h3 className="text-lg font-bold text-slate-800 mb-1">🧮 Calculadora</h3>
+        <p className="text-xs text-slate-500 mb-4">
+          <b>{pool.name}</b> · {RULE_LABELS[pool.consumption_rule]}
+        </p>
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          <div>
+            <label className="block text-[10px] font-semibold text-slate-600 mb-1">Adultos</label>
+            <input type="number" min={0} value={adults} onChange={e => setAdults(e.target.value)}
+              className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold text-slate-600 mb-1">Niños</label>
+            <input type="number" min={0} value={children} onChange={e => setChildren(e.target.value)}
+              className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold text-slate-600 mb-1">Noches</label>
+            <input type="number" min={1} value={nights} onChange={e => setNights(e.target.value)}
+              className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
+          </div>
+        </div>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-1 text-sm">
+          <div className="flex justify-between"><span className="text-slate-600">Unidades:</span><b>{units.toFixed(2)}</b></div>
+          <div className="flex justify-between"><span className="text-slate-600">Créditos:</span><b>{credits.toFixed(2)}</b></div>
+          <div className="flex justify-between"><span className="text-slate-600">Precio/crédito:</span><b>{formatCurrency(unitPrice)}</b></div>
+          <div className="flex justify-between text-base pt-1 border-t border-amber-200 mt-1">
+            <span className="text-slate-700 font-semibold">Costo:</span>
+            <b className="text-amber-700">{formatCurrency(cost)}</b>
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">
+            Cerrar
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─── Modal propiedades (sólo bolsas sin vendor) ───────────────────────────────
+
+function PoolPropertiesModal({
+  pool, properties, currentIds, onClose, onSaved,
+}: {
+  pool: CreditPoolRow;
+  properties: PropertyRow[];
+  currentIds: string[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const inheritedFromVendor = !!pool.vendor_id;
+  const [selected, setSelected] = useState<Set<string>>(new Set(currentIds));
+  const [saving, setSaving] = useState(false);
+  const toggle = (id: string) => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const save = async () => {
+    setSaving(true);
+    const res = await setCreditPoolProperties(pool.id, [...selected]);
+    setSaving(false);
+    if (res.error) { toast.error(res.error); return; }
+    toast.success('Propiedades actualizadas');
+    onSaved();
+  };
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+      {...makeBackdropHandlers(onClose)}
+    >
+      <motion.div
+        initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
+        onClick={e => e.stopPropagation()}
+        onMouseDown={e => e.stopPropagation()}
+        onMouseUp={e => e.stopPropagation()}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto"
+      >
+        <h3 className="text-lg font-bold text-slate-800 mb-1">Propiedades cubiertas</h3>
+        <p className="text-xs text-slate-500 mb-3">
+          Sólo las reservas de estas propiedades consumirán créditos de <b>{pool.name}</b>.
+        </p>
+        {inheritedFromVendor ? (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            Esta bolsa hereda cobertura del proveedor. Para cambiar las propiedades,
+            edita el proveedor en la pestaña de Proveedores.
+          </p>
+        ) : (
+          <div className="space-y-1 max-h-72 overflow-y-auto border border-slate-200 rounded-lg p-2">
+            {properties.map(prop => (
+              <label key={prop.id} className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selected.has(prop.id)}
+                  onChange={() => toggle(prop.id)}
+                  className="w-4 h-4 accent-amber-600"
+                />
+                <span className="text-sm text-slate-700">{prop.name}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        <div className="mt-5 flex gap-3 justify-end">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">
+            Cerrar
+          </button>
+          {!inheritedFromVendor && (
+            <button onClick={save} disabled={saving}
+              className="px-4 py-2 text-sm font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-lg disabled:opacity-60">
+              {saving ? 'Guardando…' : 'Guardar'}
+            </button>
+          )}
         </div>
       </motion.div>
     </motion.div>
