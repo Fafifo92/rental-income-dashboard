@@ -16,11 +16,10 @@ import {
 } from '@/services/cleanings';
 import { listVendors, type Vendor } from '@/services/vendors';
 import { consumeCreditsForCheckin, quoteBookingPoolCost, listConsumptionsForPool } from '@/services/creditPools';
-import type { CreditPoolRow } from '@/types/database';
 import { todayISO, formatDateDisplay } from '@/lib/dateUtils';
 import type { Expense } from '@/types';
 import type {
-  PropertyRow, BankAccountRow, BookingAdjustmentRow, BookingAdjustmentKind,
+  CreditPoolRow, PropertyRow, BankAccountRow, BookingAdjustmentRow, BookingAdjustmentKind,
 } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';

@@ -66,8 +66,11 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
   const netoVal = booking.net_payout != null
     ? booking.net_payout
     : subMoney(bruto, booking.channel_fees ?? 0);
-  // Infer fees from bruto-neto difference when channel_fees is not explicitly stored
-  const feesVal = booking.channel_fees ?? subMoney(bruto, netoVal);
+  // Infer fees from bruto-neto difference when channel_fees is null, undefined, or 0
+  // (0 means it was never explicitly set, not that there truly are no fees)
+  const feesVal = (booking.channel_fees != null && booking.channel_fees !== 0)
+    ? booking.channel_fees
+    : subMoney(bruto, netoVal);
   const isFine  = netoVal < 0;
 
   // ── Fine (cancelled booking penalty) ─────────────────────────────────────
