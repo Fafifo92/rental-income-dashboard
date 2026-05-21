@@ -152,6 +152,12 @@ export type Database = {
         Update: Partial<Omit<CreditPoolConsumptionRow, 'id' | 'created_at'>>;
         Relationships: [];
       };
+      credit_pool_properties: {
+        Row: CreditPoolPropertyRow;
+        Insert: Omit<CreditPoolPropertyRow, 'created_at'>;
+        Update: Partial<Omit<CreditPoolPropertyRow, 'created_at'>>;
+        Relationships: [];
+      };
       shared_bills: {
         Row: SharedBillRow;
         Insert: Omit<SharedBillRow, 'id' | 'created_at'>;
@@ -637,6 +643,8 @@ export type CreditPoolRow = {
   expires_at: string | null;
   status: CreditPoolStatus;
   notes: string | null;
+  /** Liga la bolsa al expense de compra/recarga (null = creada manualmente). */
+  expense_id: string | null;
   created_at: string;
 };
 
@@ -649,6 +657,18 @@ export type CreditPoolConsumptionRow = {
   credits_used: number;
   occurred_at: string;
   notes: string | null;
+  /** Precio/crédito congelado al momento del consumo. Blinda reportes. */
+  unit_price_snapshot: number | null;
+  created_at: string;
+};
+
+/**
+ * Cobertura por propiedad SOLO cuando la bolsa no tiene vendor_id.
+ * Si la bolsa tiene vendor, la cobertura sale de vendor_properties.
+ */
+export type CreditPoolPropertyRow = {
+  pool_id: string;
+  property_id: string;
   created_at: string;
 };
 

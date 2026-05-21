@@ -332,17 +332,28 @@ interface BookingForOverlap {
   listing_id: string;
   listing: {
     external_name: string | null;
-    property: { name: string | null } | { name: string | null }[] | null;
+    property: { id: string | null; name: string | null } | { id: string | null; name: string | null }[] | null;
   } | { external_name: string | null; property: unknown }[] | null;
 }
 
-const propertyNameFromListing = (rel: BookingForOverlap['listing']): string | null => {
-  if (!rel) return null;
+const propertyRowFromListing = (
+  rel: BookingForOverlap['listing'],
+): { id: string | null; name: string | null; external_name: string | null } => {
+  if (!rel) return { id: null, name: null, external_name: null };
   const listing = Array.isArray(rel) ? rel[0] : rel;
-  if (!listing) return null;
-  const prop = (listing as { property?: { name: string | null } | { name: string | null }[] | null }).property;
+  if (!listing) return { id: null, name: null, external_name: null };
+  const prop = (listing as { property?: { id: string | null; name: string | null } | { id: string | null; name: string | null }[] | null }).property;
   const propRow = Array.isArray(prop) ? prop[0] : prop;
-  return propRow?.name ?? listing.external_name ?? null;
+  return {
+    id: propRow?.id ?? null,
+    name: propRow?.name ?? null,
+    external_name: listing.external_name ?? null,
+  };
+};
+
+const propertyNameFromListing = (rel: BookingForOverlap['listing']): string | null => {
+  const { name, external_name } = propertyRowFromListing(rel);
+  return name ?? external_name ?? null;
 };
 
 const toBookingLite = (row: BookingForOverlap): BookingLiteRow => ({
@@ -377,10 +388,9 @@ export const listOverlappingBookings = async (): Promise<ServiceResult<OverlapPa
       .select(`
         id, confirmation_code, guest_name, start_date, end_date, num_nights,
         status, channel, net_payout, payout_date, payout_bank_account_id, listing_id,
-        listing:listings ( external_name, property:properties ( name ) )
+        listing:listings ( external_name, property:properties ( id, name ) )
       `)
       .not('listing_id', 'is', null)
-      .order('listing_id', { ascending: true })
       .order('start_date', { ascending: true }),
     (supabase
       .from('data_issue_ignores' as never)
@@ -398,18 +408,20 @@ export const listOverlappingBookings = async (): Promise<ServiceResult<OverlapPa
     return !s.includes('cancel');
   }) as unknown as BookingForOverlap[];
 
-  // Agrupar por listing_id.
-  const byListing = new Map<string, BookingForOverlap[]>();
+  // Agrupar por property_id (no por listing_id): una propiedad no puede tener
+  // dos reservas simultáneas aunque vengan de listings/canales distintos
+  // (p.ej. Airbnb + Directo apuntando a la misma propiedad).
+  const byProperty = new Map<string, BookingForOverlap[]>();
   for (const row of rows) {
-    if (!row.listing_id) continue;
-    const arr = byListing.get(row.listing_id) ?? [];
+    const propId = propertyRowFromListing(row.listing).id ?? `listing:${row.listing_id}`;
+    const arr = byProperty.get(propId) ?? [];
     arr.push(row);
-    byListing.set(row.listing_id, arr);
+    byProperty.set(propId, arr);
   }
 
   const pairs: OverlapPair[] = [];
-  for (const [, group] of byListing) {
-    // group ya está ordenado por start_date.
+  for (const [, group] of byProperty) {
+    group.sort((x, y) => x.start_date.localeCompare(y.start_date));
     for (let i = 0; i < group.length; i++) {
       for (let j = i + 1; j < group.length; j++) {
         const a = group[i];

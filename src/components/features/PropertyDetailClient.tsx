@@ -12,6 +12,7 @@ import { listVendors, type Vendor } from '@/services/vendors';
 import { listAllVendorProperties } from '@/services/vendorProperties';
 import { formatCurrency } from '@/lib/utils';
 import MoneyInput from '@/components/MoneyInput';
+import CreditPoolAttributionPanel from './CreditPoolAttributionPanel';
 
 interface Props { propertyId: string; }
 
@@ -91,7 +92,7 @@ export default function PropertyDetailClient({ propertyId }: Props) {
       )}
 
       {tab === 'services' && (
-        <ServicesTab propertyId={propertyId} legacyRecurrings={activeRecurring} />
+        <ServicesTab propertyId={propertyId} propertyName={property.name} legacyRecurrings={activeRecurring} />
       )}
     </>
   );
@@ -262,9 +263,10 @@ function DetailsTab({ property, onSaved }: { property: PropertyRow; onSaved: () 
 
 // ─── Tab: Servicios que cubren esta propiedad (Fase 15) ──────────────
 function ServicesTab({
-  propertyId, legacyRecurrings,
+  propertyId, propertyName, legacyRecurrings,
 }: {
   propertyId: string;
+  propertyName: string;
   legacyRecurrings: PropertyRecurringExpenseRow[];
 }) {
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -356,6 +358,13 @@ function ServicesTab({
           </ul>
         </section>
       )}
+
+      {/* Atribución de bolsas para ESTA propiedad. Informativo. */}
+      <CreditPoolAttributionPanel
+        propertyId={propertyId}
+        propertyMap={new Map([[propertyId, propertyName]])}
+        defaultOpen
+      />
     </div>
   );
 }

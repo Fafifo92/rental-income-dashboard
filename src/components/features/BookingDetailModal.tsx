@@ -15,7 +15,8 @@ import {
   updateBookingOperational, type BookingCleaning,
 } from '@/services/cleanings';
 import { listVendors, type Vendor } from '@/services/vendors';
-import { consumeCreditsForCheckin } from '@/services/creditPools';
+import { consumeCreditsForCheckin, quoteBookingPoolCost, listConsumptionsForPool } from '@/services/creditPools';
+import type { CreditPoolRow } from '@/types/database';
 import { todayISO, formatDateDisplay } from '@/lib/dateUtils';
 import type { Expense } from '@/types';
 import type {
@@ -133,6 +134,49 @@ export default function BookingDetailModal({
   }, [booking.id]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Cotización / consumo real de bolsa de créditos para esta reserva.
+  const [poolQuote, setPoolQuote] = useState<{
+    pool: CreditPoolRow | null;
+    credits: number;
+    unit_price: number;
+    cost_cop: number;
+    units: number;
+    actual?: { credits: number; cost: number; pool_name: string } | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!propertyId) { setPoolQuote(null); return; }
+    let cancelled = false;
+    (async () => {
+      const quote = await quoteBookingPoolCost({
+        bookingStartDate: booking.start_date,
+        propertyId,
+        num_adults: booking.num_adults ?? 1,
+        num_children: booking.num_children ?? 0,
+        num_nights: booking.num_nights,
+      });
+      if (cancelled || quote.error || !quote.data) { setPoolQuote(null); return; }
+      // Si ya hay consumos reales, sobreescribimos con el dato real.
+      let actual: { credits: number; cost: number; pool_name: string } | null = null;
+      if (quote.data.pool) {
+        const cons = await listConsumptionsForPool(quote.data.pool.id);
+        if (!cancelled && !cons.error && cons.data) {
+          const mine = cons.data.filter(c => c.booking_id === booking.id);
+          if (mine.length > 0) {
+            const credits = mine.reduce((s, c) => s + Number(c.credits_used || 0), 0);
+            const cost = mine.reduce((s, c) => {
+              const unit = Number(c.unit_price_snapshot ?? quote.data!.unit_price);
+              return s + Number(c.credits_used || 0) * unit;
+            }, 0);
+            actual = { credits, cost, pool_name: quote.data.pool.name };
+          }
+        }
+      }
+      if (!cancelled) setPoolQuote({ ...quote.data, actual });
+    })();
+    return () => { cancelled = true; };
+  }, [propertyId, booking.start_date, booking.num_adults, booking.num_children, booking.num_nights, booking.id]);
 
   // ESC cierra
   useEffect(() => {
@@ -432,6 +476,44 @@ export default function BookingDetailModal({
                 No incluye gastos fijos de la propiedad.
               </p>
             </div>
+
+            {/* Bolsa de créditos */}
+            {poolQuote && (poolQuote.pool || poolQuote.actual) && (
+              <div className="px-4 sm:px-7 py-3 sm:py-4 border-b border-slate-100">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] uppercase tracking-wider text-amber-700 font-semibold">
+                    🪙 Bolsa de créditos
+                  </p>
+                  {poolQuote.actual ? (
+                    <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">
+                      CONSUMIDO
+                    </span>
+                  ) : (
+                    <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-semibold">
+                      PROYECTADO
+                    </span>
+                  )}
+                </div>
+                {poolQuote.actual ? (
+                  <div className="text-sm text-slate-700">
+                    Consumió <b>{poolQuote.actual.credits.toFixed(2)}</b> créditos
+                    {' '}= <b>{formatCurrency(poolQuote.actual.cost)}</b>
+                    {' '}<span className="text-slate-500">({poolQuote.actual.pool_name})</span>
+                  </div>
+                ) : poolQuote.pool ? (
+                  <div className="text-sm text-slate-700">
+                    Costo proyectado de <b>{poolQuote.pool.name}</b>:
+                    {' '}<b>{poolQuote.credits.toFixed(2)}</b> créditos × {formatCurrency(poolQuote.unit_price)}
+                    {' '}= <b>{formatCurrency(poolQuote.cost_cop)}</b>
+                    <span className="text-xs text-slate-500 block mt-1">
+                      ({(booking.num_adults ?? 1)} adultos
+                      {(booking.num_children ?? 0) > 0 ? ` + ${booking.num_children} niños` : ''}
+                      {' '}× {booking.num_nights} noche{booking.num_nights !== 1 ? 's' : ''})
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            )}
 
             {/* Notas */}
             {booking.notes && (

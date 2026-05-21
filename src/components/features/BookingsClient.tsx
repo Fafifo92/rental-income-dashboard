@@ -612,7 +612,7 @@ export default function BookingsClient() {
               booking={detailTarget}
               properties={properties}
               bankAccounts={bankAccounts}
-              onClose={() => setDetailTarget(null)}
+              onClose={() => { setDetailTarget(null); reload(); }}
               resolvePropertyId={(lid) => {
                 if (!lid) return null;
                 return listings.find(l => l.id === lid)?.property_id ?? null;

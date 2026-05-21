@@ -204,7 +204,7 @@ export default function DataIssuesClient() {
   return (
     <div className="space-y-6">
       <header className="space-y-1">
-        <h1 className="text-2xl font-bold text-slate-800">Manejo de errores</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-slate-800">🛠️ Manejo de errores</h1>
         <p className="text-sm text-slate-500 max-w-3xl">
           Esta página detecta inconsistencias de datos que no pueden repararse
           desde la UI normal (reservas duplicadas, gastos sin cuenta,
@@ -623,7 +623,7 @@ function SectionExpensesWithoutAccount({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="min-w-[760px] sm:min-w-full text-sm">
           <thead className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
             <tr>
               <th className="px-3 py-2 w-10"></th>
@@ -752,7 +752,7 @@ function SectionOrphanCleaningsPaid({
         </p>
       </header>
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="min-w-[760px] sm:min-w-full text-sm">
           <thead className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
             <tr>
               <th className="px-3 py-2 text-left">Fecha pago</th>
@@ -875,7 +875,7 @@ function SectionOrphanCleaningsNoDate({
         </button>
       </header>
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="min-w-[760px] sm:min-w-full text-sm">
           <thead className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
             <tr>
               <th className="px-3 py-2 text-left">Propiedad</th>

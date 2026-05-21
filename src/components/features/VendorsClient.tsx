@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { type VendorKind, type PropertyRow, type VendorPropertyRow, type BankAccountRow, type SharedBillRow, type CreditPoolRow, type ExpenseCategory, EXPENSE_CATEGORIES } from '@/types/database';
 import { listVendors, createVendor, updateVendor, deleteVendor, type Vendor } from '@/services/vendors';
-import { listCreditPools, createCreditPool, updateCreditPool, type CreateCreditPoolInput } from '@/services/creditPools';
+import { listCreditPools, updateCreditPool } from '@/services/creditPools';
 import { listVendorProperties, setVendorProperties, listAllVendorProperties } from '@/services/vendorProperties';
 import { listProperties } from '@/services/properties';
 import { listBankAccounts } from '@/services/bankAccounts';
@@ -224,25 +224,19 @@ export default function VendorsClient(): JSX.Element {
 
     const vendorId = res.data.id;
     const vpRes = await setVendorProperties(vendorId, form.props);
-    // If insurance vendor with pool enabled → create or update credit pool
-    if (form.kind === 'insurance' && form.poolEnabled && Number(form.poolCreditsTotal) > 0) {
-      const poolPayload: CreateCreditPoolInput = {
-        vendor_id: vendorId,
-        name: form.name.trim(),
-        credits_total: Number(form.poolCreditsTotal),
-        total_price: Number(form.defaultAmount) || 0,
+    // Si el vendor es de seguros y el bloque de bolsa está habilitado:
+    //   · En CREAR: no se crea bolsa aún — nace al registrar el primer pago.
+    //   · En EDITAR: si ya existe una bolsa activa, sólo se actualizan las
+    //     reglas (consumo, créditos/unidad, peso de niños). No tocamos
+    //     credits_total/total_price/activated_at para preservar el historial.
+    if (form.kind === 'insurance' && form.poolEnabled && editing && editingPool) {
+      const rulesPatch = {
         consumption_rule: form.poolConsumptionRule,
         credits_per_unit: Number(form.poolCreditsPerUnit) || 1,
         child_weight: Number(form.poolChildWeight) || 1,
-        activated_at: form.poolActivatedAt,
         expires_at: form.poolExpiresAt || null,
-        notes: null,
       };
-      if (editingPool) {
-        await updateCreditPool(editingPool.id, poolPayload);
-      } else {
-        await createCreditPool(poolPayload);
-      }
+      await updateCreditPool(editingPool.id, rulesPatch);
     }
     setSaving(false);
     if (vpRes.error) { setErr(`Servicio guardado pero falló la asignación de propiedades: ${vpRes.error}`); return; }

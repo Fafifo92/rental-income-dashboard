@@ -10,10 +10,10 @@ import { todayISO as todayISOFromUtils } from '@/lib/dateUtils';
 
 export type DerivedBookingStatus =
   | 'cancelled'
-  | 'upcoming'      // start_date > today
-  | 'in_progress'   // start_date <= today < end_date
-  | 'completed'     // end_date <= today AND checkin_done AND checkout_done
-  | 'past_unverified'; // end_date <= today pero faltan flags
+  | 'upcoming'          // start_date > today
+  | 'in_progress'       // start_date <= today < end_date (y checkout_done=false)
+  | 'completed'         // checkout_done=true (huésped ya hizo check-out)
+  | 'past_unverified';  // end_date <= today pero checkout_done=false
 
 export interface BookingStatusInput {
   start_date?: string | null;
@@ -40,10 +40,11 @@ export const getBookingStatus = (
   const start = b.start_date ?? '';
   const end = b.end_date ?? '';
   if (start && start > today) return 'upcoming';
+  // Si el checkout está marcado como hecho, la reserva está completada
+  // sin importar si end_date aún está en el futuro (salida anticipada).
+  if (b.checkout_done) return 'completed';
   if (start && end && start <= today && today < end) return 'in_progress';
-  if (end && end <= today) {
-    return b.checkin_done && b.checkout_done ? 'completed' : 'past_unverified';
-  }
+  if (end && end <= today) return 'past_unverified';
   return 'past_unverified';
 };
 

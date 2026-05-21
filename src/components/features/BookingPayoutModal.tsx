@@ -62,8 +62,12 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
 
   // ── Financial summary (read-only) ─────────────────────────────────────────
   const bruto   = booking.gross_revenue ?? booking.total_revenue ?? 0;
-  const feesVal = booking.channel_fees ?? 0;
-  const netoVal = booking.net_payout ?? subMoney(bruto, feesVal);
+  // Resolve neto first (use saved value, else bruto minus explicit fees)
+  const netoVal = booking.net_payout != null
+    ? booking.net_payout
+    : subMoney(bruto, booking.channel_fees ?? 0);
+  // Infer fees from bruto-neto difference when channel_fees is not explicitly stored
+  const feesVal = booking.channel_fees ?? subMoney(bruto, netoVal);
   const isFine  = netoVal < 0;
 
   // ── Fine (cancelled booking penalty) ─────────────────────────────────────
@@ -121,6 +125,10 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
       setPayMode('total'); setModeLocked(false);
     } else if (data.length === 1 && data[0].notes === 'Pago total') {
       setPayMode('total'); setModeLocked(false);
+      // Restore saved form state so the user doesn't have to re-select on reopen
+      setTotalAccount(data[0].bank_account_id ?? '');
+      if (data[0].amount != null) setTotalAmount(Number(data[0].amount));
+      if (data[0].payment_date) setTotalDate(data[0].payment_date);
     } else {
       setPayMode('parcial'); setModeLocked(true);
     }

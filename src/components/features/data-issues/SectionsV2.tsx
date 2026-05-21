@@ -258,7 +258,7 @@ export function SectionOrphanIncomes({
         <div className="p-5"><EmptySection message="Todos los ingresos cobrados tienen cuenta asignada." /></div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="min-w-[760px] sm:min-w-full text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
               <tr>
                 <th className="px-3 py-2 text-left">Reserva</th>
@@ -378,7 +378,7 @@ export function SectionInconsistentPayouts({
         <div className="p-5"><EmptySection message="Sin pagos parciales." /></div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="min-w-[760px] sm:min-w-full text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
               <tr>
                 <th className="px-3 py-2 text-left">Reserva</th>
@@ -482,7 +482,7 @@ export function SectionInvalidExpenses({
         <div className="p-5"><EmptySection message="Sin gastos con monto inválido." /></div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="min-w-[760px] sm:min-w-full text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
               <tr>
                 <th className="px-3 py-2 text-left">Fecha</th>
@@ -560,7 +560,7 @@ export function SectionPaidCleaningsNoCleaner({
         <div className="p-5"><EmptySection message="Sin aseos pagados sin aseador." /></div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="min-w-[760px] sm:min-w-full text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
               <tr>
                 <th className="px-3 py-2 text-left">Fecha pago</th>
@@ -648,7 +648,7 @@ export function SectionDoneCleaningsNoDate({
         <div className="p-5"><EmptySection message="Sin aseos realizados sin fecha." /></div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="min-w-[760px] sm:min-w-full text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
               <tr>
                 <th className="px-3 py-2 text-left">Propiedad</th>
@@ -732,7 +732,7 @@ export function SectionInvalidBookingDates({
         <div className="p-5"><EmptySection message="Sin reservas con fechas inválidas." /></div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="min-w-[760px] sm:min-w-full text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
               <tr>
                 <th className="px-3 py-2 text-left">Reserva</th>

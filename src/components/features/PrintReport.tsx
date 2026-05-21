@@ -7,6 +7,7 @@ import type { PropertyRow } from '@/types/database';
 import type { Expense } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { formatDateDisplay, todayISO } from '@/lib/dateUtils';
+import CreditPoolAttributionPanel from './CreditPoolAttributionPanel';
 
 const PERIOD_LABELS: Record<Exclude<Period, 'custom'>, string> = {
   'current-month': 'Este mes',
@@ -337,6 +338,8 @@ export default function PrintReport() {
   const [payout, setPayout]               = useState<PayoutBreakdown | null>(null);
   const [propertyKPIs, setPropertyKPIs]   = useState<PropertyKPIs[]>([]);
   const [propertyNames, setPropertyNames] = useState<string[]>([]);
+  const [propertyMap, setPropertyMap]     = useState<Map<string, string>>(new Map());
+  const [reportPropertyIds, setReportPropertyIds] = useState<string[] | null>(null);
   const [loading, setLoading]             = useState(true);
   const [dateRangeLabel, setDateRangeLabel] = useState('');
   const [periodShortLabel, setPeriodShortLabel] = useState('');
@@ -394,6 +397,8 @@ export default function PrintReport() {
         : allProps;
 
       setPropertyNames(targetProps.map(p => p.name));
+      setPropertyMap(new Map(targetProps.map(p => [p.id, p.name] as const)));
+      setReportPropertyIds(propertyIds && propertyIds.length > 0 ? propertyIds : null);
 
       if (targetProps.length > 1) {
         const perProp = await Promise.all(
@@ -955,6 +960,19 @@ export default function PrintReport() {
                 })}
               </tbody>
             </table>
+          </Section>
+        )}
+
+        {/* ── Atribución de bolsas (informativo) ──────────────────────────── */}
+        {propertyMap.size > 0 && periodFrom && periodTo && (
+          <Section num={S()} title="Atribución de bolsas de créditos">
+            <CreditPoolAttributionPanel
+              propertyMap={propertyMap}
+              from={periodFrom}
+              to={periodTo}
+              variant="print"
+              propertyId={reportPropertyIds && reportPropertyIds.length === 1 ? reportPropertyIds[0] : undefined}
+            />
           </Section>
         )}
 

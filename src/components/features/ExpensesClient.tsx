@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ExpensesList from './ExpensesList';
+import CreditPoolAttributionPanel from './CreditPoolAttributionPanel';
 import DamageExpenseEditModal from './DamageExpenseEditModal';
 import ExpenseDetailModal from './ExpenseDetailModal';
 import GroupExpenseEditModal from './GroupExpenseEditModal';
@@ -551,6 +552,15 @@ export default function ExpensesClient() {
           onEditGroup={handleEditGroup}
           onView={setViewing}
         />
+
+        {/* Atribución informativa de bolsas (no se suma a expenses) */}
+        <div className="mt-4">
+          <CreditPoolAttributionPanel
+            propertyMap={propertyMap}
+            from={filters.dateFrom ?? undefined}
+            to={filters.dateTo ?? undefined}
+          />
+        </div>
       </main>
 
       <ExpensesFormsModals

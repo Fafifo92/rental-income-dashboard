@@ -276,7 +276,7 @@ export default function AseoClient(): JSX.Element {
     <div>
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-slate-800">🧹 Aseo</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-800">🧹 Aseo</h1>
           <p className="text-sm text-slate-500">Personal, saldos adeudados y liquidación semanal.</p>
         </div>
         <button
