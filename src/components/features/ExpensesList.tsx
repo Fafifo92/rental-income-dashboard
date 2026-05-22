@@ -119,8 +119,10 @@ export default function ExpensesList({ expenses, loading = false, bankAccounts =
     });
   }, [groupedExpenses, pagination]);
 
-  const columns = useMemo<ColumnDef<GroupedExpense, unknown>[]>(() => {
-    const cols: ColumnDef<GroupedExpense, unknown>[] = [
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const columns = useMemo<ColumnDef<GroupedExpense, any>[]>(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cols: ColumnDef<GroupedExpense, any>[] = [
       helper.accessor('category', {
         header: 'Categoría',
         cell: info => {

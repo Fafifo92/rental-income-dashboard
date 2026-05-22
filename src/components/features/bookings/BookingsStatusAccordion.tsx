@@ -31,7 +31,8 @@ const DEFAULT_OPEN: Record<DerivedBookingStatus, boolean> = {
 
 interface Props {
   bookings: DisplayBooking[];
-  columns: ColumnDef<DisplayBooking, unknown>[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  columns: ColumnDef<DisplayBooking, any>[];
   loading: boolean;
   onAddBooking: () => void;
 }

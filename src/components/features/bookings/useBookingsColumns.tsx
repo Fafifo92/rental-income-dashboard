@@ -30,7 +30,8 @@ export const BOOKING_COLUMN_ORDER = [
 ] as const;
 
 export function useBookingsColumns({ onView, onEdit, onPayout, onDelete, pendingCleaningIds }: ColumnHandlers) {
-  return useMemo<ColumnDef<DisplayBooking, unknown>[]>(() => [
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return useMemo<ColumnDef<DisplayBooking, any>[]>(() => [
     // ── Col 1: Estado de check-in / check-out / depósito ───────────────────
     helper.display({
       id: 'checkin_status',
