@@ -32,7 +32,7 @@ function SortIcon({ sorted }: { sorted: false | 'asc' | 'desc' }) {
 }
 
 interface DataTableProps<T extends object> {
-  columns: ColumnDef<T, any>[];
+  columns: ColumnDef<T, unknown>[];
   data: T[];
   loading?: boolean;
   showSearch?: boolean;
@@ -101,7 +101,7 @@ export default function DataTable<T extends object>({
     if (initialColumnOrder && initialColumnOrder.length > 0) return initialColumnOrder;
     return columns.map(c => {
       if ('accessorKey' in c && c.accessorKey) return String(c.accessorKey);
-      return (c as any).id ?? '';
+      return (c as { id?: string }).id ?? '';
     }).filter(Boolean);
   });
 

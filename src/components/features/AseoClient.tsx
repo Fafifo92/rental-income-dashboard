@@ -9,7 +9,6 @@ import {
   computeCleanerBalances,
   payoutCleanerConsolidated,
   getLooseCleanerSuppliesTotals,
-  type BookingCleaning,
   type CleaningHistoryRow,
 } from '@/services/cleanings';
 import {

@@ -31,7 +31,6 @@ import type {
   CreditPoolRow,
   CreditPoolConsumptionRow,
   CreditPoolConsumptionRule,
-  BookingRow,
 } from '@/types/database';
 
 // ─── CRUD básico ─────────────────────────────────────────────────────────────

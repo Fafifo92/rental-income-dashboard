@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table';
 import { FileText, Pencil, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
@@ -72,7 +72,12 @@ export default function ExpensesList({ expenses, loading = false, bankAccounts =
   const BASE_PAGE_SIZE = 25;
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: BASE_PAGE_SIZE });
 
-  const toggleGroup = (groupId: string) => {
+  const groupedExpenses = useMemo(
+    () => groupExpenses(expenses, expandedGroups),
+    [expenses, expandedGroups],
+  );
+
+  const toggleGroup = useCallback((groupId: string) => {
     setExpandedGroups(prev => {
       const next = new Set(prev);
       const isOpening = !next.has(groupId);
@@ -112,15 +117,10 @@ export default function ExpensesList({ expenses, loading = false, bankAccounts =
       }
       return next;
     });
-  };
+  }, [groupedExpenses, pagination]);
 
-  const groupedExpenses = useMemo(
-    () => groupExpenses(expenses, expandedGroups),
-    [expenses, expandedGroups],
-  );
-
-  const columns = useMemo<ColumnDef<GroupedExpense, any>[]>(() => {
-    const cols: ColumnDef<GroupedExpense, any>[] = [
+  const columns = useMemo<ColumnDef<GroupedExpense, unknown>[]>(() => {
+    const cols: ColumnDef<GroupedExpense, unknown>[] = [
       helper.accessor('category', {
         header: 'Categoría',
         cell: info => {
@@ -548,7 +548,7 @@ export default function ExpensesList({ expenses, loading = false, bankAccounts =
     }
 
     return cols;
-  }, [accountMap, expandedGroups, propertyMap, onDelete, onDeleteGroup, onEdit, onEditGroup, onView]);
+  }, [accountMap, expandedGroups, propertyMap, onDelete, onDeleteGroup, onEdit, onEditGroup, onView, toggleGroup]);
 
   return (
     <DataTable<GroupedExpense>

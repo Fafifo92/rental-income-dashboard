@@ -33,7 +33,7 @@ const STATUS_OPTS: { value: Status; label: string; color: string }[] = [
 ];
 
 export default function GroupExpenseEditModal({ groupExpense, bankAccounts, propertyMap = new Map(), onClose, onSave, onDelete }: Props) {
-  const children: Expense[] = groupExpense.children ?? [];
+  const children = useMemo(() => groupExpense.children ?? [], [groupExpense.children]);
   const groupTotal = groupExpense.groupTotal ?? groupExpense.amount;
 
   const initialStatus = (groupExpense.status as Status) ?? 'pending';

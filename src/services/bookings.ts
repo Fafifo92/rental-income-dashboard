@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase/client';
 import type { ServiceResult } from './expenses';
-import type { BookingRow } from '@/types/database';
+import type { BookingRow, DepositStatus } from '@/types/database';
 import { datesOverlap, type ParsedBooking, type ConflictEntry, type DuplicateEntry } from './etl';
 import { findOrCreateListing } from './listings';
 import { inferOperationalFlags, isCancelled } from '@/lib/bookingStatus';
@@ -775,7 +775,7 @@ export const updateBookingDeposit = async (
   patch: {
     security_deposit?: number | null;
     deposit_bank_account_id?: string | null;
-    deposit_status?: import('@/types/database').DepositStatus;
+    deposit_status?: DepositStatus;
     deposit_returned_amount?: number | null;
     deposit_return_date?: string | null;
   },

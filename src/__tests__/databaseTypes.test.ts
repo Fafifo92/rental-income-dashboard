@@ -18,8 +18,8 @@ import type {
 } from '@/types/database';
 
 // Utility: fuerza que un tipo sea asignable (falla en compilación si no)
-type Expect<T extends true> = T;
-type IsAssignable<A, B> = A extends B ? true : false;
+type _Expect<T extends true> = T;
+type _IsAssignable<A, B> = A extends B ? true : false;
 
 describe('database types — estructura correcta', () => {
   it('AuditLogRow tiene los campos obligatorios', () => {

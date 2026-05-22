@@ -127,7 +127,6 @@ function usePendingCount(refreshKey: number): number {
       setCount(cleanings + invProblems + openRecon + recurringN + sharedN);
     });
     return () => { mounted = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
   return count;
 }

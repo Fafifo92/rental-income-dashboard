@@ -26,7 +26,7 @@ export default function PeriodSelector({ value, onChange, customRange, onCustomR
   // Sync local state when parent resets
   useEffect(() => {
     if (customRange) { setFrom(customRange.from); setTo(customRange.to); }
-  }, [customRange?.from, customRange?.to]);
+  }, [customRange]);
 
   const applyRange = (f: string, t: string) => {
     if (f && t && f <= t && onCustomRangeChange) {

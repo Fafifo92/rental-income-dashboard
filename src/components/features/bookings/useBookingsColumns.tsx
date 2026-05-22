@@ -30,7 +30,7 @@ export const BOOKING_COLUMN_ORDER = [
 ] as const;
 
 export function useBookingsColumns({ onView, onEdit, onPayout, onDelete, pendingCleaningIds }: ColumnHandlers) {
-  return useMemo<ColumnDef<DisplayBooking, any>[]>(() => [
+  return useMemo<ColumnDef<DisplayBooking, unknown>[]>(() => [
     // ── Col 1: Estado de check-in / check-out / depósito ───────────────────
     helper.display({
       id: 'checkin_status',

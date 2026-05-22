@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/lib/useAuth';
 import { getProperty, updateProperty } from '@/services/properties';
@@ -26,7 +26,7 @@ export default function PropertyDetailClient({ propertyId }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     const [propRes, recRes] = await Promise.all([
       getProperty(propertyId),
@@ -36,11 +36,11 @@ export default function PropertyDetailClient({ propertyId }: Props) {
     else setProperty(propRes.data);
     if (!recRes.error) setRecurring(recRes.data ?? []);
     setLoading(false);
-  };
+  }, [propertyId]);
 
   useEffect(() => {
     if (authStatus === 'authed') loadAll();
-  }, [authStatus, propertyId]);
+  }, [authStatus, propertyId, loadAll]);
 
   if (authStatus === 'checking' || loading) {
     return <div className="h-64 bg-slate-100 rounded-2xl animate-pulse" />;

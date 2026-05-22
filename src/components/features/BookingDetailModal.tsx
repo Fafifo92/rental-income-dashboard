@@ -58,6 +58,7 @@ interface BookingLite {
   checkout_done?: boolean;
   inventory_checked?: boolean;
   operational_notes?: string | null;
+  cancelled_at?: string | null;
 }
 
 interface Props {
@@ -99,12 +100,13 @@ export default function BookingDetailModal({
   const propertyId = booking.property_id ?? resolvePropertyId?.(booking.listing_id) ?? null;
   const property = propertyId ? properties.find(p => p.id === propertyId) : null;
 
+  const cancelledAt = booking.cancelled_at;
   const bookingStarted = useMemo(() => hasBookingStarted({
     start_date: booking.start_date,
     end_date: booking.end_date,
-    cancelled_at: (booking as any).cancelled_at,
+    cancelled_at: cancelledAt,
     status: booking.status,
-  }), [booking.start_date, booking.end_date, (booking as any).cancelled_at, booking.status]);
+  }), [booking.start_date, booking.end_date, cancelledAt, booking.status]);
 
   const isCancelledBooking = isBookingCancelled({ status: booking.status });
   const damageDisabledReason = !propertyId
@@ -340,7 +342,7 @@ export default function BookingDetailModal({
         await load();
       }
     }
-  }, [booking.id, booking.end_date, opFlags, cleanings, load]);
+  }, [booking.id, booking.end_date, opFlags, cleanings, load, isCancelledBooking]);
 
   const addCleaning = useCallback(async (payload: {
     cleaner_id: string; fee: number; status: 'pending' | 'done' | 'paid';

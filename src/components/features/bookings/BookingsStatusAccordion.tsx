@@ -31,7 +31,7 @@ const DEFAULT_OPEN: Record<DerivedBookingStatus, boolean> = {
 
 interface Props {
   bookings: DisplayBooking[];
-  columns: ColumnDef<DisplayBooking, any>[];
+  columns: ColumnDef<DisplayBooking, unknown>[];
   loading: boolean;
   onAddBooking: () => void;
 }

@@ -46,13 +46,6 @@ interface Props {
   onEditClose?: () => void;
 }
 
-const PROPERTY_SUBS = new Set(['utilities', 'administration', 'maintenance', 'stock']);
-/** Legacy category strings used before subcategory was introduced. */
-const PROPERTY_CATS = new Set([
-  'servicios públicos', 'administración', 'mantenimiento', 'stock / inventario', 'stock',
-  'servicios publicos', 'insumos', 'otros gastos',
-]);
-
 /**
  * Pila de modales de creación de gastos: chooser + 5 formularios dedicados.
  * También gestiona la edición de gastos especializados mediante `editingExpense`.

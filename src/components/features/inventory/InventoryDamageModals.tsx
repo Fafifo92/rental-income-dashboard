@@ -712,7 +712,7 @@ export function RecoverDamageModal({
     listBankAccounts().then(res => {
       const list = (res.data ?? []).filter(a => a.is_active);
       setAccounts(list);
-      if (list.length > 0 && !bankId) setBankId(list[0].id);
+      if (list.length > 0) setBankId(prev => prev || list[0].id);
     });
   }, []);
 

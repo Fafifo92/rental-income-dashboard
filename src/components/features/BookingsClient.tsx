@@ -81,7 +81,7 @@ export default function BookingsClient() {
     return demo;
   }, []);
 
-  const { bookings, setBookings, loading, isDemo, reload } = useBookingsList({
+  const { bookings, loading, isDemo, reload } = useBookingsList({
     filters, propertyIds, demoFallback,
   });
 
