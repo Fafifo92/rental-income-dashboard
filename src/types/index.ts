@@ -64,8 +64,18 @@ export interface GroupedExpense extends Expense {
   groupSize?: number;
   /** Individual expenses that belong to this group (only on group headers). */
   children?: Expense[];
-  /** Points back to the parent expense_group_id (only on child rows). */
+  /** Points back to the parent group key (only on child rows). */
   parentGroupId?: string;
+  /** Unified group key — `expense_group_id` or `sb:<shared_bill_id>`.
+   *  Used for expand/collapse toggle independently of the source of grouping. */
+  _groupKey?: string;
+  /** True when this group was derived from a shared_bill (vendor payment)
+   *  instead of an expense_group_id. */
+  _isSharedBillGroup?: boolean;
+  /** True when this group was derived from matching vendor_id + year-month
+   *  (tier-3 virtual grouping for expenses without expense_group_id or shared_bill_id,
+   *  or with different shared_bill_ids for the same vendor/month). */
+  _isVirtualVendorGroup?: boolean;
 }
 
 export interface FinancialMetrics {

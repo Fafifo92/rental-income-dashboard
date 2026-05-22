@@ -1,4 +1,9 @@
--- Cron diario para invocar la Edge Function auto-checkin.
+-- Cron horario para invocar la Edge Function auto-checkin.
+--
+-- La función corre CADA HORA y procesa solo los owners cuya hora local
+-- actual sea las 15:00 (3 PM). La timezone de cada owner se lee de
+-- user_notification_settings.timezone, por lo que el horario se respeta
+-- automáticamente para cualquier timezone configurada en la cuenta.
 --
 -- REQUISITOS:
 --   1) Habilitar las extensiones pg_cron y pg_net en Supabase
@@ -10,8 +15,8 @@
 -- Ejecutar este SQL en: Supabase Studio → SQL Editor.
 
 select cron.schedule(
-  'auto-checkin-nightly',     -- nombre del job
-  '5 5 * * *',                -- todos los días a las 05:05 UTC (00:05 hora COL)
+  'auto-checkin-hourly',      -- nombre del job
+  '0 * * * *',                -- cada hora en punto (UTC)
   $$
   select net.http_post(
     url     := 'https://<PROJECT_REF>.supabase.co/functions/v1/auto-checkin',
@@ -27,11 +32,8 @@ select cron.schedule(
 -- Para verificar:
 --   select * from cron.job;
 --
--- Para cambiar la hora:
---   select cron.alter_job(
---     (select jobid from cron.job where jobname = 'auto-checkin-nightly'),
---     schedule => '0 6 * * *'
---   );
---
--- Para eliminarlo:
+-- Si ya existía el job 'auto-checkin-nightly', eliminarlo primero:
 --   select cron.unschedule('auto-checkin-nightly');
+--
+-- Para eliminar este job:
+--   select cron.unschedule('auto-checkin-hourly');

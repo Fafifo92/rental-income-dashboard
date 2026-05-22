@@ -69,13 +69,50 @@ interface Props {
 export default function ExpensesList({ expenses, loading = false, bankAccounts = [], propertyMap = new Map(), onDelete, onDeleteGroup, onEdit, onEditGroup, onView }: Props) {
   const accountMap = useMemo(() => new Map(bankAccounts.map(a => [a.id, a])), [bankAccounts]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const BASE_PAGE_SIZE = 25;
+  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: BASE_PAGE_SIZE });
 
-  const toggleGroup = (groupId: string) =>
+  const toggleGroup = (groupId: string) => {
     setExpandedGroups(prev => {
       const next = new Set(prev);
-      if (next.has(groupId)) next.delete(groupId); else next.add(groupId);
+      const isOpening = !next.has(groupId);
+      if (isOpening) {
+        next.add(groupId);
+        // Find the group header in the current flat list (before expansion).
+        // If it sits near the end of the current page, enlarge the page so
+        // all its children stay on the same page without the user needing to
+        // click "next".
+        const header = groupedExpenses.find(
+          e => (e._groupKey ?? e.expense_group_id) === groupId,
+        );
+        const childCount = header?.children?.length ?? 0;
+        if (childCount > 0) {
+          const headerIndex = groupedExpenses.findIndex(
+            e => (e._groupKey ?? e.expense_group_id) === groupId,
+          );
+          if (headerIndex >= 0) {
+            const { pageIndex: pi, pageSize: ps } = pagination;
+            const posOnPage = headerIndex - pi * ps;
+            const slotsAfterHeader = ps - posOnPage - 1;
+            if (childCount > slotsAfterHeader) {
+              // Bump page size so all children fit on the current page.
+              const needed = ps + (childCount - slotsAfterHeader);
+              // Round up to next PAGE_SIZE tier or just use exact value.
+              setPagination(p => ({ ...p, pageSize: needed }));
+            }
+          }
+        }
+      } else {
+        next.delete(groupId);
+        // Snap back to base page size if no groups remain expanded
+        // and the current size was inflated.
+        if (next.size === 0) {
+          setPagination(p => ({ ...p, pageSize: BASE_PAGE_SIZE }));
+        }
+      }
       return next;
     });
+  };
 
   const groupedExpenses = useMemo(
     () => groupExpenses(expenses, expandedGroups),
@@ -135,9 +172,11 @@ export default function ExpensesList({ expenses, loading = false, bankAccounts =
 
           // ── Group header row ────────────────────────────────────────────────
           if (row.isGroup) {
-            const gid = row.expense_group_id!;
+            const gid = row._groupKey ?? row.expense_group_id!;
             const isExpanded = expandedGroups.has(gid);
             const isCleaningGroup = isCleaning(row) || (row.children ?? []).some(c => isCleaning(c));
+            const isSharedBillGroup = row._isSharedBillGroup === true;
+            const isVirtualVendorGroup = row._isVirtualVendorGroup === true;
 
             if (isCleaningGroup) {
               const bookingCount = Math.max(
@@ -183,6 +222,22 @@ export default function ExpensesList({ expenses, loading = false, bankAccounts =
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-100 text-violet-700 border border-violet-200 flex-shrink-0">
                   {row.groupSize} propiedad{row.groupSize !== 1 ? 'es' : ''}
                 </span>
+                {isSharedBillGroup && (
+                  <span
+                    className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 flex-shrink-0"
+                    title="Pago a proveedor distribuido entre propiedades (registrado vía /vendors)"
+                  >
+                    Proveedor
+                  </span>
+                )}
+                {isVirtualVendorGroup && (
+                  <span
+                    className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 flex-shrink-0"
+                    title="Gastos del mismo proveedor en el mismo mes, agrupados automáticamente"
+                  >
+                    Mismo proveedor
+                  </span>
+                )}
               </div>
             );
           }
@@ -502,7 +557,9 @@ export default function ExpensesList({ expenses, loading = false, bankAccounts =
       loading={loading}
       showSearch
       searchPlaceholder="Buscar por categoría, tipo o descripción…"
-      defaultPageSize={25}
+      defaultPageSize={BASE_PAGE_SIZE}
+      paginationState={pagination}
+      onPaginationChange={setPagination}
       skeletonRows={5}
       emptyIcon=""
       emptyTitle="Sin gastos registrados"

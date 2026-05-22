@@ -31,9 +31,15 @@ export interface DisplayBooking {
   /** Depósito de seguridad cobrado al huésped (si aplica). */
   security_deposit?: number | null;
   deposit_bank_account_id?: string | null;
-  deposit_status?: 'none' | 'received' | 'partial_return' | 'returned';
+  deposit_status?: 'none' | 'received' | 'partial_return' | 'returned' | 'applied_to_damage' | 'mixed';
   deposit_returned_amount?: number | null;
   deposit_return_date?: string | null;
+  /** Cuánto del depósito se aplicó a daños (derivado de booking_deposit_applications). */
+  deposit_applied_amount?: number;
+  /** Cuánto del depósito se convirtió en ingreso (excedente). */
+  deposit_surplus_amount?: number;
+  /** Saldo del depósito aún retenido al huésped = security_deposit − returned − applied − surplus. */
+  deposit_available?: number;
   /** Bruto base ± ajustes: +ingresos adicionales −descuentos. */
   adjusted_gross?: number;
 }

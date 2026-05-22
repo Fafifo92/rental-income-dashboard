@@ -16,11 +16,13 @@ import {
   type UnassignedMoney,
   type BankTransaction,
 } from '@/services/bankAccounts';
+import { getDepositsSummary, type DepositsGlobalSummary } from '@/services/deposits';
 import type { BankAccountRow } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import MoneyInput from '@/components/MoneyInput';
 import { toast } from '@/lib/toast';
+import DepositLedgerCard from '@/components/features/deposits/DepositLedgerCard';
 const BANKS = ['Bancolombia', 'Caja Social', 'Davivienda', 'BBVA', 'Scotiabank Colpatria', 'Banco de Bogotá', 'Nequi', 'Daviplata', 'Otro'];
 
 type FormState = {
@@ -52,6 +54,7 @@ export default function BankAccountsClient() {
   const authStatus = useAuth(true);
   const [balances, setBalances] = useState<BankAccountBalance[]>([]);
   const [unassigned, setUnassigned] = useState<UnassignedMoney | null>(null);
+  const [depositsSummary, setDepositsSummary] = useState<DepositsGlobalSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<BankAccountRow | null>(null);
@@ -64,12 +67,14 @@ export default function BankAccountsClient() {
   const load = async () => {
     setLoading(true);
     await ensureCashAccount();
-    const [res, unassignedRes] = await Promise.all([
+    const [res, unassignedRes, depRes] = await Promise.all([
       computeBalances(),
       listUnassignedMoney(),
+      getDepositsSummary(),
     ]);
     if (!res.error) setBalances(res.data ?? []);
     if (!unassignedRes.error) setUnassigned(unassignedRes.data);
+    if (!depRes.error) setDepositsSummary(depRes.data);
     setLoading(false);
   };
 
@@ -268,7 +273,12 @@ export default function BankAccountsClient() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {balances.map(({ account, inflows, outflows, currentBalance }, i) => (
+          <DepositLedgerCard
+            accountsMap={Object.fromEntries(balances.map(b => [b.account.id, b.account.name]))}
+          />
+          {balances.map(({ account, inflows, outflows, currentBalance }, i) => {
+            const heldDeposits = depositsSummary?.held_by_account?.[account.id] ?? 0;
+            return (
             <motion.div
               key={account.id}
               initial={{ opacity: 0, y: 12 }}
@@ -325,6 +335,14 @@ export default function BankAccountsClient() {
                     <span className="text-emerald-600">+ {formatCurrency(inflows)}</span>
                     <span className="text-red-600">− {formatCurrency(outflows)}</span>
                   </div>
+                  {heldDeposits > 0 && (
+                    <div className="mt-2 flex items-center gap-1.5 text-[11px] bg-amber-50 border border-amber-200 text-amber-800 rounded px-2 py-1">
+                      <span>🪙</span>
+                      <span>
+                        De los cuales <strong>{formatCurrency(heldDeposits)}</strong> son depósitos de huéspedes (no disponibles para gastos).
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-4 flex gap-2">
@@ -365,7 +383,8 @@ export default function BankAccountsClient() {
                 </div>
               </div>
             </motion.div>
-          ))}
+            );
+          })}
         </div>
       )}
 

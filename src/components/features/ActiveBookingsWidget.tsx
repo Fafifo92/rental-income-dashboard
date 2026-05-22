@@ -106,7 +106,7 @@ export default function ActiveBookingsWidget({ propertyIds }: Props) {
       checkout_done: b.checkout_done,
       status: b.status,
     });
-    return derived === 'in_progress';
+    return derived === 'in_progress' || derived === 'checkin_today' || derived === 'checkout_today';
   }), [bookings]);
 
   if (loading) {

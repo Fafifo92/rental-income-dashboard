@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import { listBookings } from '@/services/bookings';
+import { formatDateDisplay } from '@/lib/dateUtils';
 import { listListings } from '@/services/listings';
 import type { BookingRow, ListingRow, PropertyRow } from '@/types/database';
 import DamageReportModal from './DamageReportModal';
@@ -173,7 +174,7 @@ export default function DamageFromExpensesFlow({ properties, onClose, onSaved }:
                           <span className="text-slate-700 truncate">{b.guest_name ?? 'Huésped'}</span>
                         </div>
                         <div className="text-[10px] text-slate-500 mt-0.5 truncate">
-                          {propName} · {b.start_date} → {b.end_date}
+                          {propName} · {formatDateDisplay(b.start_date)} → {formatDateDisplay(b.end_date)}
                         </div>
                       </div>
                       {isSelected && <span className="text-rose-600 text-sm flex-shrink-0">✓</span>}

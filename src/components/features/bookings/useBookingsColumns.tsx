@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table';
-import { CalendarCheck, Pencil, HandCoins, Trash2, LogIn, LogOut } from 'lucide-react';
+import { CalendarCheck, Pencil, HandCoins, Trash2, LogIn, LogOut, Coins } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { formatDateDisplay } from '@/lib/dateUtils';
 import { getBookingStatus } from '@/lib/bookingStatus';
+import RegistryStatusIcon, { type RegistryTone } from './RegistryStatusIcon';
 import type { DisplayBooking } from './types';
 
 const helper = createColumnHelper<DisplayBooking>();
@@ -30,7 +31,7 @@ export const BOOKING_COLUMN_ORDER = [
 
 export function useBookingsColumns({ onView, onEdit, onPayout, onDelete, pendingCleaningIds }: ColumnHandlers) {
   return useMemo<ColumnDef<DisplayBooking, any>[]>(() => [
-    // ── Col 1: Estado de check-in / check-out ──────────────────────────────
+    // ── Col 1: Estado de check-in / check-out / depósito ───────────────────
     helper.display({
       id: 'checkin_status',
       header: 'Registro',
@@ -47,18 +48,85 @@ export function useBookingsColumns({ onView, onEdit, onPayout, onDelete, pending
         if (derived === 'cancelled') {
           return <span className="text-slate-300 text-xs select-none">—</span>;
         }
+
+        // ── Depósito: derivar tono + tooltip a partir de campos del row.
+        const sec = Number(b.security_deposit ?? 0);
+        const applied = Number(b.deposit_applied_amount ?? 0);
+        const returned = Number(b.deposit_returned_amount ?? 0);
+        const available = Number(b.deposit_available ?? 0);
+        let depTone: RegistryTone = 'gray';
+        let depTooltip: React.ReactNode = 'Sin depósito de seguridad';
+        if (sec > 0) {
+          if (applied > 0) {
+            // Rojo: se usó (en parte o todo) para daños.
+            depTone = 'rose';
+            depTooltip = (
+              <>
+                <div className="font-semibold mb-0.5">Depósito usado para daños</div>
+                <div>Aplicado: {formatCurrency(applied)}</div>
+                {returned > 0 && <div>Devuelto al huésped: {formatCurrency(returned)}</div>}
+                {available > 0 && <div>Retenido aún: {formatCurrency(available)}</div>}
+              </>
+            );
+          } else if (available <= 0) {
+            // Verde: cerrado, todo devuelto (sin daños).
+            depTone = 'emerald';
+            depTooltip = (
+              <>
+                <div className="font-semibold mb-0.5">Depósito devuelto</div>
+                <div>{formatCurrency(returned || sec)} devueltos al huésped</div>
+                {b.deposit_return_date && (
+                  <div className="text-slate-300">el {formatDateDisplay(b.deposit_return_date)}</div>
+                )}
+              </>
+            );
+          } else {
+            // Amarillo: recibido, pendiente de devolución.
+            depTone = 'amber';
+            depTooltip = (
+              <>
+                <div className="font-semibold mb-0.5">Depósito retenido</div>
+                <div>{formatCurrency(available)} pendiente de devolución</div>
+                {returned > 0 && <div className="text-slate-300">(ya devuelto: {formatCurrency(returned)})</div>}
+              </>
+            );
+          }
+        }
+
         return (
           <div className="flex items-center justify-center gap-1.5">
-            <span title={`Check-in: ${b.checkin_done ? 'completado' : 'pendiente'}`}>
-              <LogIn
-                className={`w-4 h-4 transition-colors ${b.checkin_done ? 'text-emerald-500' : 'text-slate-200'}`}
-              />
-            </span>
-            <span title={`Check-out: ${b.checkout_done ? 'completado' : 'pendiente'}`}>
-              <LogOut
-                className={`w-4 h-4 transition-colors ${b.checkout_done ? 'text-emerald-500' : 'text-slate-200'}`}
-              />
-            </span>
+            <RegistryStatusIcon
+              Icon={LogIn}
+              tone={b.checkin_done ? 'emerald' : 'gray'}
+              label={`Check-in: ${b.checkin_done ? 'completado' : 'pendiente'}`}
+              tooltip={
+                <>
+                  <div className="font-semibold mb-0.5">
+                    Check-in {b.checkin_done ? 'completado' : 'pendiente'}
+                  </div>
+                  <div className="text-slate-300">{formatDateDisplay(b.start_date)}</div>
+                </>
+              }
+            />
+            <RegistryStatusIcon
+              Icon={LogOut}
+              tone={b.checkout_done ? 'emerald' : 'gray'}
+              label={`Check-out: ${b.checkout_done ? 'completado' : 'pendiente'}`}
+              tooltip={
+                <>
+                  <div className="font-semibold mb-0.5">
+                    Check-out {b.checkout_done ? 'completado' : 'pendiente'}
+                  </div>
+                  <div className="text-slate-300">{formatDateDisplay(b.end_date)}</div>
+                </>
+              }
+            />
+            <RegistryStatusIcon
+              Icon={Coins}
+              tone={depTone}
+              label="Estado del depósito de seguridad"
+              tooltip={depTooltip}
+            />
           </div>
         );
       },

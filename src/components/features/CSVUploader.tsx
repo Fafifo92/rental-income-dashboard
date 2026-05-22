@@ -9,6 +9,7 @@ import ListingMapper from './ListingMapper';
 import ConflictResolver from './ConflictResolver';
 import DuplicateResolver from './DuplicateResolver';
 import { formatCurrency } from '@/lib/utils';
+import { formatDateDisplay } from '@/lib/dateUtils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 
 type Step = 'idle' | 'dragging' | 'parsing' | 'preview' | 'mapping' | 'checking_dupes' | 'dupes' | 'checking' | 'conflicts' | 'importing' | 'complete' | 'error';
@@ -406,8 +407,8 @@ export default function CSVUploader({ onClose, onImport }: Props) {
                                 <span className={`px-2 py-0.5 rounded-full font-medium ${statusColor(b.status)}`}>{b.status || '—'}</span>
                               </td>
                               <td className="px-4 py-2 whitespace-nowrap text-slate-700">{b.guest_name || '—'}</td>
-                              <td className="px-4 py-2 text-slate-500">{b.start_date}</td>
-                              <td className="px-4 py-2 text-slate-500">{b.end_date}</td>
+                              <td className="px-4 py-2 text-slate-500">{formatDateDisplay(b.start_date)}</td>
+                              <td className="px-4 py-2 text-slate-500">{formatDateDisplay(b.end_date)}</td>
                               <td className="px-4 py-2 text-center font-medium">{b.num_nights}</td>
                               <td className="px-4 py-2 text-slate-600 max-w-[140px] truncate">{b.listing_name}</td>
                               <td className="px-4 py-2 text-right font-semibold text-slate-800">{formatCurrency(b.revenue)}</td>

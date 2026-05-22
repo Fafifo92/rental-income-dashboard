@@ -451,8 +451,8 @@ export default function DashboardClient() {
                             }`}>{b.status}</span>
                           </td>
                           <td className="px-4 py-3 font-medium text-slate-800">{b.guest_name}</td>
-                          <td className="px-4 py-3 text-slate-500">{b.start_date}</td>
-                          <td className="px-4 py-3 text-slate-500">{b.end_date}</td>
+                          <td className="px-4 py-3 text-slate-500">{formatDateDisplay(b.start_date)}</td>
+                          <td className="px-4 py-3 text-slate-500">{formatDateDisplay(b.end_date)}</td>
                           <td className="px-4 py-3 text-center">{b.num_nights}</td>
                           <td className="px-4 py-3 text-slate-600 max-w-[160px] truncate">{b.listing_name}</td>
                           <td className="px-4 py-3 text-right font-semibold text-slate-800">{formatCurrency(b.revenue)}</td>

@@ -22,8 +22,6 @@ export interface BookingFilters {
   status?: string;
   dateFrom?: string;
   dateTo?: string;
-  /** Column the dateFrom/dateTo range applies to. Defaults to 'checkin' (start_date). */
-  dateField?: 'checkin' | 'checkout';
   search?: string;
   channel?: string;
   /** 1-indexed page number for server-side pagination. Requires `pageSize`. */
@@ -172,6 +170,7 @@ export type BookingWithListingRow = BookingRow & {
     properties?: { id: string; name: string } | null;
   } | null;
   booking_adjustments?: Array<{ kind: string; amount: number }> | null;
+  booking_deposit_applications?: Array<{ kind: string; amount: number }> | null;
 };
 
 export const getBooking = async (
@@ -210,7 +209,7 @@ export const listBookings = async (
   // Join listing + property so each row carries external_name, property_id and property name inline.
   let query = supabase
     .from('bookings')
-    .select('*, listings(id, external_name, property_id, properties(id, name)), booking_adjustments(kind, amount)')
+    .select('*, listings(id, external_name, property_id, properties(id, name)), booking_adjustments(kind, amount), booking_deposit_applications(kind, amount)')
     .order('start_date', { ascending: false });
 
   if (allowedListingIds) query = query.in('listing_id', allowedListingIds);
@@ -218,9 +217,8 @@ export const listBookings = async (
   if (filters?.status) query = query.eq('status', filters.status);
   if (filters?.channel) query = query.eq('channel', filters.channel);
 
-  const dateCol = filters?.dateField === 'checkout' ? 'end_date' : 'start_date';
-  if (filters?.dateFrom) query = query.gte(dateCol, filters.dateFrom);
-  if (filters?.dateTo) query = query.lte(dateCol, filters.dateTo);
+  if (filters?.dateFrom) query = query.gte('start_date', filters.dateFrom);
+  if (filters?.dateTo) query = query.lte('start_date', filters.dateTo);
 
   // Search: server-side ilike (avoids fetching all rows for JS filter)
   if (filters?.search) {
@@ -777,7 +775,7 @@ export const updateBookingDeposit = async (
   patch: {
     security_deposit?: number | null;
     deposit_bank_account_id?: string | null;
-    deposit_status?: 'none' | 'received' | 'partial_return' | 'returned';
+    deposit_status?: import('@/types/database').DepositStatus;
     deposit_returned_amount?: number | null;
     deposit_return_date?: string | null;
   },

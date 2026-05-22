@@ -9,6 +9,8 @@ import type { DisplayBooking } from './types';
 import { BOOKING_COLUMN_ORDER } from './useBookingsColumns';
 
 const INITIAL_ORDER: DerivedBookingStatus[] = [
+  'checkout_today',
+  'checkin_today',
   'in_progress',
   'upcoming',
   'past_unverified',
@@ -18,6 +20,8 @@ const INITIAL_ORDER: DerivedBookingStatus[] = [
 
 // All sections start collapsed
 const DEFAULT_OPEN: Record<DerivedBookingStatus, boolean> = {
+  checkout_today: false,
+  checkin_today: false,
   in_progress: false,
   upcoming: false,
   past_unverified: false,

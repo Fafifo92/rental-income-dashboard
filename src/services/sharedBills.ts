@@ -56,12 +56,14 @@ export const createSharedBill = async (args: {
     .eq('id', args.vendorId)
     .single();
   const kindToSub: Record<string, string | null> = {
-    utility:     'utilities',
-    admin:       'administration',
-    insurance:   'administration',
-    maintenance: 'maintenance',
-    other:       null,
-    cleaner:     'cleaning',
+    utility:          'utilities',
+    admin:            'administration',
+    business_service: 'administration',
+    tax:              'administration',
+    insurance:        'administration',
+    maintenance:      'maintenance',
+    other:            null,
+    cleaner:          'cleaning',
   };
   const subcategoryFromVendor = vendor?.kind ? (kindToSub[vendor.kind] ?? null) : null;
 
@@ -72,12 +74,14 @@ export const createSharedBill = async (args: {
     ? `${_monthNames[Number(_ymParts[1]) - 1]} ${_ymParts[0].slice(2)}`
     : args.yearMonth;
   const kindLabel: Record<string, string> = {
-    utility:     'Servicios públicos',
-    admin:       'Administración',
-    insurance:   'Seguro',
-    maintenance: 'Mantenimiento',
-    cleaner:     'Aseo',
-    other:       'Otros',
+    utility:          'Servicios públicos',
+    admin:            'Administración',
+    business_service: 'Plataforma / SaaS',
+    tax:              'Predial / Impuestos',
+    insurance:        'Seguro',
+    maintenance:      'Mantenimiento',
+    cleaner:          'Aseo',
+    other:            'Otros',
   };
   const vendorKindLabel = vendor?.kind ? (kindLabel[vendor.kind] ?? vendor.kind) : null;
   const descParts = ['Pago proveedor', vendorKindLabel, vendor?.name, _ymLabel].filter(Boolean).join(' · ');

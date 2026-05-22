@@ -35,17 +35,6 @@ export default function BookingsFilterBar({
           </button>
         </div>
       </div>
-      <div className="min-w-[130px]">
-        <label className="block text-xs font-medium text-slate-500 mb-1.5">Tipo de fecha</label>
-        <select
-          value={filters.dateField ?? 'checkin'}
-          onChange={e => setFilters(prev => ({ ...prev, dateField: e.target.value as 'checkin' | 'checkout' }))}
-          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-        >
-          <option value="checkin">Check-in</option>
-          <option value="checkout">Check-out</option>
-        </select>
-      </div>
       <div className="min-w-[140px]">
         <label className="block text-xs font-medium text-slate-500 mb-1.5">Desde</label>
         <input type="date" value={filters.dateFrom ?? ''}

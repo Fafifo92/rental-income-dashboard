@@ -18,11 +18,13 @@ import { todayISO } from '@/lib/dateUtils';
 type Format = 'csv' | 'excel' | 'pdf';
 
 const STATUS_OPTIONS: { value: DerivedBookingStatus; label: string; emoji: string }[] = [
-  { value: 'upcoming',        label: 'Próximas',       emoji: '🔵' },
-  { value: 'in_progress',     label: 'En curso',       emoji: '🟣' },
-  { value: 'completed',       label: 'Completadas',    emoji: '🟢' },
-  { value: 'past_unverified', label: 'Sin verificar',  emoji: '🟡' },
-  { value: 'cancelled',       label: 'Canceladas',     emoji: '🔴' },
+  { value: 'upcoming',        label: 'Próximas',        emoji: '🔵' },
+  { value: 'checkin_today',   label: 'Check-in hoy',    emoji: '🔷' },
+  { value: 'checkout_today',  label: 'Check-out hoy',   emoji: '🟠' },
+  { value: 'in_progress',     label: 'En curso',        emoji: '🟣' },
+  { value: 'completed',       label: 'Completadas',     emoji: '🟢' },
+  { value: 'past_unverified', label: 'Sin verificar',   emoji: '🟡' },
+  { value: 'cancelled',       label: 'Canceladas',      emoji: '🔴' },
 ];
 
 interface Props {

@@ -15,6 +15,21 @@ export const fromRow = (row: BookingWithListingRow): DisplayBooking => {
     return s;
   }, base);
 
+  // Derivar saldos del depósito desde booking_deposit_applications.
+  const depApps = row.booking_deposit_applications ?? [];
+  let depReturned = 0, depApplied = 0, depSurplus = 0;
+  for (const ap of depApps) {
+    const v = Number(ap.amount) || 0;
+    if (ap.kind === 'returned_to_guest')      depReturned += v;
+    else if (ap.kind === 'applied_to_damage') depApplied  += v;
+    else if (ap.kind === 'surplus_to_income') depSurplus  += v;
+  }
+  const secDep = row.security_deposit !== null && row.security_deposit !== undefined
+    ? Number(row.security_deposit) : null;
+  const depAvailable = secDep != null
+    ? Math.max(0, secDep - depReturned - depApplied - depSurplus)
+    : 0;
+
   return {
   id: row.id,
   confirmation_code: row.confirmation_code,
@@ -46,6 +61,9 @@ export const fromRow = (row: BookingWithListingRow): DisplayBooking => {
   deposit_status: (row.deposit_status ?? 'none') as DisplayBooking['deposit_status'],
   deposit_returned_amount: row.deposit_returned_amount !== null && row.deposit_returned_amount !== undefined ? Number(row.deposit_returned_amount) : null,
   deposit_return_date: row.deposit_return_date ?? null,
+  deposit_applied_amount: depApplied,
+  deposit_surplus_amount: depSurplus,
+  deposit_available: depAvailable,
   adjusted_gross,
   };
 };

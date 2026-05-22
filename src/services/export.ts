@@ -910,7 +910,11 @@ export function exportExpensesToCsv(
     e.description ?? '',
     e.vendor ?? '',
     e._isGroupHeader
-      ? `(${e._groupSize} propiedades)`
+      ? (e._isSharedBillGroup
+          ? `(${e._groupSize} props · pago proveedor)`
+          : e._isVirtualVendorGroup
+            ? `(${e._groupSize} props · mismo proveedor)`
+            : `(${e._groupSize} propiedades)`)
       : (e.property_id ? (propMap.get(e.property_id) ?? '') : 'General'),
     e.amount,
     EXPENSE_STATUS_LABEL[e.status] ?? e.status,
@@ -932,7 +936,11 @@ export function exportExpensesToExcel(
     e.description ?? '',
     e.vendor ?? '',
     e._isGroupHeader
-      ? `(${e._groupSize} propiedades)`
+      ? (e._isSharedBillGroup
+          ? `(${e._groupSize} props · pago proveedor)`
+          : e._isVirtualVendorGroup
+            ? `(${e._groupSize} props · mismo proveedor)`
+            : `(${e._groupSize} propiedades)`)
       : (e.property_id ? (propMap.get(e.property_id) ?? '') : 'General'),
     e.amount,
     EXPENSE_STATUS_LABEL[e.status] ?? e.status,
@@ -959,23 +967,18 @@ export function exportExpensesToPdf(
   propMap: Map<string, string>,
   title: string,
 ) {
-  // Pre-compute group map for property sub-rows in PDF
-  const groupMap = new Map<string, Expense[]>();
-  for (const e of rows) {
-    if (e.expense_group_id) {
-      const b = groupMap.get(e.expense_group_id) ?? [];
-      b.push(e);
-      groupMap.set(e.expense_group_id, b);
-    }
-  }
-
   const flat = flattenExpensesForExport(rows);
   const total = flat.reduce((s, e) => s + e.amount, 0);
   const pendingTotal = flat.filter(e => e.status === 'pending').reduce((s, e) => s + e.amount, 0);
 
   const tableRows = flat.map(e => {
+    const groupTypeLabel = e._isSharedBillGroup
+      ? 'pago a proveedor'
+      : e._isVirtualVendorGroup
+        ? 'mismo proveedor / mes'
+        : 'propiedades';
     const propCell = e._isGroupHeader
-      ? `<span style="color:#7c3aed;font-size:10px">⇄ ${e._groupSize} propiedades</span>`
+      ? `<span style="color:#7c3aed;font-size:10px">⇄ ${e._groupSize} ${groupTypeLabel}</span>`
       : escXml(e.property_id ? (propMap.get(e.property_id) ?? '—') : 'General');
 
     const mainRow = `
@@ -990,11 +993,10 @@ export function exportExpensesToPdf(
       <td><span class="chip-status-${e.status}">${EXPENSE_STATUS_LABEL[e.status] ?? e.status}</span></td>
     </tr>`;
 
-    // For group headers, add one child row per property
+    // For group headers, add one child row per property (any tier)
     let childRows = '';
-    if (e._isGroupHeader && e.expense_group_id) {
-      const members = groupMap.get(e.expense_group_id) ?? [];
-      childRows = members.map(m => `
+    if (e._isGroupHeader && e._members) {
+      childRows = e._members.map(m => `
     <tr style="background:#faf5ff">
       <td style="padding-left:20px;color:#94a3b8;font-size:10px">└</td>
       <td colspan="4" style="font-size:10px;color:#7c3aed;padding-left:4px">

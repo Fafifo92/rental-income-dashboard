@@ -447,15 +447,15 @@ export default function BookingDetailModal({
           <div className="overflow-y-auto flex-1">
             {/* Datos principales */}
             <div className="px-4 sm:px-7 py-4 sm:py-5 grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 text-sm border-b border-slate-100">
-              <InfoRow label="Check-in" value={booking.start_date} />
-              <InfoRow label="Check-out" value={booking.end_date} />
+              <InfoRow label="Check-in" value={formatDateDisplay(booking.start_date)} />
+              <InfoRow label="Check-out" value={formatDateDisplay(booking.end_date)} />
               <InfoRow label="Noches" value={String(booking.num_nights)} />
               <InfoRow label="Estado" value={booking.status ?? '—'} />
               <InfoRow label="Propiedad" value={property?.name ?? '—'} />
               <InfoRow label="Canal" value={booking.channel ?? '—'} />
               <InfoRow label="Adultos" value={String(booking.num_adults ?? 1)} />
               <InfoRow label="Niños" value={String(booking.num_children ?? 0)} />
-              <InfoRow label="Payout real" value={booking.payout_date ?? 'Pendiente'} />
+              <InfoRow label="Payout real" value={booking.payout_date ? formatDateDisplay(booking.payout_date) : 'Pendiente'} />
             </div>
 
             {/* Resumen financiero */}
@@ -605,7 +605,7 @@ export default function BookingDetailModal({
                               {cleaner?.name ?? 'Sin asignar'}
                               <span className="ml-2 text-xs font-normal text-slate-500">{formatCurrency(c.fee)}</span>
                             </p>
-                            {c.done_date && <p className="text-xs text-slate-500">Hecho {c.done_date}</p>}
+                            {c.done_date && <p className="text-xs text-slate-500">Hecho {formatDateDisplay(c.done_date)}</p>}
                           </div>
                           <div className="flex items-center gap-1.5">
                             {c.status === 'paid' && <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs font-semibold">Pagado</span>}

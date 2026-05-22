@@ -15,10 +15,14 @@
  *        y registra un inventory_movement.
  *      · Aplica idempotencia: si ya hay un daño pendiente para el mismo
  *        (booking, sujeto), no duplica.
+ *  - Si la reserva tiene depósito de seguridad con saldo disponible, se puede
+ *    aplicar parte (o todo) ese depósito como pago del gasto. Lo que sobra se
+ *    paga desde otra cuenta o queda como pendiente.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { reportDamage, listInventoryItems } from '@/services/inventory';
+import { applyDepositToDamage, getDepositBalance, type DepositBalance } from '@/services/deposits';
 import type { BookingRow, InventoryItemRow } from '@/types/database';
 import { useBackdropClose } from '@/lib/useBackdropClose';
 import MoneyInput from '@/components/MoneyInput';
@@ -62,6 +66,11 @@ export default function DamageReportModal({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // ── Depósito de seguridad disponible ─────────────────────────────────────
+  const [depBalance, setDepBalance] = useState<DepositBalance | null>(null);
+  const [useDeposit, setUseDeposit] = useState(false);
+  const [depositAmount, setDepositAmount] = useState<number | null>(null);
+
   useEffect(() => {
     if (presetItem) return;
     (async () => {
@@ -69,6 +78,13 @@ export default function DamageReportModal({
       if (res.data) setItems(res.data);
     })();
   }, [propertyId, presetItem]);
+
+  useEffect(() => {
+    (async () => {
+      const res = await getDepositBalance(booking.id);
+      if (res.data) setDepBalance(res.data);
+    })();
+  }, [booking.id]);
 
   const selectedItem = useMemo(
     () => presetItem ?? items.find(i => i.id === itemId) ?? null,
@@ -95,9 +111,18 @@ export default function DamageReportModal({
     ? Math.round(Number(selectedItem.purchase_price) / itemQty)
     : null;
 
+  // Cuánto del depósito se puede aplicar a este daño en concreto.
+  const maxFromDeposit = Math.min(
+    depBalance?.available ?? 0,
+    Number(repairCost ?? 0),
+  );
+  const depositToApply = useDeposit ? Math.min(Number(depositAmount ?? 0), maxFromDeposit) : 0;
+  const remainingToPay = Math.max(0, Number(repairCost ?? 0) - depositToApply);
+
   const canSubmit =
     !!repairCost && repairCost > 0 &&
-    ((mode === 'inventory' && !!itemId) || (mode === 'structural' && !!subjectLabel));
+    ((mode === 'inventory' && !!itemId) || (mode === 'structural' && !!subjectLabel)) &&
+    (!useDeposit || depositToApply > 0);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,10 +142,30 @@ export default function DamageReportModal({
       charge_from_platform: chargeFromPlatform,
       damaged_units: hasMultipleUnits ? damagedUnits : undefined,
     });
+    if (res.error) { setSaving(false); setErr(res.error); return; }
+
+    // Si el usuario eligió usar parte del depósito, registrar la aplicación
+    // contra el expense recién creado.
+    if (useDeposit && depositToApply > 0 && res.data?.expense_id) {
+      const appRes = await applyDepositToDamage({
+        booking_id: booking.id,
+        expense_id: res.data.expense_id,
+        amount: depositToApply,
+        notes: `Daño: ${subjectLabel}`,
+      });
+      if (appRes.error) {
+        setSaving(false);
+        setErr(`Daño registrado, pero falló aplicar el depósito: ${appRes.error}`);
+        return;
+      }
+    }
+
     setSaving(false);
-    if (res.error) { setErr(res.error); return; }
     await onSaved();
   };
+
+  // ── Render ───────────────────────────────────────────────────────────────
+  const hasDeposit = (depBalance?.available ?? 0) > 0;
 
   return (
     <motion.div
@@ -292,6 +337,65 @@ export default function DamageReportModal({
               className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
+
+          {/* ── Depósito de seguridad ─────────────────────────────────────── */}
+          {hasDeposit && (
+            <div className="border border-amber-200 rounded-lg p-3 space-y-2 bg-amber-50">
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useDeposit}
+                  onChange={e => {
+                    setUseDeposit(e.target.checked);
+                    if (e.target.checked && depositAmount == null) {
+                      setDepositAmount(maxFromDeposit);
+                    }
+                  }}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium text-amber-900">💰 Pagar este daño con el depósito de seguridad</span>
+                  <span className="block text-[11px] text-amber-700 mt-0.5">
+                    Disponible: <strong>{formatCurrency(depBalance?.available ?? 0)}</strong>
+                    {(depBalance?.applied_amount ?? 0) > 0 && (
+                      <> · Ya aplicado a otros daños: {formatCurrency(depBalance!.applied_amount)}</>
+                    )}
+                  </span>
+                </span>
+              </label>
+              {useDeposit && (
+                <div className="space-y-2 pl-6">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-amber-900 mb-1">
+                      Monto a aplicar del depósito (máx {formatCurrency(maxFromDeposit)})
+                    </label>
+                    <MoneyInput
+                      value={depositAmount}
+                      onChange={(v) => {
+                        if (v == null) { setDepositAmount(null); return; }
+                        setDepositAmount(Math.min(v, maxFromDeposit));
+                      }}
+                      placeholder="0"
+                      inputClassName="text-amber-800"
+                    />
+                  </div>
+                  <div className="text-[11px] bg-white border border-amber-200 rounded px-2 py-1.5 text-amber-900 space-y-0.5">
+                    <div>
+                      Aplicado del depósito: <strong>{formatCurrency(depositToApply)}</strong>
+                    </div>
+                    <div>
+                      Diferencia a cubrir con gasto pendiente: <strong>{formatCurrency(remainingToPay)}</strong>
+                    </div>
+                    {remainingToPay > 0 && (
+                      <div className="text-[10px] text-amber-700">
+                        Esta diferencia queda como gasto pendiente normal (lo pagas desde la cuenta que prefieras al marcarlo como pagado).
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="border border-slate-200 rounded-lg p-3 space-y-2 bg-slate-50">
             <label className="flex items-center gap-2 text-sm cursor-pointer">

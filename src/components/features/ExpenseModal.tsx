@@ -7,7 +7,7 @@ import { listListings } from '@/services/listings';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import MoneyInput from '@/components/MoneyInput';
 import { addMoney, splitMoney } from '@/lib/money';
-import { todayISO } from '@/lib/dateUtils';
+import { todayISO, formatDateDisplay } from '@/lib/dateUtils';
 
 type FormData = Omit<Expense, 'id' | 'owner_id'>;
 
@@ -665,7 +665,7 @@ export default function ExpenseModal({ properties = [], bankAccounts = [], onClo
                   <option value="">— No vinculado —</option>
                   {bookings.map(b => (
                     <option key={b.id} value={b.id}>
-                      {b.confirmation_code} · {b.guest_name ?? 'sin nombre'} · {b.start_date}
+                      {b.confirmation_code} · {b.guest_name ?? 'sin nombre'} · {formatDateDisplay(b.start_date)}
                     </option>
                   ))}
                 </select>

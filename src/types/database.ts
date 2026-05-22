@@ -188,6 +188,12 @@ export type Database = {
         Update: Partial<Omit<AccountDepositRow, 'id' | 'created_at'>>;
         Relationships: [];
       };
+      booking_deposit_applications: {
+        Row: BookingDepositApplicationRow;
+        Insert: Omit<BookingDepositApplicationRow, 'id' | 'created_at'>;
+        Update: Partial<Omit<BookingDepositApplicationRow, 'id' | 'created_at'>>;
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -365,13 +371,46 @@ export type BookingRow = {
   security_deposit: number | null;
   /** Cuenta bancaria donde se recibió el depósito de seguridad. */
   deposit_bank_account_id: string | null;
-  /** Estado del depósito: none → sin depósito, received → recibido pendiente devolución,
-   *  partial_return → devolución parcial (daño descontado), returned → devuelto en su totalidad. */
-  deposit_status: 'none' | 'received' | 'partial_return' | 'returned';
-  /** Monto devuelto al huésped (partial_return o returned). */
+  /** Estado agregado del depósito.
+   *  - none:               no se cobró depósito
+   *  - received:           recibido, sin devoluciones ni aplicaciones
+   *  - applied_to_damage:  parte/total se usó para daños (sin devolución al huésped)
+   *  - partial_return:     se devolvió al huésped solo una parte
+   *  - mixed:              hubo aplicación a daño + devolución al huésped
+   *  - returned:           ya no queda nada retenido al huésped (cerrado)
+   *  Este campo es DERIVADO de booking_deposit_applications via trigger. */
+  deposit_status: DepositStatus;
+  /** Monto devuelto al huésped (sumatoria de filas returned_to_guest). LEGACY: derivado. */
   deposit_returned_amount: number | null;
-  /** Fecha en que se devolvió el depósito. */
+  /** Fecha de la última devolución (max de applied_date en returned_to_guest). LEGACY: derivado. */
   deposit_return_date: string | null;
+};
+
+export type DepositStatus =
+  | 'none'
+  | 'received'
+  | 'partial_return'
+  | 'returned'
+  | 'applied_to_damage'
+  | 'mixed';
+
+export type BookingDepositApplicationKind =
+  | 'applied_to_damage'
+  | 'surplus_to_income'
+  | 'returned_to_guest';
+
+/** Aplicación individual del depósito de seguridad de una reserva. */
+export type BookingDepositApplicationRow = {
+  id: string;
+  owner_id: string;
+  booking_id: string;
+  /** Gasto de reparación al que se aplicó (solo para kind='applied_to_damage'). */
+  expense_id: string | null;
+  kind: BookingDepositApplicationKind;
+  amount: number;
+  applied_date: string;
+  notes: string | null;
+  created_at: string;
 };
 
 export type ExpenseRow = {

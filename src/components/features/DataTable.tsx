@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -23,7 +23,7 @@ declare module '@tanstack/react-table' {
   }
 }
 
-const PAGE_SIZES = [10, 25, 50, 100];
+const PAGE_SIZES = [10, 25, 50, 100, 200];
 
 function SortIcon({ sorted }: { sorted: false | 'asc' | 'desc' }) {
   if (sorted === 'asc') return <ChevronUp size={12} className="text-blue-500 flex-shrink-0" />;
@@ -49,6 +49,12 @@ interface DataTableProps<T extends object> {
   initialColumnOrder?: string[];
   /** Enables column resize handles on header cells. */
   enableResizing?: boolean;
+  /** Controlled pagination state. When provided, the table uses this instead of
+   *  its internal pagination state. Pair with `onPaginationChange`. */
+  paginationState?: { pageIndex: number; pageSize: number };
+  /** Called whenever the user changes page or page-size via the built-in controls.
+   *  Only used when `paginationState` is provided (controlled mode). */
+  onPaginationChange?: (p: { pageIndex: number; pageSize: number }) => void;
 }
 
 export default function DataTable<T extends object>({
@@ -66,10 +72,29 @@ export default function DataTable<T extends object>({
   getRowClassName,
   initialColumnOrder,
   enableResizing = false,
+  paginationState: controlledPagination,
+  onPaginationChange: onControlledPaginationChange,
 }: DataTableProps<T>) {
+  const isControlled = controlledPagination !== undefined;
+  const [internalPagination, setInternalPagination] = useState({ pageIndex: 0, pageSize: defaultPageSize });
+
+  // Sync internal state when controlled pagination changes from outside
+  useEffect(() => {
+    if (isControlled) setInternalPagination(controlledPagination);
+  }, [isControlled, controlledPagination?.pageIndex, controlledPagination?.pageSize]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pagination = isControlled ? controlledPagination : internalPagination;
+  const setPagination = (updater: { pageIndex: number; pageSize: number } | ((prev: { pageIndex: number; pageSize: number }) => { pageIndex: number; pageSize: number })) => {
+    const next = typeof updater === 'function' ? updater(pagination) : updater;
+    if (isControlled) {
+      onControlledPaginationChange?.(next);
+    } else {
+      setInternalPagination(next);
+    }
+  };
+
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
-  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: defaultPageSize });
 
   // Column ordering — initialised once from prop or natural column order
   const [columnOrder, setColumnOrder] = useState<ColumnOrderState>(() => {
@@ -92,9 +117,12 @@ export default function DataTable<T extends object>({
     onColumnOrderChange: setColumnOrder,
     onGlobalFilterChange: (v: string) => {
       setGlobalFilter(v);
-      setPagination(p => ({ ...p, pageIndex: 0 }));
+      setPagination({ ...pagination, pageIndex: 0 });
     },
-    onPaginationChange: setPagination,
+    onPaginationChange: (updater) => {
+      const next = typeof updater === 'function' ? updater(pagination) : updater;
+      setPagination(next);
+    },
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -145,7 +173,7 @@ export default function DataTable<T extends object>({
               value={globalFilter}
               onChange={e => {
                 setGlobalFilter(e.target.value);
-                setPagination(p => ({ ...p, pageIndex: 0 }));
+                setPagination({ ...pagination, pageIndex: 0 });
               }}
               placeholder={searchPlaceholder}
               className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
@@ -155,7 +183,7 @@ export default function DataTable<T extends object>({
             <button
               onClick={() => {
                 setGlobalFilter('');
-                setPagination(p => ({ ...p, pageIndex: 0 }));
+                setPagination({ ...pagination, pageIndex: 0 });
               }}
               className="text-sm text-slate-400 hover:text-slate-600 transition-colors"
             >

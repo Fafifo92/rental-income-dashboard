@@ -24,6 +24,7 @@ import {
   type ExpenseFilters,
 } from '@/services/expenses';
 import { deleteBookingAdjustment } from '@/services/bookingAdjustments';
+import { deleteSharedBill } from '@/services/sharedBills';
 import { getUpcomingAndOverdueSchedules, getSchedulesDoneNeedingExpense, completeMaintenanceSchedule } from '@/services/maintenanceSchedules';
 import { listInventoryItems } from '@/services/inventory';
 import { listProperties } from '@/services/properties';
@@ -297,31 +298,100 @@ export default function ExpensesClient() {
     sharedPatch: Partial<Pick<Expense, 'status' | 'bank_account_id' | 'date' | 'description'>>,
     childAmounts: { id: string; amount: number }[],
   ): Promise<boolean> => {
-    const gid = editingGroup?.expense_group_id;
-    if (!gid) return false;
+    if (!editingGroup) return false;
+    const isVirtual = editingGroup._isVirtualVendorGroup === true;
+    const gid = editingGroup.expense_group_id;
 
-    // 1. Update shared fields across all group members
-    const result = await updateExpenseGroup(gid, sharedPatch);
-    if (result.error) { toast.error(result.error); return false; }
+    // Path A — DB-level grouping by expense_group_id (one UPDATE covers all members).
+    if (!isVirtual && gid) {
+      const result = await updateExpenseGroup(gid, sharedPatch);
+      if (result.error) { toast.error(result.error); return false; }
 
-    // 2. Update individual amounts where changed
-    for (const { id, amount } of childAmounts) {
-      const res = await updateExpense(id, { amount });
-      if (res.error) { toast.error(res.error); return false; }
+      for (const { id, amount } of childAmounts) {
+        const r = await updateExpense(id, { amount });
+        if (r.error) { toast.error(r.error); return false; }
+      }
+      const amountMap = new Map(childAmounts.map(c => [c.id, c.amount]));
+      setExpenses(prev => prev.map(e => {
+        if (e.expense_group_id !== gid) return e;
+        return { ...e, ...sharedPatch, ...(amountMap.has(e.id) ? { amount: amountMap.get(e.id)! } : {}) };
+      }));
+      setEditingGroup(null);
+      toast.success('Grupo actualizado');
+      return true;
     }
 
-    // 3. Sync local state
+    // Path B — virtual vendor grouping (no DB key links members). Update each child
+    // individually and merge per-child amount changes. This also covers tier-2
+    // shared_bill groups, where expense_group_id is null but we still want to bulk-edit.
+    const members = editingGroup.children ?? [];
+    if (members.length === 0) return false;
+
     const amountMap = new Map(childAmounts.map(c => [c.id, c.amount]));
+    for (const m of members) {
+      const patch: Partial<Pick<Expense, 'status' | 'bank_account_id' | 'date' | 'description' | 'amount'>> = { ...sharedPatch };
+      if (amountMap.has(m.id)) patch.amount = amountMap.get(m.id)!;
+      const r = await updateExpense(m.id, patch);
+      if (r.error) { toast.error(r.error); return false; }
+    }
+
+    const memberIds = new Set(members.map(m => m.id));
     setExpenses(prev => prev.map(e => {
-      if (e.expense_group_id !== gid) return e;
+      if (!memberIds.has(e.id)) return e;
       return { ...e, ...sharedPatch, ...(amountMap.has(e.id) ? { amount: amountMap.get(e.id)! } : {}) };
     }));
     setEditingGroup(null);
-    toast.success('Grupo actualizado');
+    toast.success('Gastos actualizados');
     return true;
   };
 
   const handleDeleteGroup = async (group: GroupedExpense) => {
+    // Vendor payment grouped by shared_bill_id: delete the shared bill,
+    // which cascades to its derived expenses.
+    if (group._isSharedBillGroup) {
+      const sbId = group.shared_bill_id;
+      if (!sbId) return;
+      if (dbConnected) {
+        const result = await deleteSharedBill(sbId);
+        if (result.error) { toast.error(result.error); return; }
+      }
+      setExpenses(prev => prev.filter(e => e.shared_bill_id !== sbId));
+      setEditingGroup(null);
+      dispatchRecurringChange();
+      toast.success('Pago a proveedor eliminado');
+      return;
+    }
+
+    // Virtual vendor group (tier-3 grouping): expenses may have different or
+    // null shared_bill_ids so we delete each underlying record individually,
+    // routing through deleteSharedBill when a shared_bill_id is present.
+    if (group._isVirtualVendorGroup) {
+      const children = group.children ?? [];
+      if (children.length === 0) return;
+      if (dbConnected) {
+        const processedSbIds = new Set<string>();
+        for (const child of children) {
+          if (child.shared_bill_id && !processedSbIds.has(child.shared_bill_id)) {
+            processedSbIds.add(child.shared_bill_id);
+            const result = await deleteSharedBill(child.shared_bill_id);
+            if (result.error) { toast.error(result.error); return; }
+          } else if (!child.shared_bill_id) {
+            const result = await deleteExpense(child.id);
+            if (result.error) { toast.error(result.error); return; }
+          }
+        }
+      }
+      const childIds = new Set(children.map(c => c.id));
+      const sbIds = new Set(children.map(c => c.shared_bill_id).filter(Boolean) as string[]);
+      setExpenses(prev => prev.filter(e =>
+        !childIds.has(e.id) && !(e.shared_bill_id && sbIds.has(e.shared_bill_id)),
+      ));
+      setEditingGroup(null);
+      dispatchRecurringChange();
+      toast.success('Gastos de proveedor eliminados');
+      return;
+    }
+
     const gid = group.expense_group_id;
     if (!gid) return;
     if (dbConnected) {

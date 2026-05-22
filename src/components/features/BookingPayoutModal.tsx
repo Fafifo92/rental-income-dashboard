@@ -10,7 +10,20 @@ import {
   listBookingAdjustments,
   updateBookingAdjustment,
 } from '@/services/bookingAdjustments';
-import type { BankAccountRow, BookingPaymentRow, BookingAdjustmentRow } from '@/types/database';
+import {
+  getDepositBalance,
+  listDepositApplications,
+  returnDepositToGuest,
+  convertDepositSurplusToIncome,
+  type DepositBalance,
+} from '@/services/deposits';
+import type {
+  BankAccountRow,
+  BookingPaymentRow,
+  BookingAdjustmentRow,
+  BookingDepositApplicationRow,
+  DepositStatus,
+} from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import { addMoney, subMoney } from '@/lib/money';
@@ -35,7 +48,7 @@ export interface PayoutTarget {
   /** Deposito de seguridad cobrado al huesped. */
   security_deposit?: number | null;
   deposit_bank_account_id?: string | null;
-  deposit_status?: 'none' | 'received' | 'partial_return' | 'returned' | null;
+  deposit_status?: DepositStatus | null;
   deposit_returned_amount?: number | null;
   deposit_return_date?: string | null;
 }
@@ -50,11 +63,22 @@ interface Props {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const fmtDate = (d: string | null | undefined) => formatDateDisplay(d);
 
-const DEPOSIT_STATUS_LABELS: Record<string, string> = {
+const DEPOSIT_STATUS_LABELS: Record<DepositStatus, string> = {
   none: 'No aplica',
   received: 'Recibido (pendiente devolución)',
   partial_return: 'Devolución parcial',
   returned: 'Devuelto al huésped',
+  applied_to_damage: 'Aplicado a daños',
+  mixed: 'Mixto (devuelto + aplicado)',
+};
+
+const DEPOSIT_STATUS_TONE: Record<DepositStatus, string> = {
+  none: 'bg-slate-100 text-slate-500',
+  received: 'bg-amber-100 text-amber-700',
+  partial_return: 'bg-blue-100 text-blue-700',
+  returned: 'bg-emerald-100 text-emerald-700',
+  applied_to_damage: 'bg-rose-100 text-rose-700',
+  mixed: 'bg-violet-100 text-violet-700',
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -205,16 +229,38 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
   // ══════════════════════════════════════════════════════════════════════
   const hasDeposit = (booking.security_deposit ?? 0) > 0;
   const [depositAccount, setDepositAccount] = useState(booking.deposit_bank_account_id ?? '');
-  const [depositStatus, setDepositStatus]   = useState<'none'|'received'|'partial_return'|'returned'>(
-    (booking.deposit_status as 'none'|'received'|'partial_return'|'returned') ?? 'none',
+  const [depositStatus, setDepositStatus]   = useState<DepositStatus>(
+    (booking.deposit_status as DepositStatus) ?? 'none',
   );
-  const [depositReturnAmt, setDepositReturnAmt] = useState<number | null>(
-    booking.deposit_returned_amount != null ? Number(booking.deposit_returned_amount) : null,
-  );
-  const [depositReturnDate, setDepositReturnDate] = useState(booking.deposit_return_date ?? todayISO());
+  const [depositReturnAmt, setDepositReturnAmt] = useState<number | null>(null);
+  const [depositReturnDate, setDepositReturnDate] = useState(todayISO());
   const [savingDeposit, setSavingDeposit]   = useState(false);
   const [depositError, setDepositError]     = useState('');
   const [depositSaved, setDepositSaved]     = useState(false);
+
+  // Balance + timeline derivado de booking_deposit_applications.
+  const [depBalance, setDepBalance] = useState<DepositBalance | null>(null);
+  const [depApps, setDepApps] = useState<BookingDepositApplicationRow[]>([]);
+  const [surplusAccount, setSurplusAccount] = useState('');
+  const [surplusError, setSurplusError] = useState('');
+  const [convertingSurplus, setConvertingSurplus] = useState(false);
+
+  const reloadDeposit = useCallback(async () => {
+    if (!hasDeposit) return;
+    const [balRes, appsRes] = await Promise.all([
+      getDepositBalance(booking.id),
+      listDepositApplications(booking.id),
+    ]);
+    if (balRes.data) setDepBalance(balRes.data);
+    if (appsRes.data) setDepApps(appsRes.data);
+  }, [booking.id, hasDeposit]);
+
+  useEffect(() => { void reloadDeposit(); }, [reloadDeposit]);
+
+  const depAvailable = depBalance?.available ?? 0;
+  const depAppliedAmount = depBalance?.applied_amount ?? 0;
+  const depReturnedAmount = depBalance?.returned_amount ?? 0;
+  const depSurplusAmount = depBalance?.surplus_amount ?? 0;
 
   const handleSaveDeposit = async () => {
     setSavingDeposit(true); setDepositError(''); setDepositSaved(false);
@@ -222,20 +268,55 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
       setDepositError('Selecciona la cuenta donde se recibió el depósito.');
       setSavingDeposit(false); return;
     }
-    if ((depositStatus === 'partial_return' || depositStatus === 'returned') && !depositReturnAmt) {
-      setDepositError('Ingresa el monto devuelto.');
-      setSavingDeposit(false); return;
+    // Si el usuario indicó una devolución (parcial/total) en este formulario,
+    // se registra como un movimiento en la tabla nueva (fuente de verdad).
+    const wantsReturn =
+      (depositStatus === 'partial_return' || depositStatus === 'returned') &&
+      depositReturnAmt != null && depositReturnAmt > 0;
+
+    if (wantsReturn) {
+      if (depositReturnAmt! > depAvailable) {
+        setDepositError(`El monto a devolver supera el disponible (${formatCurrency(depAvailable)}).`);
+        setSavingDeposit(false); return;
+      }
+      const ret = await returnDepositToGuest({
+        booking_id: booking.id,
+        amount: depositReturnAmt!,
+        applied_date: depositReturnDate,
+      });
+      if (ret.error) { setDepositError(ret.error); setSavingDeposit(false); return; }
     }
+
+    // Persistir cuenta del depósito (y dejar que el trigger recalcule el estado).
     const res = await updateBookingDeposit(booking.id, {
       deposit_bank_account_id: depositAccount || null,
       deposit_status: depositStatus,
-      deposit_returned_amount:
-        (depositStatus === 'partial_return' || depositStatus === 'returned') ? depositReturnAmt : null,
-      deposit_return_date:
-        (depositStatus === 'partial_return' || depositStatus === 'returned') ? depositReturnDate : null,
     });
     if (res.error) { setDepositError(res.error); setSavingDeposit(false); return; }
+
+    setDepositReturnAmt(null);
+    await reloadDeposit();
     setSavingDeposit(false); setDepositSaved(true);
+    onSaved();
+  };
+
+  const handleConvertSurplus = async () => {
+    setSurplusError('');
+    if (depAvailable <= 0) return;
+    if (!surplusAccount) {
+      setSurplusError('Selecciona la cuenta donde queda el excedente.');
+      return;
+    }
+    setConvertingSurplus(true);
+    const res = await convertDepositSurplusToIncome({
+      booking_id: booking.id,
+      amount: depAvailable,
+      target_bank_account_id: surplusAccount,
+      applied_date: todayISO(),
+    });
+    setConvertingSurplus(false);
+    if (res.error) { setSurplusError(res.error); return; }
+    await reloadDeposit();
     onSaved();
   };
 
@@ -804,53 +885,71 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <h4 className="text-sm font-bold text-slate-700">🔐 Depósito de seguridad</h4>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                      depositStatus === 'returned' ? 'bg-emerald-100 text-emerald-700'
-                      : depositStatus === 'received' ? 'bg-amber-100 text-amber-700'
-                      : depositStatus === 'partial_return' ? 'bg-blue-100 text-blue-700'
-                      : 'bg-slate-100 text-slate-500'
-                    }`}>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${DEPOSIT_STATUS_TONE[depositStatus]}`}>
                       {DEPOSIT_STATUS_LABELS[depositStatus]}
                     </span>
                   </div>
 
-                  {depositStatus !== 'returned' && (
-                    <div className="flex gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
-                      <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-xs font-semibold text-amber-800">
-                          {formatCurrency(booking.security_deposit ?? 0)} pendiente de devolución
-                        </p>
-                        <p className="text-[11px] text-amber-700 mt-0.5">
-                          Este dinero pertenece al huésped. Debe ser devuelto al finalizar, descontando daños si los hay.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                  {depositStatus === 'returned' && (
-                    <div className="flex gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-                      <p className="text-xs font-semibold text-emerald-800">
-                        Devuelto al huésped · {formatCurrency(depositReturnAmt ?? 0)}
-                        {depositReturnDate ? ` el ${fmtDate(depositReturnDate)}` : ''}
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
-                    <span className="text-xs font-semibold text-slate-600">Monto cobrado al huésped</span>
-                    <span className="text-base font-bold text-slate-900 tabular-nums">
-                      {formatCurrency(booking.security_deposit ?? 0)}
-                    </span>
-                  </div>
-
-                  {damageAdjs.length > 0 && (
-                    <div className="flex items-center justify-between text-xs text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2">
-                      <span>Daños a descontar del depósito</span>
-                      <span className="font-semibold">
-                        −{formatCurrency(damageAdjs.reduce((s, a) => s + Number(a.amount), 0))}
+                  {/* Timeline / desglose */}
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-600">💵 Cobrado al huésped</span>
+                      <span className="font-semibold text-slate-900 tabular-nums">
+                        {formatCurrency(booking.security_deposit ?? 0)}
                       </span>
                     </div>
+                    {depAppliedAmount > 0 && (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-rose-700">🔧 Aplicado a daños</span>
+                        <span className="font-semibold text-rose-700 tabular-nums">
+                          −{formatCurrency(depAppliedAmount)}
+                        </span>
+                      </div>
+                    )}
+                    {depReturnedAmount > 0 && (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-emerald-700">↩️ Devuelto al huésped</span>
+                        <span className="font-semibold text-emerald-700 tabular-nums">
+                          −{formatCurrency(depReturnedAmount)}
+                        </span>
+                      </div>
+                    )}
+                    {depSurplusAmount > 0 && (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-indigo-700">💰 Excedente a ingreso</span>
+                        <span className="font-semibold text-indigo-700 tabular-nums">
+                          −{formatCurrency(depSurplusAmount)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between text-xs pt-1.5 border-t border-slate-200">
+                      <span className="font-semibold text-slate-700">Disponible (pendiente)</span>
+                      <span className={`font-bold tabular-nums ${depAvailable > 0 ? 'text-amber-700' : 'text-slate-500'}`}>
+                        {formatCurrency(depAvailable)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Aplicaciones individuales */}
+                  {depApps.length > 0 && (
+                    <details className="text-xs">
+                      <summary className="cursor-pointer text-slate-600 hover:text-slate-900">
+                        Ver movimientos del depósito ({depApps.length})
+                      </summary>
+                      <ul className="mt-2 space-y-1">
+                        {depApps.map(a => (
+                          <li key={a.id} className="flex items-center justify-between bg-white border border-slate-200 rounded px-2 py-1">
+                            <span>
+                              {a.kind === 'applied_to_damage' && '🔧 Daño'}
+                              {a.kind === 'returned_to_guest' && '↩️ Devolución'}
+                              {a.kind === 'surplus_to_income' && '💰 Excedente'}
+                              {a.applied_date && <span className="text-slate-400 ml-1">· {fmtDate(a.applied_date)}</span>}
+                            </span>
+                            <span className="font-semibold tabular-nums">{formatCurrency(Number(a.amount))}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
                   )}
 
                   <div>
@@ -867,23 +966,30 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Estado del depósito</label>
                     <select value={depositStatus}
-                      onChange={e => setDepositStatus(e.target.value as typeof depositStatus)}
+                      onChange={e => setDepositStatus(e.target.value as DepositStatus)}
                       className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none">
                       <option value="none">No aplica</option>
                       <option value="received">Recibido (pendiente devolución)</option>
                       <option value="partial_return">Devolución parcial (daño descontado)</option>
                       <option value="returned">Devuelto al huésped</option>
+                      <option value="applied_to_damage" disabled>Aplicado a daños (auto)</option>
+                      <option value="mixed" disabled>Mixto (auto)</option>
                     </select>
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Los estados "Aplicado a daños" y "Mixto" se asignan automáticamente.
+                    </p>
                   </div>
 
                   <AnimatePresence>
-                    {(depositStatus === 'partial_return' || depositStatus === 'returned') && (
+                    {(depositStatus === 'partial_return' || depositStatus === 'returned') && depAvailable > 0 && (
                       <motion.div
                         initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                         className="grid grid-cols-2 gap-3"
                       >
                         <div>
-                          <label className="block text-xs font-semibold text-slate-600 mb-1">Monto devuelto (COP)</label>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">
+                            Monto a devolver (máx {formatCurrency(depAvailable)})
+                          </label>
                           <MoneyInput value={depositReturnAmt} onChange={setDepositReturnAmt} inputClassName="text-blue-700" />
                         </div>
                         <div>
@@ -908,6 +1014,32 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
                     className="w-full py-2.5 text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-colors disabled:opacity-50">
                     {savingDeposit ? 'Guardando…' : '✓ Guardar depósito'}
                   </button>
+
+                  {/* Excedente a ingreso */}
+                  {depAvailable > 0 && (depAppliedAmount > 0 || depReturnedAmount > 0) && (
+                    <div className="mt-2 rounded-xl border border-indigo-200 bg-indigo-50 p-3 space-y-2">
+                      <p className="text-xs font-semibold text-indigo-900">
+                        💰 Convertir excedente a ingreso ({formatCurrency(depAvailable)})
+                      </p>
+                      <p className="text-[11px] text-indigo-700">
+                        Si decides quedarte con el saldo disponible (no se devuelve al huésped), se registra como ingreso extra de la reserva.
+                      </p>
+                      <select value={surplusAccount} onChange={e => setSurplusAccount(e.target.value)}
+                        className="w-full px-2 py-1.5 text-xs border border-indigo-200 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                        <option value="">— Cuenta donde queda el ingreso —</option>
+                        {bankAccounts.map(a => (
+                          <option key={a.id} value={a.id}>{a.name}{a.bank && !a.is_cash ? ` (${a.bank})` : ''}</option>
+                        ))}
+                      </select>
+                      {surplusError && (
+                        <p className="text-[11px] text-red-600">{surplusError}</p>
+                      )}
+                      <button onClick={handleConvertSurplus} disabled={convertingSurplus || !surplusAccount}
+                        className="w-full py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50">
+                        {convertingSurplus ? 'Procesando…' : 'Convertir excedente a ingreso'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </>

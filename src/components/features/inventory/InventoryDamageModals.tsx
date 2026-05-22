@@ -18,7 +18,7 @@ import type {
 } from '@/types/database';
 import { useBackdropClose, makeBackdropHandlers } from '@/lib/useBackdropClose';
 import { formatCurrency } from '@/lib/utils';
-import { todayISO } from '@/lib/dateUtils';
+import { todayISO, formatDateDisplay } from '@/lib/dateUtils';
 import MoneyInput from '@/components/MoneyInput';
 import { AlertTriangle, DollarSign, CheckCircle2, TrendingUp, Info } from 'lucide-react';
 // ──────────────────────────────────────────────────────────────────────────
@@ -169,7 +169,7 @@ export function DamageReportModal({
               <option value="">— Selecciona la reserva —</option>
               {bookings.map(b => (
                 <option key={b.id} value={b.id}>
-                  {b.confirmation_code} · {b.guest_name ?? 'Huésped'} · {b.start_date} → {b.end_date}
+                  {b.confirmation_code} · {b.guest_name ?? 'Huésped'} · {formatDateDisplay(b.start_date)} → {formatDateDisplay(b.end_date)}
                 </option>
               ))}
             </select>

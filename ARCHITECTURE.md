@@ -32,6 +32,25 @@ Built with **Astro (SSR)** for performance and SEO, with **React** for complex i
 - `num_nights`: Integer
 - `total_revenue`: Numeric(12,2)
 - `raw_data`: JSONB
+- `security_deposit`: Numeric(14,2) — depósito cobrado al huésped
+- `deposit_bank_account_id`: UUID nullable — cuenta real donde está el dinero retenido
+- `deposit_status`: enum (`none | received | partial_return | returned | applied_to_damage | mixed`) — **derivado** vía trigger desde `booking_deposit_applications`
+- `deposit_returned_amount`, `deposit_return_date`: legacy, sincronizados por el trigger
+
+### `booking_deposit_applications` — Ciclo de vida del depósito
+Cada uso del depósito genera una fila aquí. La tabla es la fuente de verdad y un trigger recalcula `bookings.deposit_status`.
+- `id`: UUID
+- `owner_id`: UUID
+- `booking_id`: UUID (FK to bookings)
+- `expense_id`: UUID nullable (FK to expenses — para `applied_to_damage`)
+- `kind`: enum (`applied_to_damage | surplus_to_income | returned_to_guest`)
+- `amount`: Numeric(14,2) > 0
+- `applied_date`: Date
+- `notes`: Text nullable
+
+**Saldo disponible** = `security_deposit − Σ amounts`. Cuando se aplica a un daño, el monto sale (conceptualmente) de la cuenta real donde se guardó el depósito y paga parte del expense. El excedente se puede convertir a ingreso (crea `booking_adjustment` extra_income, sí afecta P&L).
+
+La vista "Depósitos de huéspedes" en `BankAccountsClient` es un **ledger virtual** — agrega `deposit_available` por reserva sin contar como cuenta bancaria real.
 
 ### `expenses`
 - `id`: UUID
