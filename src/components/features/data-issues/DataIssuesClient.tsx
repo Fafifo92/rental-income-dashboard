@@ -172,33 +172,59 @@ export default function DataIssuesClient() {
 
   useEffect(() => { void load(); }, []);
 
+  // Overrides all count fields with the actual lengths of the loaded arrays so
+  // that the badge, the summary banner, and the Resumen tab all agree — even
+  // when the RPC rpc_data_issues_summary_v2 uses a different algorithm
+  // (e.g. groups overlaps by listing_id instead of property_id).
+  const effectiveSummary = useMemo((): DataIssuesSummary | null => {
+    if (!summary) return null;
+    return {
+      ...summary,
+      overlapping_bookings_count: overlaps.length,
+      bookings_without_payout_account_count: orphanIncomes.length,
+      inconsistent_payouts_count: inconsistentPayouts.length,
+      invalid_booking_dates_count: invalidBookingDates.length,
+      duplicate_codes_count: duplicateCodes.length,
+      cleanings_paid_without_expense_count: orphanCleaningsPaid.length,
+      cleanings_paid_without_date_count: orphanCleaningsNoDate.length,
+      paid_cleanings_without_cleaner_count: paidCleaningsNoCleaner.length,
+      done_cleanings_without_date_count: doneCleaningsNoDate.length,
+      expenses_paid_without_account_count: orphanExpenses.length,
+      invalid_expenses_count: invalidExpenses.length,
+    };
+  }, [
+    summary, overlaps, orphanIncomes, inconsistentPayouts, invalidBookingDates,
+    duplicateCodes, orphanCleaningsPaid, orphanCleaningsNoDate, paidCleaningsNoCleaner,
+    doneCleaningsNoDate, orphanExpenses, invalidExpenses,
+  ]);
+
   const allClean = useMemo(() => {
-    if (!summary) return false;
-    return summary.expenses_paid_without_account_count === 0
-      && summary.cleanings_paid_without_expense_count === 0
-      && summary.cleanings_paid_without_date_count === 0
-      && summary.overlapping_bookings_count === 0
-      && summary.bookings_without_payout_account_count === 0
-      && summary.inconsistent_payouts_count === 0
-      && summary.invalid_expenses_count === 0
-      && summary.paid_cleanings_without_cleaner_count === 0
-      && summary.done_cleanings_without_date_count === 0
-      && summary.invalid_booking_dates_count === 0
-      && summary.duplicate_codes_count === 0;
-  }, [summary]);
+    if (!effectiveSummary) return false;
+    return effectiveSummary.expenses_paid_without_account_count === 0
+      && effectiveSummary.cleanings_paid_without_expense_count === 0
+      && effectiveSummary.cleanings_paid_without_date_count === 0
+      && effectiveSummary.overlapping_bookings_count === 0
+      && effectiveSummary.bookings_without_payout_account_count === 0
+      && effectiveSummary.inconsistent_payouts_count === 0
+      && effectiveSummary.invalid_expenses_count === 0
+      && effectiveSummary.paid_cleanings_without_cleaner_count === 0
+      && effectiveSummary.done_cleanings_without_date_count === 0
+      && effectiveSummary.invalid_booking_dates_count === 0
+      && effectiveSummary.duplicate_codes_count === 0;
+  }, [effectiveSummary]);
 
   const counts = {
-    reservas: (summary?.overlapping_bookings_count ?? 0)
-      + (summary?.bookings_without_payout_account_count ?? 0)
-      + (summary?.inconsistent_payouts_count ?? 0)
-      + (summary?.invalid_booking_dates_count ?? 0)
-      + (summary?.duplicate_codes_count ?? 0),
-    aseos: (summary?.cleanings_paid_without_expense_count ?? 0)
-      + (summary?.cleanings_paid_without_date_count ?? 0)
-      + (summary?.paid_cleanings_without_cleaner_count ?? 0)
-      + (summary?.done_cleanings_without_date_count ?? 0),
-    gastos: (summary?.expenses_paid_without_account_count ?? 0)
-      + (summary?.invalid_expenses_count ?? 0),
+    reservas: (effectiveSummary?.overlapping_bookings_count ?? 0)
+      + (effectiveSummary?.bookings_without_payout_account_count ?? 0)
+      + (effectiveSummary?.inconsistent_payouts_count ?? 0)
+      + (effectiveSummary?.invalid_booking_dates_count ?? 0)
+      + (effectiveSummary?.duplicate_codes_count ?? 0),
+    aseos: (effectiveSummary?.cleanings_paid_without_expense_count ?? 0)
+      + (effectiveSummary?.cleanings_paid_without_date_count ?? 0)
+      + (effectiveSummary?.paid_cleanings_without_cleaner_count ?? 0)
+      + (effectiveSummary?.done_cleanings_without_date_count ?? 0),
+    gastos: (effectiveSummary?.expenses_paid_without_account_count ?? 0)
+      + (effectiveSummary?.invalid_expenses_count ?? 0),
   };
 
   return (
@@ -213,7 +239,7 @@ export default function DataIssuesClient() {
         </p>
       </header>
 
-      <SummaryBanner summary={summary} loading={loading} allClean={allClean} />
+      <SummaryBanner summary={effectiveSummary} loading={loading} allClean={allClean} />
 
       {error && (
         <div className="bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-lg px-4 py-3">
@@ -228,7 +254,7 @@ export default function DataIssuesClient() {
       />
 
       {activeTab === 'resumen' && (
-        <ResumenTab summary={summary} loading={loading} onJump={setActiveTab} />
+        <ResumenTab summary={effectiveSummary} loading={loading} onJump={setActiveTab} />
       )}
 
       {activeTab === 'reservas' && (

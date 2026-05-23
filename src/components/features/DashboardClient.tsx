@@ -10,6 +10,7 @@ import ExportMenu from './ExportMenu';
 import AlertsPanel from './AlertsPanel';
 import IncomeExpenseTab from './IncomeExpenseTab';
 import ActiveBookingsWidget from './ActiveBookingsWidget';
+import TodayCheckInOutWidget from './TodayCheckInOutWidget';
 const BookingDetailModal = lazy(() => import('./BookingDetailModal'));
 const BookingPayoutModal = lazy(() => import('./BookingPayoutModal'));
 import PropertyMultiSelect from '@/components/PropertyMultiSelectFilter';
@@ -138,7 +139,7 @@ export default function DashboardClient() {
   const { properties, propertyIds, setPropertyIds, groups, tags, tagAssigns } = usePropertyFilter();
   const [period, setPeriod]               = useState<Period>('current-month');
   const [customRange, setCustomRange]     = useState<{ from: string; to: string } | undefined>(undefined);
-  const [activeTab, setActiveTab]         = useState<'resumen' | 'pendientes' | 'ingresos-egresos' | 'en-curso' | 'calendario'>('resumen');
+  const [activeTab, setActiveTab]         = useState<'resumen' | 'hoy' | 'pendientes' | 'ingresos-egresos' | 'en-curso' | 'calendario'>('resumen');
   const [showUploader, setShowUploader]   = useState(false);
   const [importedBookings, setImportedBookings] = useState<ParsedBooking[]>([]);
   const [calendarDetailBooking, setCalendarDetailBooking] = useState<BookingWithListingRow | null>(null);
@@ -199,10 +200,10 @@ export default function DashboardClient() {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <PropertyMultiSelect properties={properties} value={propertyIds} onChange={setPropertyIds} groups={groups} tags={tags} tagAssigns={tagAssigns} />
-            {activeTab !== 'pendientes' && (
+            {activeTab !== 'pendientes' && activeTab !== 'hoy' && (
               <PeriodSelector value={period} onChange={setPeriod} customRange={customRange} onCustomRangeChange={setCustomRange} />
             )}
-            {activeTab !== 'pendientes' && !loading && kpis && (
+            {activeTab !== 'pendientes' && activeTab !== 'hoy' && !loading && kpis && (
               <ExportMenu kpis={kpis} monthly={exportMonthly} monthlyByBookings={exportMonthlyByBookings} period={period} customRange={customRange} propertyIds={propertyIds} />
             )}
           </div>
@@ -210,7 +211,7 @@ export default function DashboardClient() {
 
         {/* Tabs */}
         <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit flex-wrap">
-          {(['resumen', 'pendientes', 'ingresos-egresos', 'en-curso', 'calendario'] as const).map(tab => (
+          {(['resumen', 'hoy', 'pendientes', 'ingresos-egresos', 'en-curso', 'calendario'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -221,6 +222,7 @@ export default function DashboardClient() {
               }`}
             >
               {tab === 'resumen'          ? 'Resumen'
+                : tab === 'hoy'          ? 'Check-in / Check-out hoy'
                 : tab === 'pendientes'   ? 'Pendientes'
                 : tab === 'ingresos-egresos' ? 'Ingresos vs Egresos'
                 : tab === 'en-curso'     ? 'Reservas en curso'
@@ -236,6 +238,8 @@ export default function DashboardClient() {
 
         {activeTab === 'ingresos-egresos' && kpis && payoutBreakdown ? (
           <IncomeExpenseTab payout={payoutBreakdown} kpis={kpis} granularity={granularity} transactions={transactions} txLoading={txLoading} />
+        ) : activeTab === 'hoy' ? (
+          <TodayCheckInOutWidget propertyIds={propertyIds} />
         ) : activeTab === 'pendientes' ? (
           <div className="space-y-6">
             <RecurringPendingPanel

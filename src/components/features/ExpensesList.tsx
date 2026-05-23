@@ -224,22 +224,7 @@ export default function ExpensesList({ expenses, loading = false, bankAccounts =
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-100 text-violet-700 border border-violet-200 flex-shrink-0">
                   {row.groupSize} propiedad{row.groupSize !== 1 ? 'es' : ''}
                 </span>
-                {isSharedBillGroup && (
-                  <span
-                    className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 flex-shrink-0"
-                    title="Pago a proveedor distribuido entre propiedades (registrado vía /vendors)"
-                  >
-                    Proveedor
-                  </span>
-                )}
-                {isVirtualVendorGroup && (
-                  <span
-                    className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 flex-shrink-0"
-                    title="Gastos del mismo proveedor en el mismo mes, agrupados automáticamente"
-                  >
-                    Mismo proveedor
-                  </span>
-                )}
+
               </div>
             );
           }

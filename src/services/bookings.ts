@@ -407,6 +407,69 @@ export const listBookingAlerts = async (
   return { data: [...alertMap.values()].sort((a, b) => b.end_date.localeCompare(a.end_date)), error: null };
 };
 
+// ─── Today's check-in / check-out ────────────────────────────────────────────
+
+export interface TodayActivity {
+  checkins: BookingWithListingRow[];
+  checkouts: BookingWithListingRow[];
+}
+
+/**
+ * Returns bookings that check in today (start_date = today) and
+ * bookings that check out today (end_date = today), excluding cancelled ones.
+ */
+export const listTodayActivity = async (
+  propertyIds?: string[],
+): Promise<ServiceResult<TodayActivity>> => {
+  const today = todayISO();
+
+  let allowedListingIds: string[] | undefined;
+  if (propertyIds && propertyIds.length > 0) {
+    const { data: listingsData, error } = await supabase
+      .from('listings')
+      .select('id')
+      .in('property_id', propertyIds);
+    if (error) return { data: null, error: error.message };
+    if (!listingsData || listingsData.length === 0)
+      return { data: { checkins: [], checkouts: [] }, error: null };
+    allowedListingIds = listingsData.map((l: { id: string }) => l.id);
+  }
+
+  const baseSelect = '*, listings(id, external_name, property_id, properties(id, name))';
+
+  let checkinQ = supabase
+    .from('bookings')
+    .select(baseSelect)
+    .eq('start_date', today)
+    .order('start_date', { ascending: true });
+
+  let checkoutQ = supabase
+    .from('bookings')
+    .select(baseSelect)
+    .eq('end_date', today)
+    .order('end_date', { ascending: true });
+
+  if (allowedListingIds) {
+    checkinQ  = checkinQ.in('listing_id', allowedListingIds);
+    checkoutQ = checkoutQ.in('listing_id', allowedListingIds);
+  }
+
+  const [cinRes, coutRes] = await Promise.all([checkinQ, checkoutQ]);
+  if (cinRes.error)  return { data: null, error: cinRes.error.message };
+  if (coutRes.error) return { data: null, error: coutRes.error.message };
+
+  const notCancelled = (b: { status?: string | null }) =>
+    !isCancelled(b);
+
+  return {
+    data: {
+      checkins:  ((cinRes.data  ?? []) as unknown as BookingWithListingRow[]).filter(notCancelled),
+      checkouts: ((coutRes.data ?? []) as unknown as BookingWithListingRow[]).filter(notCancelled),
+    },
+    error: null,
+  };
+};
+
 // ─── Import conflict detection ────────────────────────────────────────────────
 
 /**
