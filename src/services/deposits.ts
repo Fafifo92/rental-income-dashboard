@@ -365,7 +365,7 @@ export const listPendingDepositReturns = async (
   const { data, error } = await query;
   if (error) return { data: null, error: error.message };
 
-  const rows = (data ?? []) as Array<{
+  const rows = (data ?? []) as unknown as Array<{
     id: string;
     confirmation_code: string;
     guest_name: string | null;
