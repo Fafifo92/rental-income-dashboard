@@ -1,8 +1,8 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { Eye, LogIn, LogOut } from 'lucide-react';
-import { listTodayActivity } from '@/services/bookings';
-import type { BookingWithListingRow } from '@/services/bookings';
+import { listTodayActivity, type BookingWithListingRow } from '@/services/bookings';
+
 import { listProperties } from '@/services/properties';
 import { listBankAccounts } from '@/services/bankAccounts';
 import { getBookingStatus, statusUI } from '@/lib/bookingStatus';

@@ -177,8 +177,8 @@ export default function ExpensesList({ expenses, loading = false, bankAccounts =
             const gid = row._groupKey ?? row.expense_group_id!;
             const isExpanded = expandedGroups.has(gid);
             const isCleaningGroup = isCleaning(row) || (row.children ?? []).some(c => isCleaning(c));
-            const isSharedBillGroup = row._isSharedBillGroup === true;
-            const isVirtualVendorGroup = row._isVirtualVendorGroup === true;
+            const _isSharedBillGroup = row._isSharedBillGroup === true;
+            const _isVirtualVendorGroup = row._isVirtualVendorGroup === true;
 
             if (isCleaningGroup) {
               const bookingCount = Math.max(
