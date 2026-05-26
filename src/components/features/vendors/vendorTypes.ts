@@ -1,5 +1,4 @@
-import type { VendorKind, ExpenseCategory, CreditPoolConsumptionRule } from '@/types/database';
-import { todayISO } from '@/lib/dateUtils';
+import type { VendorKind, ExpenseCategory } from '@/types/database';
 
 export const KINDS: { value: VendorKind; label: string; icon: string; description: string; group: 'utilities' | 'business' }[] = [
   { value: 'utility',          label: 'Servicio público',     icon: '💡', description: 'Luz, agua, gas, internet — gastos de operación de cada propiedad.', group: 'utilities' },
@@ -53,24 +52,10 @@ export interface VendorForm {
   notes: string;
   active: boolean;
   props: PropShare[];
-  poolEnabled: boolean;
-  poolCreditsTotal: string;
-  poolConsumptionRule: CreditPoolConsumptionRule;
-  poolCreditsPerUnit: string;
-  poolChildWeight: string;
-  poolActivatedAt: string;
-  poolExpiresAt: string;
 }
 
 export const EMPTY_VENDOR_FORM: VendorForm = {
   name: '', kind: 'business_service', category: 'Administración',
   defaultAmount: '', dayOfMonth: '', startYearMonth: '', isVariable: false,
   contact: '', notes: '', active: true, props: [],
-  poolEnabled: false,
-  poolCreditsTotal: '',
-  poolConsumptionRule: 'per_person_per_night',
-  poolCreditsPerUnit: '1',
-  poolChildWeight: '1',
-  poolActivatedAt: todayISO(),
-  poolExpiresAt: '',
 };

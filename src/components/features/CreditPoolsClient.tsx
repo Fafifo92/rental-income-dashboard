@@ -25,7 +25,7 @@ import {
   listCreditPools, createCreditPool, updateCreditPool, archiveCreditPool,
   listConsumptionsForPool, resolvePoolProperties, setCreditPoolProperties,
   unitPriceOf, calcUnitsForBooking,
-  deleteCreditPoolConsumptions, recomputeCreditPoolSnapshots,
+  deleteCreditPoolConsumptions, recomputeCreditPoolSnapshots, hardDeleteCreditPool,
 } from '@/services/creditPools';
 import type {
   CreditPoolRow, CreditPoolConsumptionRow, CreditPoolConsumptionRule,
@@ -214,6 +214,14 @@ export default function CreditPoolsClient() {
     await load();
   }, [load]);
 
+  const onHardDelete = useCallback(async (p: CreditPoolRow) => {
+    if (!confirm(`¿Eliminar DEFINITIVAMENTE la bolsa "${p.name}"?\n\nEsta acción no se puede deshacer.`)) return;
+    const res = await hardDeleteCreditPool(p.id);
+    if (res.error) { toast.error(res.error); return; }
+    toast.success(`Bolsa "${p.name}" eliminada`);
+    await load();
+  }, [load]);
+
   useBackdropClose(() => setModalOpen(false));
   useBackdropClose(() => setHistoryTarget(null));
 
@@ -248,13 +256,12 @@ export default function CreditPoolsClient() {
             <option value="archived">Archivadas</option>
             <option value="all">Todas</option>
           </select>
-          <motion.button
-            whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+          <button
             onClick={openNew}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg shadow-sm"
+            className="shrink-0 inline-flex items-center gap-1.5 whitespace-nowrap px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-semibold hover:bg-amber-700 shadow-sm"
           >
-            + Nueva bolsa
-          </motion.button>
+            <span className="text-base leading-none">+</span> Nueva bolsa
+          </button>
         </div>
       </div>
 
@@ -281,6 +288,7 @@ export default function CreditPoolsClient() {
           onEditProps={(p) => setPropsTarget(p)}
           onDeleteConsumptions={onDeleteConsumptions}
           onRecomputeSnapshots={onRecomputeSnapshots}
+          onHardDelete={onHardDelete}
         />
       )}
 
@@ -558,7 +566,7 @@ function PoolHistoryModal({ pool, onClose }: {
 function PoolsGrouped({
   pools, vendors, properties, propsByPool,
   onEdit, onArchive, onHistory, onCalc, onEditProps,
-  onDeleteConsumptions, onRecomputeSnapshots,
+  onDeleteConsumptions, onRecomputeSnapshots, onHardDelete,
 }: {
   pools: CreditPoolRow[];
   vendors: Vendor[];
@@ -571,6 +579,7 @@ function PoolsGrouped({
   onEditProps: (p: CreditPoolRow) => void;
   onDeleteConsumptions: (p: CreditPoolRow) => void;
   onRecomputeSnapshots: (p: CreditPoolRow) => void;
+  onHardDelete: (p: CreditPoolRow) => void;
 }) {
   // Agrupa por vendor_id (null = "Sin proveedor"); ordena bolsas por
   // activated_at asc (FIFO: la más antigua primero, la próxima a consumirse).
@@ -629,6 +638,7 @@ function PoolsGrouped({
                   onEditProps={() => onEditProps(p)}
                   onDeleteConsumptions={() => onDeleteConsumptions(p)}
                   onRecomputeSnapshots={() => onRecomputeSnapshots(p)}
+                  onHardDelete={() => onHardDelete(p)}
                 />
               ))}
             </div>
@@ -643,7 +653,7 @@ function PoolCard({
   pool: p, fifoOrder, fifoTotal, propertyIds, propertyNames,
   inheritedFromVendor,
   onEdit, onArchive, onHistory, onCalc, onEditProps,
-  onDeleteConsumptions, onRecomputeSnapshots,
+  onDeleteConsumptions, onRecomputeSnapshots, onHardDelete,
 }: {
   pool: CreditPoolRow;
   fifoOrder: number;
@@ -658,6 +668,7 @@ function PoolCard({
   onEditProps: () => void;
   onDeleteConsumptions: () => void;
   onRecomputeSnapshots: () => void;
+  onHardDelete: () => void;
 }) {
   const remaining = Number(p.credits_total) - Number(p.credits_used);
   const pct = Number(p.credits_total) > 0
@@ -757,19 +768,22 @@ function PoolCard({
 
       <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
         <button onClick={onCalc} className="flex-1 text-xs font-semibold text-amber-700 hover:bg-amber-50 py-1.5 rounded">
-          🧮 Calcular
+          Calcular
         </button>
         <button onClick={onHistory} className="flex-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 py-1.5 rounded">
-          📜 Historial
+          Historial
         </button>
         <button onClick={onEdit} className="flex-1 text-xs font-semibold text-amber-700 hover:bg-amber-50 py-1.5 rounded">
-          ✏️ Editar
+          Editar
         </button>
         {p.status !== 'archived' && (
           <button onClick={onArchive} className="flex-1 text-xs font-semibold text-slate-500 hover:bg-slate-50 py-1.5 rounded">
             Archivar
           </button>
         )}
+        <button onClick={onHardDelete} className="flex-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 py-1.5 rounded">
+          Eliminar
+        </button>
       </div>
 
       {/* Acciones de mantenimiento — sólo cuando hay consumos asociados */}
@@ -780,14 +794,14 @@ function PoolCard({
             className="flex-1 text-[11px] font-semibold text-sky-700 hover:bg-sky-50 py-1.5 rounded border border-sky-100"
             title="Recalcula los precios congelados de los consumos usando el precio/crédito actual de la bolsa."
           >
-            🔄 Recalcular precios
+            Recalcular precios
           </button>
           <button
             onClick={onDeleteConsumptions}
             className="flex-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50 py-1.5 rounded border border-rose-100"
             title="Borra todos los consumos de esta bolsa (limpia el panel de atribución). No afecta el gasto de compra."
           >
-            🗑️ Borrar consumos
+            Borrar consumos
           </button>
         </div>
       )}

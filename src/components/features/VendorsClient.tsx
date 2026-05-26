@@ -1,15 +1,13 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { type VendorKind, type PropertyRow, type VendorPropertyRow, type BankAccountRow, type SharedBillRow, type CreditPoolRow, type ExpenseCategory, EXPENSE_CATEGORIES } from '@/types/database';
+import { type VendorKind, type PropertyRow, type VendorPropertyRow, type BankAccountRow, type SharedBillRow, type ExpenseCategory, EXPENSE_CATEGORIES } from '@/types/database';
 import { listVendors, createVendor, updateVendor, deleteVendor, type Vendor } from '@/services/vendors';
-import { listCreditPools, updateCreditPool } from '@/services/creditPools';
 import { listVendorProperties, setVendorProperties, listAllVendorProperties } from '@/services/vendorProperties';
 import { listProperties } from '@/services/properties';
 import { listBankAccounts } from '@/services/bankAccounts';
 import { listSharedBills, deleteSharedBill } from '@/services/sharedBills';
 import { currentYearMonth, yearMonthRange } from '@/services/recurringPeriods';
-import { todayISO } from '@/lib/dateUtils';
 import { formatCurrency } from '@/lib/utils';
 import SharedBillPayModal from './SharedBillPayModal';
 import { toast } from '@/lib/toast';
@@ -36,7 +34,6 @@ export default function VendorsClient(): JSX.Element {
   const [err, setErr] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Vendor | null>(null);
   const [paying, setPaying] = useState<{ vendor: Vendor; ym: string; estimated: number } | null>(null);
-  const [editingPool, setEditingPool] = useState<CreditPoolRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -115,7 +112,7 @@ export default function VendorsClient(): JSX.Element {
     await load();
   };
 
-  const openNew = () => { setEditing(null); setForm(EMPTY_VENDOR_FORM); setErr(null); setEditingPool(null); setModalOpen(true); };
+  const openNew = () => { setEditing(null); setForm(EMPTY_VENDOR_FORM); setErr(null); setModalOpen(true); };
   const openEdit = async (v: Vendor) => {
     setEditing(v);
     const vpRes = await listVendorProperties(v.id);
@@ -138,37 +135,8 @@ export default function VendorsClient(): JSX.Element {
       notes: v.notes ?? '',
       active: v.active,
       props,
-      poolEnabled: false,
-      poolCreditsTotal: '',
-      poolConsumptionRule: 'per_person_per_night',
-      poolCreditsPerUnit: '1',
-      poolChildWeight: '1',
-      poolActivatedAt: todayISO(),
-      poolExpiresAt: '',
     });
     setErr(null);
-    // Load linked credit pool for insurance vendors
-    if (v.kind === 'insurance') {
-      const cpRes = await listCreditPools();
-      const existingPool = cpRes.data?.find(p => p.vendor_id === v.id && p.status !== 'archived') ?? null;
-      setEditingPool(existingPool);
-      if (existingPool) {
-        setForm(f => ({
-          ...f,
-          poolEnabled: true,
-          poolCreditsTotal: String(existingPool.credits_total),
-          poolConsumptionRule: existingPool.consumption_rule,
-          poolCreditsPerUnit: String(existingPool.credits_per_unit),
-          poolChildWeight: String(existingPool.child_weight),
-          poolActivatedAt: existingPool.activated_at,
-          poolExpiresAt: existingPool.expires_at ?? '',
-        }));
-      } else {
-        setEditingPool(null);
-      }
-    } else {
-      setEditingPool(null);
-    }
     setModalOpen(true);
   };
 
@@ -224,20 +192,6 @@ export default function VendorsClient(): JSX.Element {
 
     const vendorId = res.data.id;
     const vpRes = await setVendorProperties(vendorId, form.props);
-    // Si el vendor es de seguros y el bloque de bolsa está habilitado:
-    //   · En CREAR: no se crea bolsa aún — nace al registrar el primer pago.
-    //   · En EDITAR: si ya existe una bolsa activa, sólo se actualizan las
-    //     reglas (consumo, créditos/unidad, peso de niños). No tocamos
-    //     credits_total/total_price/activated_at para preservar el historial.
-    if (form.kind === 'insurance' && form.poolEnabled && editing && editingPool) {
-      const rulesPatch = {
-        consumption_rule: form.poolConsumptionRule,
-        credits_per_unit: Number(form.poolCreditsPerUnit) || 1,
-        child_weight: Number(form.poolChildWeight) || 1,
-        expires_at: form.poolExpiresAt || null,
-      };
-      await updateCreditPool(editingPool.id, rulesPatch);
-    }
     setSaving(false);
     if (vpRes.error) { setErr(`Servicio guardado pero falló la asignación de propiedades: ${vpRes.error}`); return; }
     setModalOpen(false);
@@ -376,7 +330,6 @@ export default function VendorsClient(): JSX.Element {
             setForm={setForm}
             err={err}
             saving={saving}
-            editingPool={editingPool}
             properties={properties}
             toggleProp={toggleProp}
             setPropShare={setPropShare}

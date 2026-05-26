@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import type { PropertyRow, CreditPoolRow, CreditPoolConsumptionRule } from '@/types/database';
+import type { PropertyRow } from '@/types/database';
 import type { Vendor } from '@/services/vendors';
 import { makeBackdropHandlers } from '@/lib/useBackdropClose';
 import { formatCurrency } from '@/lib/utils';
@@ -13,7 +13,6 @@ interface Props {
   setForm: React.Dispatch<React.SetStateAction<VendorForm>>;
   err: string | null;
   saving: boolean;
-  editingPool: CreditPoolRow | null;
   properties: PropertyRow[];
   toggleProp: (propertyId: string) => void;
   setPropShare: (propertyId: string, raw: string) => void;
@@ -23,7 +22,7 @@ interface Props {
 }
 
 export default function VendorFormModal({
-  editing, form, setForm, err, saving, editingPool,
+  editing, form, setForm, err, saving,
   properties, toggleProp, setPropShare, setPropFixed,
   onSave, onClose,
 }: Props) {
@@ -115,7 +114,11 @@ export default function VendorFormModal({
           </div>
 
           {form.kind === 'insurance' && (
-            <InsurancePoolSection form={form} setForm={setForm} editingPool={editingPool} />
+            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              💡 Para configurar este seguro como una <b>bolsa de créditos</b> prepagados,
+              ve a <b>Administración → Bolsas de créditos</b> y crea una bolsa asociada
+              a este proveedor.
+            </p>
           )}
 
           <div>
@@ -194,112 +197,6 @@ export default function VendorFormModal({
         </div>
       </motion.div>
     </motion.div>
-  );
-}
-
-// ── Insurance credit pool sub-section ──────────────────────────────────────
-function InsurancePoolSection({
-  form, setForm, editingPool,
-}: {
-  form: VendorForm;
-  setForm: React.Dispatch<React.SetStateAction<VendorForm>>;
-  editingPool: CreditPoolRow | null;
-}) {
-  return (
-    <div className="border border-amber-200 rounded-xl bg-amber-50 p-4 space-y-3">
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={form.poolEnabled}
-          onChange={e => setForm(f => ({ ...f, poolEnabled: e.target.checked }))}
-          className="w-4 h-4 accent-amber-600"
-        />
-        <span className="text-sm font-semibold text-amber-900">Configurar como bolsa de créditos</span>
-      </label>
-      <p className="text-[11px] text-amber-700">
-        Activa esto si este seguro funciona por créditos prepagados que se descuentan al hacer check-in de cada reserva.
-      </p>
-      {form.poolEnabled && (
-        <div className="space-y-3 pt-1">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Total de créditos *</label>
-              <input
-                type="number" min={1}
-                value={form.poolCreditsTotal}
-                onChange={e => setForm(f => ({ ...f, poolCreditsTotal: e.target.value }))}
-                placeholder="Ej: 1000"
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Créditos por unidad</label>
-              <input
-                type="number" min={0.01} step={0.01}
-                value={form.poolCreditsPerUnit}
-                onChange={e => setForm(f => ({ ...f, poolCreditsPerUnit: e.target.value }))}
-                placeholder="1"
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Regla de consumo</label>
-            <select
-              value={form.poolConsumptionRule}
-              onChange={e => setForm(f => ({ ...f, poolConsumptionRule: e.target.value as CreditPoolConsumptionRule }))}
-              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none bg-white"
-            >
-              <option value="per_person_per_night">Por persona y noche</option>
-              <option value="per_person_per_booking">Por persona (toda la reserva)</option>
-              <option value="per_booking">Por reserva (fijo)</option>
-            </select>
-          </div>
-          {form.poolConsumptionRule !== 'per_booking' && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Peso de niños (0–1)</label>
-              <input
-                type="number" min={0} max={1} step={0.1}
-                value={form.poolChildWeight}
-                onChange={e => setForm(f => ({ ...f, poolChildWeight: e.target.value }))}
-                placeholder="1"
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
-              />
-              <p className="text-[10px] text-slate-500 mt-0.5">1 = niños cuentan igual que adultos, 0.5 = mitad de créditos</p>
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Activar desde *</label>
-              <input
-                type="date"
-                value={form.poolActivatedAt}
-                onChange={e => setForm(f => ({ ...f, poolActivatedAt: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Vence (opcional)</label>
-              <input
-                type="date"
-                value={form.poolExpiresAt}
-                onChange={e => setForm(f => ({ ...f, poolExpiresAt: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
-              />
-            </div>
-          </div>
-          <p className="text-[10px] text-amber-700">
-            💡 El precio de la bolsa se toma del campo "Monto mensual estimado" de arriba.
-          </p>
-          {editingPool && (
-            <div className="text-[11px] text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2">
-              Bolsa activa: <b>{editingPool.credits_used}</b> / {editingPool.credits_total} créditos usados
-              {editingPool.status === 'depleted' && <span className="ml-2 text-red-600 font-semibold">· AGOTADA</span>}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 

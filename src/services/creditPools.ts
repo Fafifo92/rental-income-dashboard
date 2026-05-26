@@ -140,6 +140,15 @@ export const archiveCreditPool = async (id: string): Promise<ServiceResult<true>
   return { data: true, error: null };
 };
 
+export const hardDeleteCreditPool = async (id: string): Promise<ServiceResult<true>> => {
+  const { error } = await supabase
+    .from('credit_pools')
+    .delete()
+    .eq('id', id);
+  if (error) return { data: null, error: error.message };
+  return { data: true, error: null };
+};
+
 /**
  * Borra TODOS los consumos (`credit_pool_consumptions`) de una bolsa y resetea
  * su contador `credits_used` a 0. Útil para limpiar el panel de "Atribución de
