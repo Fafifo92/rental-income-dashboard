@@ -199,7 +199,14 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      admin_set_account_status: {
+        Args: { target_id: string; new_status: string };
+        Returns: void;
+      };
+      admin_delete_user: {
+        Args: { target_id: string };
+        Returns: void;
+      };
     };
     Enums: {
       [_ in never]: never;
@@ -210,11 +217,16 @@ export type Database = {
   };
 };
 
+export type AccountStatus = 'pending' | 'approved' | 'suspended';
+
 export type ProfileRow = {
   id: string;
   email: string;
   full_name: string | null;
   role: 'admin' | 'owner';
+  status: AccountStatus;
+  approved_at: string | null;
+  approved_by: string | null;
   created_at: string;
 };
 

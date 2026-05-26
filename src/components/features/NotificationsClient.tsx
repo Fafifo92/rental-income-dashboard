@@ -113,12 +113,10 @@ export default function NotificationsClient() {
           />
           <ToggleRow
             label="Recordatorios por email"
-            description="Próximamente: envío automático a tu correo con un resumen diario."
+            description="Envío automático a tu correo con un resumen de pendientes (respeta cadencia y hora)."
             checked={settings.email_enabled}
-            saving={false}
-            disabled
-            badge="Próximamente"
-            onChange={() => {}}
+            saving={savingKey === 'email_enabled'}
+            onChange={v => patch('email_enabled', v)}
           />
         </Section>
 
@@ -202,9 +200,8 @@ export default function NotificationsClient() {
         </Section>
 
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
-          <strong>Nota:</strong> las notificaciones por email se habilitarán cuando conectemos el
-          servicio de envío. Mientras tanto, la campana en el menú superior muestra siempre tus
-          pendientes en tiempo real.
+          <strong>Nota:</strong> el email se envía a la hora configurada arriba en tu zona horaria,
+          respetando la cadencia. Si no hay pendientes ese día, no se envía nada.
         </div>
       </div>
     </>
