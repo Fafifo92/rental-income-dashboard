@@ -169,7 +169,7 @@ export type BookingWithListingRow = BookingRow & {
     property_id: string;
     properties?: { id: string; name: string } | null;
   } | null;
-  booking_adjustments?: Array<{ kind: string; amount: number }> | null;
+  booking_adjustments?: Array<{ kind: string; amount: number; bank_account_id: string | null }> | null;
   booking_deposit_applications?: Array<{ kind: string; amount: number }> | null;
 };
 
@@ -209,7 +209,7 @@ export const listBookings = async (
   // Join listing + property so each row carries external_name, property_id and property name inline.
   let query = supabase
     .from('bookings')
-    .select('*, listings(id, external_name, property_id, properties(id, name)), booking_adjustments(kind, amount), booking_deposit_applications(kind, amount)')
+    .select('*, listings(id, external_name, property_id, properties(id, name)), booking_adjustments(kind, amount, bank_account_id), booking_deposit_applications(kind, amount)')
     .order('start_date', { ascending: false });
 
   if (allowedListingIds) query = query.in('listing_id', allowedListingIds);

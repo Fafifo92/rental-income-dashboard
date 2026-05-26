@@ -185,7 +185,8 @@ export default function IncomeExpenseTab({ payout, kpis, granularity = 'month', 
       <div className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 space-y-1">
         <p>
           <strong className="text-slate-600">¿Cómo se calcula?</strong>{' '}
-          &quot;Payout confirmado&quot; = suma de <code>net_payout</code> de reservas con cuenta bancaria asignada.
+          &quot;Payout confirmado&quot; = suma de <code>net_payout</code> de reservas con cuenta bancaria asignada
+          {' '}+ ajustes de reserva que tengan cuenta bancaria.
           &quot;Por cobrar&quot; = suma de <code>total_revenue</code> de reservas activas sin banco asignado.
           Asignar la cuenta en cada reserva (botón de payout) mueve el ingreso de &quot;esperado&quot; a &quot;confirmado&quot;.
         </p>

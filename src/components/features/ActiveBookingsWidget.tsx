@@ -37,9 +37,23 @@ interface ActiveBooking {
   num_children: number | null;
   inventory_checked: boolean;
   operational_notes: string | null;
+  deposit_available: number;
 }
 
 function fromRow(row: BookingWithListingRow): ActiveBooking {
+  const depApps = row.booking_deposit_applications ?? [];
+  let depReturned = 0, depApplied = 0, depSurplus = 0;
+  for (const ap of depApps) {
+    const v = Number(ap.amount) || 0;
+    if (ap.kind === 'returned_to_guest') depReturned += v;
+    else if (ap.kind === 'applied_to_damage') depApplied += v;
+    else if (ap.kind === 'surplus_to_income') depSurplus += v;
+  }
+  const secDep = row.security_deposit !== null && row.security_deposit !== undefined
+    ? Number(row.security_deposit)
+    : 0;
+  const depAvailable = Math.max(0, secDep - depReturned - depApplied - depSurplus);
+
   return {
     id: row.id,
     confirmation_code: row.confirmation_code,
@@ -65,6 +79,7 @@ function fromRow(row: BookingWithListingRow): ActiveBooking {
     num_children: row.num_children ?? null,
     inventory_checked: row.inventory_checked ?? false,
     operational_notes: row.operational_notes ?? null,
+    deposit_available: depAvailable,
   };
 }
 
@@ -185,9 +200,16 @@ export default function ActiveBookingsWidget({ propertyIds }: Props) {
                     className="hover:bg-slate-50 transition-colors"
                   >
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border whitespace-nowrap ${ui.className}`}>
-                        {ui.label}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border whitespace-nowrap ${ui.className}`}>
+                          {ui.label}
+                        </span>
+                        {b.deposit_available > 0 && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap bg-orange-100 text-orange-700 border-orange-200">
+                            💰 Depósito pendiente
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col min-w-0">

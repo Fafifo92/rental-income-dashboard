@@ -67,18 +67,24 @@ Deno.serve(async (req) => {
   for (const settings of (allSettings ?? []) as OwnerSettings[]) {
     const tz = settings.timezone || 'America/Bogota';
     const hour = localHour(tz);
-
-    // Solo procesar si es la hora configurada (12:00 local del owner).
-    if (hour !== CHECKOUT_HOUR) continue;
-
     const today = todayISO(tz);
     let processed = 0, skipped = 0, errors = 0;
+
+    // Reservas PASADAS (end_date < hoy): procesar siempre para recuperar las
+    // que se escaparon del slot horario en días anteriores.
+    // Reservas de HOY: solo procesar a partir de CHECKOUT_HOUR para no marcar
+    // check-out antes de que el huésped pueda haber salido.
+    const cutoffDate = hour >= CHECKOUT_HOUR ? today : (() => {
+      const d = new Date(today + 'T00:00:00');
+      d.setDate(d.getDate() - 1);
+      return d.toISOString().slice(0, 10);
+    })();
 
     const { data: bookings, error: bErr } = await admin
       .from('bookings')
       .select('id, owner_id, end_date, status, checkin_done, checkout_done')
       .eq('owner_id', settings.user_id)
-      .lte('end_date', today)
+      .lte('end_date', cutoffDate)
       .or('checkout_done.is.null,checkout_done.eq.false');
 
     if (bErr) { errors++; results[settings.user_id] = { processed, skipped, errors, date: today }; continue; }

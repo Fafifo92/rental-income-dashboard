@@ -28,6 +28,7 @@ import { getBooking, type BookingWithListingRow, listBookingAlerts, type Booking
 import { listProperties } from '@/services/properties';
 import { listPendingRecurringForOwner } from '@/services/recurringPeriods';
 import { listPendingSharedBills } from '@/services/sharedBills';
+import { listPendingDepositReturns, type PendingDepositReturn } from '@/services/deposits';
 import RecurringPendingPanel from './RecurringPendingPanel';
 import SharedBillsPendingPanel from './SharedBillsPendingPanel';
 
@@ -114,7 +115,8 @@ function usePendingCount(refreshKey: number): number {
       getDamageReconciliations(),
       listPendingRecurringForOwner(6),
       listPendingSharedBills(6),
-    ]).then(([alerts, invItems, recon, recurring, sharedBills]) => {
+      listPendingDepositReturns(),
+    ]).then(([alerts, invItems, recon, recurring, sharedBills, pendingDeposits]) => {
       if (!mounted) return;
       const cleanings   = (alerts.data  ?? []).filter(a => a.issues.includes('cleaning')).length;
       const invProblems = (invItems.data ?? []).filter(it =>
@@ -125,7 +127,8 @@ function usePendingCount(refreshKey: number): number {
       ).length;
       const recurringN  = (recurring.data    ?? []).length;
       const sharedN     = (sharedBills.data  ?? []).length;
-      setCount(cleanings + invProblems + openRecon + recurringN + sharedN);
+      const depositN    = (pendingDeposits.data ?? []).length;
+      setCount(cleanings + invProblems + openRecon + recurringN + sharedN + depositN);
     });
     return () => { mounted = false; };
   }, [refreshKey]);
@@ -242,6 +245,7 @@ export default function DashboardClient() {
           <TodayCheckInOutWidget propertyIds={propertyIds} />
         ) : activeTab === 'pendientes' ? (
           <div className="space-y-6">
+            <DepositReturnPendingWidget propertyIds={propertyIds.length > 0 ? propertyIds : null} />
             <RecurringPendingPanel
               propertyIds={propertyIds.length > 0 ? propertyIds : null}
               onChanged={() => setPendingRefreshKey(k => k + 1)}
@@ -515,6 +519,108 @@ export default function DashboardClient() {
         </Suspense>
       )}
     </>
+  );
+}
+
+// ---------- Widget "Depósitos pendientes de devolución" ----------
+function DepositReturnPendingWidget({ propertyIds }: { propertyIds?: string[] | null }): JSX.Element | null {
+  const [items, setItems] = useState<PendingDepositReturn[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    listPendingDepositReturns().then(res => {
+      if (!mounted) return;
+      if (!res.error) setItems(res.data ?? []);
+      setLoading(false);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  if (loading) return null;
+
+  const visible = propertyIds && propertyIds.length > 0
+    ? items.filter(({ booking }) => booking.property_id && propertyIds.includes(booking.property_id))
+    : items;
+
+  if (visible.length === 0) return null;
+
+  const totalToReturn = visible.reduce((s, { balance }) => s + balance.available, 0);
+
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-orange-50 rounded-2xl border border-orange-200 p-5 sm:p-6"
+    >
+      <header className="flex items-start justify-between gap-3 mb-4">
+        <div>
+          <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+            💰 Depósitos pendientes de devolución
+            <span className="text-sm font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200">
+              {visible.length}
+            </span>
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Reservas con depósito de seguridad retenido y saldo pendiente por devolver al huésped.
+          </p>
+        </div>
+        <a href="/bookings" className="text-xs text-orange-700 hover:underline font-medium whitespace-nowrap">
+          Ver reservas →
+        </a>
+      </header>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-[10px] uppercase text-slate-500 bg-orange-100/60">
+            <tr>
+              <th className="text-left py-1.5 px-2">Huésped</th>
+              <th className="text-left py-1.5 px-2">Checkout</th>
+              <th className="text-left py-1.5 px-2">Propiedad</th>
+              <th className="text-right py-1.5 px-2">Monto a devolver</th>
+              <th className="text-left py-1.5 px-2">Acción</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-orange-100">
+            {visible.slice(0, 10).map(({ booking, balance }) => (
+              <tr key={booking.id}>
+                <td className="py-1.5 px-2 font-medium text-slate-800">
+                  {booking.guest_name ?? booking.confirmation_code}
+                </td>
+                <td className="py-1.5 px-2 text-slate-500 whitespace-nowrap">
+                  {formatDateDisplay(booking.end_date)}
+                </td>
+                <td className="py-1.5 px-2 text-slate-500">
+                  {booking.property_name ?? '—'}
+                </td>
+                <td className="py-1.5 px-2 text-right font-bold text-orange-700 whitespace-nowrap">
+                  {formatCurrency(balance.available)}
+                </td>
+                <td className="py-1.5 px-2">
+                  <a
+                    href={`/bookings?booking=${booking.id}`}
+                    className="text-orange-700 hover:underline font-medium whitespace-nowrap"
+                  >
+                    Registrar devolución →
+                  </a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {visible.length > 10 && (
+          <p className="text-xs text-slate-400 text-center mt-3">
+            +{visible.length - 10} más — ve a{' '}
+            <a href="/bookings" className="text-orange-700 hover:underline">reservas</a> para verlos todos.
+          </p>
+        )}
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-orange-200 flex items-center justify-between">
+        <span className="text-xs text-slate-500">Total por devolver:</span>
+        <span className="text-sm font-bold text-orange-700">{formatCurrency(totalToReturn)}</span>
+      </div>
+    </motion.section>
   );
 }
 

@@ -25,7 +25,7 @@ export const BOOKING_COLUMN_ORDER = [
   'guest_name',
   'channel',
   'adjusted_gross',
-  'net_payout',
+  'net_to_bank',
   'actions',
 ] as const;
 
@@ -172,6 +172,11 @@ export function useBookingsColumns({ onView, onEdit, onPayout, onDelete, pending
                   🧹 Aseo pendiente
                 </span>
               )}
+              {b.checkout_done && (b.deposit_available ?? 0) > 0 && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200 whitespace-nowrap shrink-0">
+                  💰 Depósito pendiente
+                </span>
+              )}
             </div>
           </div>
         );
@@ -205,7 +210,7 @@ export function useBookingsColumns({ onView, onEdit, onPayout, onDelete, pending
         return <span className="font-semibold text-slate-800 whitespace-nowrap">{formatCurrency(v)}</span>;
       },
     }),
-    helper.accessor('net_payout', {
+    helper.accessor('net_to_bank', {
       header: 'Neto al banco',
       meta: { align: 'right' },
       sortingFn: 'basic',

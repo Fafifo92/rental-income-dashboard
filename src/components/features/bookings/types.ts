@@ -42,6 +42,10 @@ export interface DisplayBooking {
   deposit_available?: number;
   /** Bruto base ± ajustes: +ingresos adicionales −descuentos. */
   adjusted_gross?: number;
+  /** Ajustes de reserva que ya entraron/salieron por cuenta bancaria. */
+  banked_adjustments_total?: number;
+  /** Neto al banco = net_payout + ajustes bancarizados. */
+  net_to_bank?: number | null;
 }
 
 export interface BookingForm {

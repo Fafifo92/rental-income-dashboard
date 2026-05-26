@@ -29,6 +29,7 @@ import type {
   BookingDepositApplicationRow,
   BookingDepositApplicationKind,
   BookingRow,
+  DepositStatus,
 } from '@/types/database';
 import { todayISO } from '@/lib/dateUtils';
 import { computeDepositBalance, type DepositBalance } from '@/lib/depositMath';
@@ -312,6 +313,93 @@ export interface DepositLedgerEntry {
 }
 
 /** Devuelve la línea de tiempo del depósito de una reserva (incluye recepción inicial). */
+// ── Pending deposit returns ─────────────────────────────────────────────────
+
+export interface PendingDepositReturn {
+  booking: {
+    id: string;
+    confirmation_code: string;
+    guest_name: string | null;
+    end_date: string;
+    security_deposit: number;
+    deposit_bank_account_id: string | null;
+    deposit_status: DepositStatus;
+    property_name: string | null;
+    property_id: string | null;
+  };
+  balance: DepositBalance;
+}
+
+/**
+ * Returns bookings (any status) with a deposit balance still pending return.
+ * Used by the Pendientes tab and status badges.
+ */
+export const listPendingDepositReturns = async (
+  propertyIds?: string[] | null,
+): Promise<ServiceResult<PendingDepositReturn[]>> => {
+  let allowedListingIds: string[] | undefined;
+  if (propertyIds && propertyIds.length > 0) {
+    const lRes = await supabase
+      .from('listings')
+      .select('id')
+      .in('property_id', propertyIds);
+    if (lRes.error) return { data: null, error: lRes.error.message };
+    allowedListingIds = (lRes.data ?? []).map((l: { id: string }) => l.id);
+    if (allowedListingIds.length === 0) return { data: [], error: null };
+  }
+
+  let query = supabase
+    .from('bookings')
+    .select(
+      'id, confirmation_code, guest_name, end_date, security_deposit, deposit_bank_account_id, deposit_status, listing_id, listings(id, external_name, property_id, properties(id, name)), booking_deposit_applications(kind, amount)',
+    )
+    .not('security_deposit', 'is', null)
+    .gt('security_deposit', 0)
+    .order('end_date', { ascending: false });
+
+  if (allowedListingIds) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    query = (query as any).in('listing_id', allowedListingIds);
+  }
+
+  const { data, error } = await query;
+  if (error) return { data: null, error: error.message };
+
+  const rows = (data ?? []) as Array<{
+    id: string;
+    confirmation_code: string;
+    guest_name: string | null;
+    end_date: string;
+    security_deposit: number;
+    deposit_bank_account_id: string | null;
+    deposit_status: DepositStatus;
+    listing_id: string | null;
+    listings: { property_id: string; properties: { id: string; name: string } | null } | null;
+    booking_deposit_applications: Array<{ kind: BookingDepositApplicationKind; amount: number }>;
+  }>;
+
+  const result: PendingDepositReturn[] = [];
+  for (const row of rows) {
+    const balance = computeDepositBalance(row.security_deposit, row.booking_deposit_applications ?? []);
+    if (balance.available <= 0) continue;
+    result.push({
+      booking: {
+        id: row.id,
+        confirmation_code: row.confirmation_code,
+        guest_name: row.guest_name,
+        end_date: row.end_date,
+        security_deposit: row.security_deposit,
+        deposit_bank_account_id: row.deposit_bank_account_id,
+        deposit_status: row.deposit_status,
+        property_name: row.listings?.properties?.name ?? null,
+        property_id: row.listings?.property_id ?? null,
+      },
+      balance,
+    });
+  }
+  return { data: result, error: null };
+};
+
 export const getDepositLedger = async (
   bookingId: string,
 ): Promise<ServiceResult<DepositLedgerEntry[]>> => {

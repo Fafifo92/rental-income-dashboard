@@ -106,6 +106,7 @@ export default function BookingsStatusAccordion({ bookings, columns, loading, on
         const activeItems = isCancelledSection ? [] : items;
         const sectionNights = activeItems.reduce((s, b) => s + b.num_nights, 0);
         const sectionRevenue = activeItems.reduce((s, b) => s + (b.adjusted_gross ?? b.total_revenue), 0);
+        const pendingDepositCount = items.filter(b => Number(b.deposit_available ?? 0) > 0).length;
         const isDragOver = dragOverStatus === status;
 
         return (
@@ -151,6 +152,11 @@ export default function BookingsStatusAccordion({ bookings, columns, loading, on
                   >
                     {ui.label}
                   </span>
+                  {pendingDepositCount > 0 && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border bg-orange-100 text-orange-700 border-orange-200">
+                      💰 Depósito pendiente ({pendingDepositCount})
+                    </span>
+                  )}
                   <span className="text-sm font-medium text-slate-600">
                     {loading ? '…' : `${items.length} reserva${items.length !== 1 ? 's' : ''}`}
                   </span>
@@ -189,7 +195,7 @@ export default function BookingsStatusAccordion({ bookings, columns, loading, on
                       renderFooter={filteredData => {
                         const active = isCancelledSection ? [] : filteredData;
                         const rev = active.reduce((s, b) => s + (b.adjusted_gross ?? b.total_revenue), 0);
-                        const net = active.reduce((s, b) => s + (b.net_payout ?? 0), 0);
+                        const net = active.reduce((s, b) => s + (b.net_to_bank ?? 0), 0);
                         const nights = active.reduce((s, b) => s + b.num_nights, 0);
                         return (
                           <tr className="border-t bg-slate-50">

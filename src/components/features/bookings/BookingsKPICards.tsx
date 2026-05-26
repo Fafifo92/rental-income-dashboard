@@ -19,7 +19,7 @@ export function buildBookingKPIs(enrichedBookings: DisplayBooking[]): { kpis: KP
     return !isCancelled || b.total_revenue > 0;
   });
   const confirmed = payoutEligible.filter(b => b.payout_bank_account_id);
-  const receivedPayout = confirmed.reduce((s, b) => s + (b.net_payout ?? b.total_revenue), 0);
+  const receivedPayout = confirmed.reduce((s, b) => s + (b.net_to_bank ?? b.net_payout ?? b.total_revenue), 0);
   const expectedPayout = payoutEligible.filter(b => !b.payout_bank_account_id).reduce((s, b) => s + b.total_revenue, 0);
   const cancelledFinesTotal = enrichedBookings
     .filter(b => b.status.toLowerCase().includes('cancel') && b.total_revenue < 0)

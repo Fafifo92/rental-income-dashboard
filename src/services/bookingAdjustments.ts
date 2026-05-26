@@ -58,11 +58,11 @@ export const deleteBookingAdjustment = async (
  * y descuentos en los KPIs globales y gráficas mensuales.
  */
 export const listAllBookingAdjustmentsForOwner = async (): Promise<
-  ServiceResult<Pick<BookingAdjustmentRow, 'kind' | 'amount' | 'date'>[]>
+  ServiceResult<Pick<BookingAdjustmentRow, 'kind' | 'amount' | 'date' | 'bank_account_id'>[]>
 > => {
   const { data, error } = await supabase
     .from('booking_adjustments')
-    .select('kind, amount, date');
+    .select('kind, amount, date, bank_account_id');
   if (error) return { data: null, error: error.message };
   return { data: data ?? [], error: null };
 };

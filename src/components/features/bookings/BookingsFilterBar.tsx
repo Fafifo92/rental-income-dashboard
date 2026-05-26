@@ -18,49 +18,50 @@ export default function BookingsFilterBar({
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-      className="bg-white border rounded-xl p-4 shadow-sm space-y-3"
+      className="bg-white border rounded-xl px-4 py-3 shadow-sm"
     >
-      {/* Row 1: Search (full width) */}
-      <div>
-        <label className="block text-xs font-medium text-slate-500 mb-1.5">Buscar huésped / código</label>
-        <div className="flex gap-2">
-          <input
-            type="text" value={search} onChange={e => setSearch(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && applySearch()}
-            placeholder="Buscar…"
-            className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-          />
-          <button onClick={applySearch}
-            className="px-3 py-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap">
-            Buscar
-          </button>
+      {/* Desktop: single row | Mobile: stacked */}
+      <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+        {/* Search */}
+        <div className="flex-1 min-w-0">
+          <label className="block text-xs font-medium text-slate-500 mb-1">Buscar huésped / código</label>
+          <div className="flex gap-2">
+            <input
+              type="text" value={search} onChange={e => setSearch(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && applySearch()}
+              placeholder="Buscar…"
+              className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <button onClick={applySearch}
+              className="px-3 py-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap">
+              Buscar
+            </button>
+          </div>
         </div>
-      </div>
 
-      {/* Row 2: Desde + Hasta (2 columns) */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1.5">Desde</label>
+        {/* Desde */}
+        <div className="lg:w-36">
+          <label className="block text-xs font-medium text-slate-500 mb-1">Desde</label>
           <input type="date" value={filters.dateFrom ?? ''}
             max={filters.dateTo || undefined}
             onChange={e => setFilters(prev => ({ ...prev, dateFrom: e.target.value || undefined }))}
             className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
           />
         </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1.5">Hasta</label>
+
+        {/* Hasta */}
+        <div className="lg:w-36">
+          <label className="block text-xs font-medium text-slate-500 mb-1">Hasta</label>
           <input type="date" value={filters.dateTo ?? ''}
             min={filters.dateFrom || undefined}
             onChange={e => setFilters(prev => ({ ...prev, dateTo: e.target.value || undefined }))}
             className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
           />
         </div>
-      </div>
 
-      {/* Row 3: Canal + Clear button */}
-      <div className="flex gap-3 items-end">
-        <div className="flex-1">
-          <label className="block text-xs font-medium text-slate-500 mb-1.5">Canal</label>
+        {/* Canal */}
+        <div className="lg:w-36">
+          <label className="block text-xs font-medium text-slate-500 mb-1">Canal</label>
           <select
             value={filters.channel ?? ''}
             onChange={e => setFilters(prev => ({ ...prev, channel: e.target.value || undefined }))}
@@ -74,11 +75,13 @@ export default function BookingsFilterBar({
             <option value="other">Otro</option>
           </select>
         </div>
+
+        {/* Clear */}
         {hasFilters && (
           <motion.button
             initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
             onClick={onClear}
-            className="px-3 py-2 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap"
+            className="px-3 py-2 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap self-end"
           >
             ✕ Limpiar
           </motion.button>

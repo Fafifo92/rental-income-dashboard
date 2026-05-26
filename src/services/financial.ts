@@ -71,7 +71,7 @@ export interface MonthlyPnL {
 /** Detalle mensual de ingresos confirmados vs esperados */
 export interface MonthlyPayoutData {
   month: string;
-  received: number;  // net_payout de reservas con banco asignado
+  received: number;  // net_payout de reservas con banco asignado + ajustes con cuenta bancaria
   expected: number;  // total_revenue de reservas sin banco (no canceladas)
   expenses: number;
   netConfirmed: number; // received - expenses
@@ -79,7 +79,7 @@ export interface MonthlyPayoutData {
 
 /**
  * Desglose de pagos:
- *  - received:        ingresos confirmados (payout_bank_account_id != null)
+ *  - received:        ingresos confirmados (payout_bank_account_id != null) + ajustes con cuenta bancaria
  *  - expected:        ingresos esperados (payout sin confirmar, no cancelados)
  *  - incompleteCount: reservas pasadas no canceladas con payout sin confirmar
  *  - monthlyBreakdown: desglose mes a mes
@@ -112,6 +112,7 @@ interface AdjData {
   kind: string;
   amount: number;
   date: string;
+  bank_account_id?: string | null;
 }
 
 interface DateRange {
@@ -503,6 +504,7 @@ const buildMonthlyPnLByBookings = (
 const buildPayoutBreakdown = (
   bookings: BookingData[],
   expenses: Expense[],
+  adjustments: AdjData[],
   range: DateRange,
   granularity: ChartGranularity,
 ): PayoutBreakdown => {
@@ -540,6 +542,16 @@ const buildPayoutBreakdown = (
       add(exptMap, key, b.revenue);
       if (isPast) incompleteCount++;
     }
+  }
+
+  for (const a of adjustments) {
+    if (!a.date || !inRange(a.date) || !a.bank_account_id) continue;
+    const amount = Number(a.amount) || 0;
+    if (!amount) continue;
+    const signed = a.kind === 'discount' ? -amount : amount;
+    const key = keyFn(new Date(a.date + 'T12:00:00'));
+    received = addMoney(received, signed);
+    add(recvMap, key, signed);
   }
 
   for (const e of expenses) {
@@ -747,6 +759,7 @@ export const computeFinancials = async (
         kind:   a.kind,
         amount: Number(a.amount),
         date:   a.date,
+        bank_account_id: a.bank_account_id ?? null,
       }));
     }
   }
@@ -846,7 +859,7 @@ export const computeFinancials = async (
   })();
   const exportMonthly   = buildMonthlyPnL(bookings, expenses, adjustments, exportRange, 'month', propertyCount);
   const exportMonthlyByBookings = buildMonthlyPnLByBookings(bookings, expenses, adjustments, exportRange, propertyCount);
-  const payoutBreakdown = buildPayoutBreakdown(bookings, expenses, chartRange, granularity);
+  const payoutBreakdown = buildPayoutBreakdown(bookings, expenses, adjustments, chartRange, granularity);
 
   const inPeriod = (d: string) => { const t = new Date(d + 'T12:00:00'); return t >= range.from && t <= range.to; };
   const expensesInPeriod = expenses.filter(e => e.date && inPeriod(e.date));
