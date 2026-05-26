@@ -25,6 +25,7 @@ import {
   listCreditPools, createCreditPool, updateCreditPool, archiveCreditPool,
   listConsumptionsForPool, resolvePoolProperties, setCreditPoolProperties,
   unitPriceOf, calcUnitsForBooking,
+  deleteCreditPoolConsumptions, recomputeCreditPoolSnapshots,
 } from '@/services/creditPools';
 import type {
   CreditPoolRow, CreditPoolConsumptionRow, CreditPoolConsumptionRule,
@@ -183,6 +184,36 @@ export default function CreditPoolsClient() {
     await load();
   }, [load]);
 
+  const onDeleteConsumptions = useCallback(async (p: CreditPoolRow) => {
+    const ok = confirm(
+      `¿Borrar TODOS los consumos de la bolsa "${p.name}"?\n\n` +
+      `Esto eliminará el desglose de atribución por propiedad y reseteará los ` +
+      `créditos usados a 0. El gasto original de la compra de la bolsa NO se toca.\n\n` +
+      `Esta acción no se puede deshacer.`
+    );
+    if (!ok) return;
+    const res = await deleteCreditPoolConsumptions(p.id);
+    if (res.error) { toast.error(res.error); return; }
+    toast.success(`Se borraron ${res.data?.deleted ?? 0} consumos de "${p.name}"`);
+    await load();
+  }, [load]);
+
+  const onRecomputeSnapshots = useCallback(async (p: CreditPoolRow) => {
+    const ok = confirm(
+      `¿Recalcular los precios históricos de los consumos de "${p.name}" ` +
+      `usando el precio/crédito ACTUAL de la bolsa?\n\n` +
+      `Úsalo sólo si la bolsa quedó mal configurada al momento del consumo ` +
+      `(p.ej. quedaron en $0).`
+    );
+    if (!ok) return;
+    const res = await recomputeCreditPoolSnapshots(p.id);
+    if (res.error) { toast.error(res.error); return; }
+    toast.success(
+      `Recalculados ${res.data?.updated ?? 0} consumos a ${formatCurrency(res.data?.unitPrice ?? 0)}/crédito`
+    );
+    await load();
+  }, [load]);
+
   useBackdropClose(() => setModalOpen(false));
   useBackdropClose(() => setHistoryTarget(null));
 
@@ -248,6 +279,8 @@ export default function CreditPoolsClient() {
           onHistory={(p) => setHistoryTarget(p)}
           onCalc={(p) => setCalcTarget(p)}
           onEditProps={(p) => setPropsTarget(p)}
+          onDeleteConsumptions={onDeleteConsumptions}
+          onRecomputeSnapshots={onRecomputeSnapshots}
         />
       )}
 
@@ -525,6 +558,7 @@ function PoolHistoryModal({ pool, onClose }: {
 function PoolsGrouped({
   pools, vendors, properties, propsByPool,
   onEdit, onArchive, onHistory, onCalc, onEditProps,
+  onDeleteConsumptions, onRecomputeSnapshots,
 }: {
   pools: CreditPoolRow[];
   vendors: Vendor[];
@@ -535,6 +569,8 @@ function PoolsGrouped({
   onHistory: (p: CreditPoolRow) => void;
   onCalc: (p: CreditPoolRow) => void;
   onEditProps: (p: CreditPoolRow) => void;
+  onDeleteConsumptions: (p: CreditPoolRow) => void;
+  onRecomputeSnapshots: (p: CreditPoolRow) => void;
 }) {
   // Agrupa por vendor_id (null = "Sin proveedor"); ordena bolsas por
   // activated_at asc (FIFO: la más antigua primero, la próxima a consumirse).
@@ -591,6 +627,8 @@ function PoolsGrouped({
                   onHistory={() => onHistory(p)}
                   onCalc={() => onCalc(p)}
                   onEditProps={() => onEditProps(p)}
+                  onDeleteConsumptions={() => onDeleteConsumptions(p)}
+                  onRecomputeSnapshots={() => onRecomputeSnapshots(p)}
                 />
               ))}
             </div>
@@ -605,6 +643,7 @@ function PoolCard({
   pool: p, fifoOrder, fifoTotal, propertyIds, propertyNames,
   inheritedFromVendor,
   onEdit, onArchive, onHistory, onCalc, onEditProps,
+  onDeleteConsumptions, onRecomputeSnapshots,
 }: {
   pool: CreditPoolRow;
   fifoOrder: number;
@@ -617,6 +656,8 @@ function PoolCard({
   onHistory: () => void;
   onCalc: () => void;
   onEditProps: () => void;
+  onDeleteConsumptions: () => void;
+  onRecomputeSnapshots: () => void;
 }) {
   const remaining = Number(p.credits_total) - Number(p.credits_used);
   const pct = Number(p.credits_total) > 0
@@ -730,6 +771,26 @@ function PoolCard({
           </button>
         )}
       </div>
+
+      {/* Acciones de mantenimiento — sólo cuando hay consumos asociados */}
+      {Number(p.credits_used) > 0 && (
+        <div className="flex gap-2 mt-2">
+          <button
+            onClick={onRecomputeSnapshots}
+            className="flex-1 text-[11px] font-semibold text-sky-700 hover:bg-sky-50 py-1.5 rounded border border-sky-100"
+            title="Recalcula los precios congelados de los consumos usando el precio/crédito actual de la bolsa."
+          >
+            🔄 Recalcular precios
+          </button>
+          <button
+            onClick={onDeleteConsumptions}
+            className="flex-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50 py-1.5 rounded border border-rose-100"
+            title="Borra todos los consumos de esta bolsa (limpia el panel de atribución). No afecta el gasto de compra."
+          >
+            🗑️ Borrar consumos
+          </button>
+        </div>
+      )}
     </div>
   );
 }

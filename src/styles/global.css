@@ -66,3 +66,9 @@ input, select, textarea {
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
+/* Recharts: allow tooltips to overflow chart boundaries on mobile */
+.recharts-wrapper,
+.recharts-responsive-container {
+  overflow: visible !important;
+}
+

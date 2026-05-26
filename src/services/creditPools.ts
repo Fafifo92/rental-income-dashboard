@@ -140,6 +140,92 @@ export const archiveCreditPool = async (id: string): Promise<ServiceResult<true>
   return { data: true, error: null };
 };
 
+/**
+ * Borra TODOS los consumos (`credit_pool_consumptions`) de una bolsa y resetea
+ * su contador `credits_used` a 0. Útil para limpiar el panel de "Atribución de
+ * bolsas por propiedad" cuando una bolsa quedó mal configurada y sus consumos
+ * históricos no tienen sentido contable.
+ *
+ * Esto NO afecta el `expense` original de compra de la bolsa (eso vive en
+ * `expenses` aparte). Sólo limpia la atribución informativa.
+ *
+ * Si la bolsa estaba en estado `depleted`, vuelve a su estado anterior según
+ * corresponda (archived si estaba archivada, active en otro caso).
+ */
+export const deleteCreditPoolConsumptions = async (
+  poolId: string,
+): Promise<ServiceResult<{ deleted: number }>> => {
+  const { data: existing, error: countErr } = await supabase
+    .from('credit_pool_consumptions')
+    .select('id')
+    .eq('pool_id', poolId);
+  if (countErr) return { data: null, error: countErr.message };
+  const deleted = existing?.length ?? 0;
+
+  if (deleted > 0) {
+    const { error: delErr } = await supabase
+      .from('credit_pool_consumptions')
+      .delete()
+      .eq('pool_id', poolId);
+    if (delErr) return { data: null, error: delErr.message };
+  }
+
+  // Resetear contador y, si estaba depleted, volver a active/archived según corresponda.
+  const { data: pool } = await supabase
+    .from('credit_pools')
+    .select('status')
+    .eq('id', poolId)
+    .single();
+  const nextStatus = pool?.status === 'depleted' ? 'active' : pool?.status ?? 'active';
+  const { error: updErr } = await supabase
+    .from('credit_pools')
+    .update({ credits_used: 0, status: nextStatus })
+    .eq('id', poolId);
+  if (updErr) return { data: null, error: updErr.message };
+
+  return { data: { deleted }, error: null };
+};
+
+/**
+ * Recalcula `unit_price_snapshot` en todos los consumos de una bolsa usando
+ * el precio/crédito ACTUAL de la bolsa. Útil cuando la bolsa se configuró con
+ * 0 (o un precio incorrecto) en el momento del consumo y luego se ajustó.
+ *
+ * Importante: rompe el contrato normal de "snapshot inmutable" — usar sólo
+ * para corregir consumos creados con datos incompletos.
+ */
+export const recomputeCreditPoolSnapshots = async (
+  poolId: string,
+): Promise<ServiceResult<{ updated: number; unitPrice: number }>> => {
+  const { data: pool, error: pErr } = await supabase
+    .from('credit_pools')
+    .select('id, total_price, credits_total')
+    .eq('id', poolId)
+    .single();
+  if (pErr || !pool) return { data: null, error: pErr?.message ?? 'Bolsa no encontrada' };
+  const credits = Number(pool.credits_total);
+  const total = Number(pool.total_price);
+  if (credits <= 0 || total <= 0) {
+    return { data: null, error: 'La bolsa no tiene precio o créditos totales válidos para recalcular.' };
+  }
+  const unitPrice = total / credits;
+
+  const { data: rows, error: lErr } = await supabase
+    .from('credit_pool_consumptions')
+    .select('id')
+    .eq('pool_id', poolId);
+  if (lErr) return { data: null, error: lErr.message };
+  const updated = rows?.length ?? 0;
+  if (updated === 0) return { data: { updated: 0, unitPrice }, error: null };
+
+  const { error: uErr } = await supabase
+    .from('credit_pool_consumptions')
+    .update({ unit_price_snapshot: unitPrice })
+    .eq('pool_id', poolId);
+  if (uErr) return { data: null, error: uErr.message };
+  return { data: { updated, unitPrice }, error: null };
+};
+
 export const listConsumptionsForPool = async (
   poolId: string,
 ): Promise<ServiceResult<CreditPoolConsumptionRow[]>> => {
@@ -567,6 +653,12 @@ export const getCreditPoolCostByProperty = async (opts: {
   to?: string;
   propertyId?: string;
   vendorId?: string;
+  /**
+   * Si `true`, incluye consumos de bolsas archivadas. Por defecto se excluyen
+   * para no ensuciar el panel de atribución con bolsas que el usuario ya retiró.
+   * El historial real (`expenses` de compra) no se ve afectado.
+   */
+  includeArchived?: boolean;
 } = {}): Promise<ServiceResult<PoolCostByPropertyRow[]>> => {
   let q = supabase
     .from('credit_pool_consumptions')
@@ -588,12 +680,16 @@ export const getCreditPoolCostByProperty = async (opts: {
   const poolIds = [...new Set(consumptions.map(r => r.pool_id))];
   const bookingIds = [...new Set(consumptions.map(r => r.booking_id))];
 
-  const { data: poolsData } = await supabase
+  let poolsQuery = supabase
     .from('credit_pools')
-    .select('id, name, vendor_id, total_price, credits_total')
+    .select('id, name, vendor_id, total_price, credits_total, status')
     .in('id', poolIds);
-  const poolsById = new Map<string, { id: string; name: string; vendor_id: string | null; total_price: number; credits_total: number }>();
-  for (const p of (poolsData ?? []) as Array<{ id: string; name: string; vendor_id: string | null; total_price: number; credits_total: number }>) {
+  if (!opts.includeArchived) {
+    poolsQuery = poolsQuery.neq('status', 'archived');
+  }
+  const { data: poolsData } = await poolsQuery;
+  const poolsById = new Map<string, { id: string; name: string; vendor_id: string | null; total_price: number; credits_total: number; status: string }>();
+  for (const p of (poolsData ?? []) as Array<{ id: string; name: string; vendor_id: string | null; total_price: number; credits_total: number; status: string }>) {
     poolsById.set(p.id, p);
   }
 
@@ -629,9 +725,13 @@ export const getCreditPoolCostByProperty = async (opts: {
     if (opts.vendorId && opts.vendorId !== pool.vendor_id) continue;
 
     const credits = Number(r.credits_used);
-    const unitPrice = r.unit_price_snapshot != null
-      ? Number(r.unit_price_snapshot)
-      : (Number(pool.credits_total) > 0 ? Number(pool.total_price) / Number(pool.credits_total) : 0);
+    // Fallback de precio: si el snapshot es null O 0 (bolsa mal configurada al
+    // momento del consumo), usar el precio actual del pool. Esto sólo aplica
+    // a consumos que históricamente quedaron sin precio válido — un snapshot
+    // legítimo positivo siempre prevalece.
+    const snapshotRaw = r.unit_price_snapshot != null ? Number(r.unit_price_snapshot) : null;
+    const fallback = Number(pool.credits_total) > 0 ? Number(pool.total_price) / Number(pool.credits_total) : 0;
+    const unitPrice = snapshotRaw != null && snapshotRaw > 0 ? snapshotRaw : fallback;
     const cost = credits * unitPrice;
 
     const key = `${propertyId}::${pool.id}`;

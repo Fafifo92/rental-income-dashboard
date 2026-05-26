@@ -10,7 +10,7 @@
  *
  * "Sin grupo" properties share a neutral color.
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend, ReferenceLine,
@@ -129,13 +129,13 @@ function CustomTooltip({ active, payload, label, totalProperties, coordinate, vi
   const total = entries.reduce((s, p) => s + p.value, 0);
   const pct = totalProperties > 0 ? Math.round((total / totalProperties) * 100) : 0;
 
-  // For bar charts: default to above the coordinate (bars grow from bottom, space is above).
-  // Only drop below if very near the top of the chart area.
-  const nearTop = coordinate && viewBox && coordinate.y < viewBox.y + viewBox.height * 0.25;
-  const flipX   = coordinate && viewBox && coordinate.x > viewBox.x + viewBox.width  * 0.55;
+  // Default: show to the LEFT of the bar (safer on mobile — right edge overflows viewport).
+  // Only flip to RIGHT if the bar is in the leftmost 20% of the chart.
+  const nearTop  = coordinate && viewBox && coordinate.y < viewBox.y + viewBox.height * 0.25;
+  const flipRight = coordinate && viewBox && coordinate.x < viewBox.x + viewBox.width * 0.20;
 
   const transform = [
-    flipX ? 'translateX(calc(-100% - 12px))' : 'translateX(12px)',
+    flipRight ? 'translateX(12px)' : 'translateX(calc(-100% - 12px))',
     nearTop ? 'translateY(8px)' : 'translateY(calc(-100% - 8px))',
   ].join(' ');
 
@@ -149,8 +149,8 @@ function CustomTooltip({ active, payload, label, totalProperties, coordinate, vi
         borderRadius: 12,
         border: '1px solid #e2e8f0',
         padding: '12px 14px',
-        minWidth: 200,
-        maxWidth: 290,
+        minWidth: 160,
+        maxWidth: 260,
         fontSize: 13,
         pointerEvents: 'none',
       }}
@@ -208,8 +208,17 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
   const [totalProps, setTotalProps] = useState(0);
   const [stats, setStats]           = useState<OccupancyStats>({ mostOccupied: null, leastOccupied: null, totalBuckets: 0 });
   const [loading, setLoading]       = useState(true);
+  const chartRef                    = useRef<HTMLDivElement>(null);
 
   useEffect(() => setMounted(true), []);
+
+  // recharts sets overflow:hidden as an inline style on .recharts-wrapper,
+  // which overrides CSS. Force it to visible so the tooltip can spill out.
+  useEffect(() => {
+    if (!mounted || !chartRef.current) return;
+    const wrapper = chartRef.current.querySelector('.recharts-wrapper') as HTMLElement | null;
+    if (wrapper) wrapper.style.overflow = 'visible';
+  }, [mounted, chartData]);
 
   const propIdsKey = propertyIds?.join(',') ?? '';
 
@@ -363,7 +372,7 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
     : 0;
 
   return (
-    <div className="p-6 bg-white border rounded-xl shadow-sm">
+    <div className="p-6 bg-white border rounded-xl shadow-sm overflow-visible">
       <div className="flex items-start justify-between mb-3 gap-4 flex-wrap">
         <div>
           <h3 className="text-lg font-bold text-slate-800">Ocupación por grupo</h3>
@@ -409,7 +418,7 @@ export default function OccupancyByProperty({ granularity, from, to, propertyIds
         </div>
       )}
 
-      <div className="h-64 w-full">
+      <div ref={chartRef} className="h-64 w-full overflow-visible">
         {mounted && (
         <ResponsiveContainer width="100%" height="100%" minHeight={0} minWidth={0}>
           <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>

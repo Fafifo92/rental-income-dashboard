@@ -497,25 +497,25 @@ export default function BookingsClient() {
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }}
-        className="flex items-start justify-between"
+        className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
       >
         <div>
           <div className="flex items-center gap-3">
-            <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Reservas</h2>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">Reservas</h2>
             {isDemo && (
               <span className="text-xs font-semibold px-2 py-1 bg-amber-100 text-amber-700 rounded-full">
                 Modo demo
               </span>
             )}
           </div>
-          <p className="text-slate-500 mt-1">Historial de reservas importadas desde Airbnb.</p>
+          <p className="text-slate-500 mt-1 text-sm sm:text-base">Historial de reservas importadas desde Airbnb.</p>
         </div>
-        <div className="flex flex-wrap gap-2 items-center">
+        <div className="flex flex-wrap gap-2 items-center sm:shrink-0">
           <PropertyMultiSelect properties={allProperties} value={propertyIds} onChange={setPropertyIds} groups={groups} tags={tags} tagAssigns={tagAssigns} />
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
             onClick={() => setShowExportModal(true)}
-            className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-1.5"
+            className="px-3 py-2 sm:px-4 bg-white border border-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-1.5"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -525,14 +525,14 @@ export default function BookingsClient() {
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
             onClick={openNewBookingModal}
-            className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
+            className="px-3 py-2 sm:px-4 bg-white border border-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
           >
             + Nueva reserva
           </motion.button>
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
             onClick={() => setShowImporter(true)}
-            className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+            className="w-full sm:w-auto px-3 py-2 sm:px-4 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
           >
             Importar CSV / XLSX
           </motion.button>

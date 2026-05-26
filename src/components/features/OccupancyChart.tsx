@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine, Legend,
@@ -19,7 +19,7 @@ const CustomTooltip = ({ active, payload, label }: TooltipProps) => {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
   return (
-    <div className="bg-white rounded-xl shadow-xl border p-3 text-sm min-w-[160px]">
+    <div className="bg-white rounded-xl shadow-xl border p-3 text-sm min-w-[140px] max-w-[220px]">
       <p className="font-bold text-slate-700 mb-2">{label}</p>
       <div className="space-y-1">
         <div className="flex justify-between gap-4">
@@ -55,7 +55,13 @@ interface Props {
 
 export default function OccupancyChart({ data, breakEvenOccupancy, granularity = 'month', totalNights, availableNights }: Props) {
   const [mounted, setMounted] = useState(false);
+  const chartRef = useRef<HTMLDivElement>(null);
   useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    if (!mounted || !chartRef.current) return;
+    const wrapper = chartRef.current.querySelector('.recharts-wrapper') as HTMLElement | null;
+    if (wrapper) wrapper.style.overflow = 'visible';
+  }, [mounted, data]);
 
   const chartData: ChartEntry[] = data.map(d => ({
     ...d,
@@ -71,7 +77,7 @@ export default function OccupancyChart({ data, breakEvenOccupancy, granularity =
   const overallPct = availableNights > 0 ? Math.round((totalNights / availableNights) * 100) : 0;
 
   return (
-    <div className="p-6 bg-white border rounded-xl shadow-sm">
+    <div className="p-6 bg-white border rounded-xl shadow-sm overflow-visible">
       <div className="flex items-start justify-between mb-2 gap-4">
         <div>
           <h3 className="text-lg font-bold text-slate-800">
@@ -93,7 +99,7 @@ export default function OccupancyChart({ data, breakEvenOccupancy, granularity =
           </div>
         )}
       </div>
-      <div className="h-52 w-full">
+      <div ref={chartRef} className="h-52 w-full">
         {mounted && (
           <ResponsiveContainer width="100%" height="100%" minHeight={0} minWidth={0}>
             <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -117,7 +123,12 @@ export default function OccupancyChart({ data, breakEvenOccupancy, granularity =
                 domain={[0, 100]}
                 width={36}
               />
-              <Tooltip content={<CustomTooltip />} />
+              <Tooltip
+                content={<CustomTooltip />}
+                wrapperStyle={{ zIndex: 9999 }}
+                allowEscapeViewBox={{ x: true, y: true }}
+                isAnimationActive={false}
+              />
               {breakEvenNights > 0 && (
                 <ReferenceLine
                   yAxisId="nights"

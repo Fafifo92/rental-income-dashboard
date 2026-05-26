@@ -57,10 +57,10 @@ export default function BookingsKPICards({
           <motion.div
             key={kpi.label}
             initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}
-            className={`p-5 border rounded-xl shadow-sm ${kpi.bg}`}
+            className={`p-3 sm:p-5 border rounded-xl shadow-sm ${kpi.bg}`}
           >
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{kpi.label}</p>
-            <p className={`text-2xl font-bold mt-1 ${kpi.color}`}>{kpi.value}</p>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider leading-tight">{kpi.label}</p>
+            <p className={`text-lg sm:text-2xl font-bold mt-1 break-words ${kpi.color}`}>{kpi.value}</p>
             {kpi.sub && (
               <p className="text-xs text-amber-600 font-medium mt-1">{kpi.sub}</p>
             )}
