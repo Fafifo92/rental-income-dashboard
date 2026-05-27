@@ -429,7 +429,8 @@ function PasswordModal({
               {!generatedLink ? (
                 <>
                   <p className="text-sm text-slate-300">
-                    Se generará un link de recuperación con expiración. Cópialo y compártelo
+                    Se generará un link de recuperación de <span className="font-medium">un solo uso</span> que
+                    expira en <span className="font-medium">15 minutos</span>. Cópialo y compártelo
                     con <span className="font-medium">{target.email}</span> por el canal que prefieras.
                   </p>
                   <div className="flex gap-2">
