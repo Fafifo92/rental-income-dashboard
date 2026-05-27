@@ -156,9 +156,10 @@ export function adminSetUserPassword(targetId: string, newPassword: string) {
 }
 
 export function adminGenerateRecoveryLink(targetId: string) {
-  const redirectTo = typeof window !== 'undefined'
-    ? `${window.location.origin}/reset-password`
-    : undefined;
+  const envSiteUrl = (import.meta.env.PUBLIC_SITE_URL as string | undefined)?.replace(/\/$/, '');
+  const origin = envSiteUrl
+    ?? (typeof window !== 'undefined' ? window.location.origin : undefined);
+  const redirectTo = origin ? `${origin}/reset-password` : undefined;
   return callPasswordAction({
     action: 'generate_link',
     target_id: targetId,
