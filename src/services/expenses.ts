@@ -3,6 +3,9 @@ import type { Expense } from '@/types';
 import type { ExpenseRow } from '@/types/database';
 // listAllRecurringExpensesForOwner ya no se usa: synthesis legacy desactivada.
 import { listBookings } from './bookings';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_EXPENSES } from './demo/fixtures';
 
 export interface ExpenseFilters {
   category?: string;
@@ -57,6 +60,32 @@ export const listExpenses = async (
   const propertyIds: string[] | undefined = Array.isArray(propertyIdOrIds)
     ? (propertyIdOrIds.length > 0 ? propertyIdOrIds : undefined)
     : (propertyIdOrIds ? [propertyIdOrIds] : undefined);
+
+  if (isDemoMode()) {
+    let rows = DEMO_EXPENSES.map(toExpense);
+    if (propertyIds) rows = rows.filter(e => !e.property_id || propertyIds.includes(e.property_id));
+    if (filters?.category) rows = rows.filter(e => e.category === filters.category);
+    if (filters?.type) rows = rows.filter(e => e.type === filters.type);
+    if (filters?.status) rows = rows.filter(e => e.status === filters.status);
+    if (filters?.dateFrom) rows = rows.filter(e => e.date >= filters.dateFrom!);
+    if (filters?.dateTo) rows = rows.filter(e => e.date <= filters.dateTo!);
+    if (filters?.bankAccountId) rows = rows.filter(e => e.bank_account_id === filters.bankAccountId);
+    if (filters?.vendor) {
+      const v = filters.vendor.toLowerCase();
+      rows = rows.filter(e => (e.vendor ?? '').toLowerCase().includes(v));
+    }
+    if (filters?.bookingId) rows = rows.filter(e => e.booking_id === filters.bookingId);
+    if (filters?.search) {
+      const q = filters.search.toLowerCase();
+      rows = rows.filter(e =>
+        e.category.toLowerCase().includes(q) ||
+        (e.description?.toLowerCase().includes(q) ?? false) ||
+        (e.vendor?.toLowerCase().includes(q) ?? false)
+      );
+    }
+    rows.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    return { data: rows, error: null };
+  }
 
   let query = supabase
     .from('expenses')
@@ -181,6 +210,7 @@ export const listExpenses = async (
 export const createExpense = async (
   expense: Omit<Expense, 'id' | 'owner_id'>,
 ): Promise<ServiceResult<Expense>> => {
+  if (demoBlockWrite('crear gasto')) return demoWriteBlockedResult<Expense>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado — inicia sesión primero' };
 
@@ -303,6 +333,7 @@ export const updateExpense = async (
   id: string,
   patch: Partial<Omit<Expense, 'id' | 'owner_id'>>,
 ): Promise<ServiceResult<Expense>> => {
+  if (demoBlockWrite('editar gasto')) return demoWriteBlockedResult<Expense>();
   // Bloque 14A: banco obligatorio cuando se marca como pagado.
   if (patch.status === 'paid' && patch.bank_account_id === null) {
     return {
@@ -364,6 +395,7 @@ export const updateExpense = async (
 };
 
 export const deleteExpense = async (id: string): Promise<ServiceResult<null>> => {
+  if (demoBlockWrite('eliminar gasto')) return demoWriteBlockedResult<null>();
   const { error } = await supabase.from('expenses').delete().eq('id', id);
   if (error) return { data: null, error: error.message };
   return { data: null, error: null };
@@ -371,6 +403,7 @@ export const deleteExpense = async (id: string): Promise<ServiceResult<null>> =>
 
 /** Elimina TODAS las filas de un grupo compartido (expense_group_id). */
 export const deleteExpenseGroup = async (groupId: string): Promise<ServiceResult<null>> => {
+  if (demoBlockWrite('eliminar grupo de gasto')) return demoWriteBlockedResult<null>();
   if (!groupId) return { data: null, error: 'Falta el grupo' };
   const { error } = await supabase.from('expenses').delete().eq('expense_group_id', groupId);
   if (error) return { data: null, error: error.message };
@@ -390,6 +423,7 @@ export const updateExpenseGroup = async (
   groupId: string,
   patch: Partial<Pick<Expense, 'status' | 'bank_account_id' | 'date' | 'description'>>,
 ): Promise<ServiceResult<Expense[]>> => {
+  if (demoBlockWrite('actualizar grupo de gasto')) return demoWriteBlockedResult<Expense[]>();
   if (!groupId) return { data: null, error: 'Falta el grupo' };
   // Only validate bank_account when it is being explicitly set to null/empty while status=paid.
   // If bank_account_id is not in the patch, the DB keeps the existing value — no need to validate.

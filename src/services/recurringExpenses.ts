@@ -1,10 +1,16 @@
 import { supabase } from '@/lib/supabase/client';
 import type { ServiceResult } from './expenses';
 import type { PropertyRecurringExpenseRow } from '@/types/database';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_RECURRING_EXPENSES } from './demo/fixtures';
 
 export const listRecurringExpenses = async (
   propertyId: string,
 ): Promise<ServiceResult<PropertyRecurringExpenseRow[]>> => {
+  if (isDemoMode()) {
+    return { data: DEMO_RECURRING_EXPENSES.filter(r => r.property_id === propertyId), error: null };
+  }
   const { data, error } = await supabase
     .from('property_recurring_expenses')
     .select('*')
@@ -19,6 +25,9 @@ export const listRecurringExpenses = async (
 export const listActiveRecurringExpensesForOwner = async (): Promise<
   ServiceResult<PropertyRecurringExpenseRow[]>
 > => {
+  if (isDemoMode()) {
+    return { data: DEMO_RECURRING_EXPENSES.filter(r => r.is_active && r.valid_to == null), error: null };
+  }
   const { data, error } = await supabase
     .from('property_recurring_expenses')
     .select('*')
@@ -32,6 +41,7 @@ export const listActiveRecurringExpensesForOwner = async (): Promise<
 export const listAllRecurringExpensesForOwner = async (): Promise<
   ServiceResult<PropertyRecurringExpenseRow[]>
 > => {
+  if (isDemoMode()) return { data: DEMO_RECURRING_EXPENSES, error: null };
   const { data, error } = await supabase
     .from('property_recurring_expenses')
     .select('*');
@@ -42,6 +52,7 @@ export const listAllRecurringExpensesForOwner = async (): Promise<
 export const createRecurringExpense = async (
   input: Omit<PropertyRecurringExpenseRow, 'id' | 'created_at'>,
 ): Promise<ServiceResult<PropertyRecurringExpenseRow>> => {
+  if (demoBlockWrite('crear gasto recurrente')) return demoWriteBlockedResult<PropertyRecurringExpenseRow>();
   const { data, error } = await supabase
     .from('property_recurring_expenses')
     .insert(input)
@@ -55,6 +66,7 @@ export const updateRecurringExpense = async (
   id: string,
   patch: Partial<Omit<PropertyRecurringExpenseRow, 'id' | 'property_id' | 'created_at'>>,
 ): Promise<ServiceResult<PropertyRecurringExpenseRow>> => {
+  if (demoBlockWrite('actualizar gasto recurrente')) return demoWriteBlockedResult<PropertyRecurringExpenseRow>();
   const { data, error } = await supabase
     .from('property_recurring_expenses')
     .update(patch)
@@ -83,6 +95,7 @@ export const changeRecurringExpensePrice = async (
     person_in_charge?: string | null;
   },
 ): Promise<ServiceResult<PropertyRecurringExpenseRow>> => {
+  if (demoBlockWrite('cambiar precio recurrente')) return demoWriteBlockedResult<PropertyRecurringExpenseRow>();
   // 1. Obtener fila actual para heredar property_id + atributos no modificados
   const { data: current, error: cErr } = await supabase
     .from('property_recurring_expenses')
@@ -128,6 +141,7 @@ export const changeRecurringExpensePrice = async (
 export const deleteRecurringExpense = async (
   id: string,
 ): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar gasto recurrente')) return demoWriteBlockedResult<true>();
   const { error } = await supabase
     .from('property_recurring_expenses')
     .delete()

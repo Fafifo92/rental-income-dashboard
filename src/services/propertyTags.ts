@@ -1,8 +1,12 @@
 import { supabase } from '@/lib/supabase/client';
 import type { PropertyTagRow, PropertyTagAssignmentRow } from '@/types/database';
 import type { ServiceResult } from './expenses';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_PROPERTY_TAGS, DEMO_PROPERTY_TAG_ASSIGNMENTS } from './demo/fixtures';
 
 export const listPropertyTags = async (): Promise<ServiceResult<PropertyTagRow[]>> => {
+  if (isDemoMode()) return { data: DEMO_PROPERTY_TAGS, error: null };
   const { data: authData, error: authErr } = await supabase.auth.getUser();
   if (authErr || !authData?.user) return { data: [], error: null };
   const { data, error } = await supabase
@@ -17,6 +21,7 @@ export const listPropertyTags = async (): Promise<ServiceResult<PropertyTagRow[]
 export const createPropertyTag = async (
   input: { name: string; color?: string },
 ): Promise<ServiceResult<PropertyTagRow>> => {
+  if (demoBlockWrite('crear etiqueta')) return demoWriteBlockedResult<PropertyTagRow>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
   const { data, error } = await supabase
@@ -36,6 +41,7 @@ export const updatePropertyTag = async (
   id: string,
   patch: Partial<{ name: string; color: string }>,
 ): Promise<ServiceResult<PropertyTagRow>> => {
+  if (demoBlockWrite('actualizar etiqueta')) return demoWriteBlockedResult<PropertyTagRow>();
   const { data, error } = await supabase
     .from('property_tags')
     .update(patch)
@@ -47,12 +53,14 @@ export const updatePropertyTag = async (
 };
 
 export const deletePropertyTag = async (id: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar etiqueta')) return demoWriteBlockedResult<true>();
   const { error } = await supabase.from('property_tags').delete().eq('id', id);
   if (error) return { data: null, error: error.message };
   return { data: true, error: null };
 };
 
 export const listAllTagAssignments = async (): Promise<ServiceResult<PropertyTagAssignmentRow[]>> => {
+  if (isDemoMode()) return { data: DEMO_PROPERTY_TAG_ASSIGNMENTS, error: null };
   const { data: authData, error: authErr } = await supabase.auth.getUser();
   if (authErr || !authData?.user) return { data: [], error: null };
   const { data, error } = await supabase
@@ -71,6 +79,7 @@ export const setPropertyTags = async (
   propertyId: string,
   tagIds: string[],
 ): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('asignar etiquetas')) return demoWriteBlockedResult<true>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 
@@ -101,6 +110,7 @@ export const addPropertyTagAssignment = async (
   propertyId: string,
   tagId: string,
 ): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('asignar etiqueta')) return demoWriteBlockedResult<true>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
   const { error } = await supabase
@@ -120,6 +130,7 @@ export const removePropertyTagAssignment = async (
   propertyId: string,
   tagId: string,
 ): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('quitar etiqueta')) return demoWriteBlockedResult<true>();
   const { error } = await supabase
     .from('property_tag_assignments')
     .delete()

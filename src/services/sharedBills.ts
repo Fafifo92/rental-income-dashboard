@@ -3,6 +3,8 @@ import type { SharedBillRow, VendorPropertyRow, VendorRow, ExpenseRow } from '@/
 import type { ServiceResult } from './vendors';
 import { listVendorProperties, computeShares } from './vendorProperties';
 import { currentYearMonth, yearMonthRange } from './recurringPeriods';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
 
 /**
  * Crea una factura compartida + N expenses (uno por propiedad cubierta),
@@ -23,6 +25,7 @@ export const createSharedBill = async (args: {
    *  coincidir con totalAmount (validado en cliente). */
   perPropertyAmounts?: Map<string, number> | null;
 }): Promise<ServiceResult<SharedBillRow>> => {
+  if (demoBlockWrite('crear factura compartida')) return demoWriteBlockedResult<SharedBillRow>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 
@@ -123,6 +126,7 @@ export const createSharedBill = async (args: {
 export const listSharedBills = async (
   vendorId?: string,
 ): Promise<ServiceResult<SharedBillRow[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   let q = supabase.from('shared_bills').select('*').order('year_month', { ascending: false });
   if (vendorId) q = q.eq('vendor_id', vendorId);
   const { data, error } = await q;
@@ -131,6 +135,7 @@ export const listSharedBills = async (
 };
 
 export const deleteSharedBill = async (id: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar factura compartida')) return demoWriteBlockedResult<true>();
   // Los expenses vinculados quedan con shared_bill_id=NULL por ON DELETE SET NULL.
   // Decisión: borrar la factura compartida borra también los expenses asociados,
   // porque son derivados (no tenían vida propia).
@@ -145,6 +150,7 @@ export const deleteSharedBill = async (id: string): Promise<ServiceResult<true>>
 export const listSharedBillExpenses = async (
   billId: string,
 ): Promise<ServiceResult<ExpenseRow[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const { data, error } = await supabase
     .from('expenses')
     .select('*')
@@ -173,6 +179,7 @@ export type PendingSharedBill = {
 export const listPendingSharedBills = async (
   monthsBack = 6,
 ): Promise<ServiceResult<PendingSharedBill[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 

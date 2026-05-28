@@ -527,6 +527,7 @@ export default function ExpensesClient() {
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
               onClick={() => setShowChooser(true)}
+              data-tour="expenses-add"
               className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
             >
               + Registrar Gasto
@@ -535,7 +536,7 @@ export default function ExpensesClient() {
         </motion.div>
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div data-tour="expenses-summary" className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {kpis.map((kpi, i) => (
             <motion.div
               key={kpi.label}
@@ -611,6 +612,7 @@ export default function ExpensesClient() {
         />
 
         {/* Table */}
+        <div data-tour="expenses-table">
         <ExpensesList
           expenses={visibleExpenses}
           loading={loading}
@@ -622,6 +624,7 @@ export default function ExpensesClient() {
           onEditGroup={handleEditGroup}
           onView={setViewing}
         />
+        </div>
 
         {/* Atribución informativa de bolsas (no se suma a expenses) */}
         <div className="mt-4">

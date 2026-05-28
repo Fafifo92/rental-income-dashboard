@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getSession, isSupabaseConfigured } from '@/services/auth';
+import { isDemoMode } from '@/lib/demoMode';
 
 export type AuthStatus = 'checking' | 'authed' | 'demo';
 
@@ -8,6 +9,10 @@ export function useAuth(requireAuth = true): AuthStatus {
 
   useEffect(() => {
     let cancelled = false;
+    if (isDemoMode()) {
+      setStatus('demo');
+      return;
+    }
     if (!isSupabaseConfigured()) {
       setStatus('demo');
       return;

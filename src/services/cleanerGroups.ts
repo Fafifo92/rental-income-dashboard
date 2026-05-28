@@ -1,6 +1,9 @@
 import { supabase } from '@/lib/supabase/client';
 import type { ServiceResult } from './expenses';
 import type { CleanerGroupRow } from '@/types/database';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_CLEANER_GROUPS } from './demo/fixtures';
 
 export interface CleanerGroup extends CleanerGroupRow {
   member_ids: string[];
@@ -13,6 +16,9 @@ const pickColor = () => PALETTE[Math.floor(Math.random() * PALETTE.length)];
  * Lista todos los grupos del usuario con la lista de cleaner_ids miembros.
  */
 export const listCleanerGroups = async (): Promise<ServiceResult<CleanerGroup[]>> => {
+  if (isDemoMode()) {
+    return { data: DEMO_CLEANER_GROUPS.map(g => ({ ...g, member_ids: [] })), error: null };
+  }
   const { data: groups, error: gErr } = await supabase
     .from('cleaner_groups')
     .select('*')
@@ -45,6 +51,7 @@ export const createCleanerGroup = async (
   name: string,
   color?: string | null,
 ): Promise<ServiceResult<CleanerGroupRow>> => {
+  if (demoBlockWrite('crear grupo de aseo')) return demoWriteBlockedResult<CleanerGroupRow>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
   const trimmed = name.trim();
@@ -63,6 +70,7 @@ export const renameCleanerGroup = async (
   name: string,
   color?: string | null,
 ): Promise<ServiceResult<CleanerGroupRow>> => {
+  if (demoBlockWrite('renombrar grupo de aseo')) return demoWriteBlockedResult<CleanerGroupRow>();
   const patch: Partial<Omit<CleanerGroupRow, 'id' | 'created_at'>> = { name: name.trim() };
   if (color !== undefined) patch.color = color;
   const { data, error } = await supabase
@@ -76,6 +84,7 @@ export const renameCleanerGroup = async (
 };
 
 export const deleteCleanerGroup = async (id: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar grupo de aseo')) return demoWriteBlockedResult<true>();
   const { error } = await supabase.from('cleaner_groups').delete().eq('id', id);
   if (error) return { data: null, error: error.message };
   return { data: true, error: null };
@@ -85,6 +94,7 @@ export const setCleanerGroupMembership = async (
   cleanerId: string,
   groupIds: string[],
 ): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('actualizar membresía de grupo')) return demoWriteBlockedResult<true>();
   // Wipe & rewrite — simple y suficiente para volumen típico.
   const del = await supabase
     .from('cleaner_group_members')

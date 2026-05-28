@@ -190,7 +190,7 @@ export default function DashboardClient() {
           transition={{ duration: 0.4 }}
           className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
         >
-          <div>
+          <div data-tour="dashboard-kpis">
             <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Panel de Control</h2>
             <div className="flex items-center gap-2 mt-1">
               <p className="text-slate-500">Análisis de tus rentas de corta estancia.</p>
@@ -204,7 +204,9 @@ export default function DashboardClient() {
           <div className="flex items-center gap-3 flex-wrap">
             <PropertyMultiSelect properties={properties} value={propertyIds} onChange={setPropertyIds} groups={groups} tags={tags} tagAssigns={tagAssigns} />
             {activeTab !== 'pendientes' && activeTab !== 'hoy' && (
-              <PeriodSelector value={period} onChange={setPeriod} customRange={customRange} onCustomRangeChange={setCustomRange} />
+              <span data-tour="period-selector">
+                <PeriodSelector value={period} onChange={setPeriod} customRange={customRange} onCustomRangeChange={setCustomRange} />
+              </span>
             )}
             {activeTab !== 'pendientes' && activeTab !== 'hoy' && !loading && kpis && (
               <ExportMenu kpis={kpis} monthly={exportMonthly} monthlyByBookings={exportMonthlyByBookings} period={period} customRange={customRange} propertyIds={propertyIds} />
@@ -332,14 +334,14 @@ export default function DashboardClient() {
         {/* Charts + Sidebar */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6 min-w-0">
-            <RevenueChart data={monthlyPnL} />
-            <OccupancyByProperty
+            <div data-tour="pnl-chart"><RevenueChart data={monthlyPnL} /></div>
+            <div data-tour="occupancy"><OccupancyByProperty
                   granularity={granularity}
                   from={chartFrom}
                   to={chartTo}
                   propertyIds={propertyIds}
                   breakEvenOccupancy={kpis?.breakEvenOccupancy ?? 0}
-                />
+                /></div>
           </div>
 
           <motion.aside
@@ -362,6 +364,12 @@ export default function DashboardClient() {
                     <motion.a
                       key={item.label}
                       href={item.href}
+                      data-tour={
+                        item.href === '/bookings' ? 'nav-bookings'
+                        : item.href === '/expenses' ? 'nav-expenses'
+                        : item.href === '/properties' ? 'nav-properties'
+                        : undefined
+                      }
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       className="w-full text-left px-4 py-3 text-sm font-medium rounded-lg bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors"

@@ -532,6 +532,7 @@ export default function BookingsClient() {
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
             onClick={() => setShowImporter(true)}
+            data-tour="bookings-import"
             className="w-full sm:w-auto px-3 py-2 sm:px-4 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
           >
             Importar CSV / XLSX
@@ -545,6 +546,7 @@ export default function BookingsClient() {
       )}
 
       {/* Filters */}
+      <div data-tour="bookings-filters">
       <BookingsFilterBar
         search={search}
         setSearch={setSearch}
@@ -553,14 +555,17 @@ export default function BookingsClient() {
         setFilters={setFilters}
         onClear={handleClearFilters}
       />
+      </div>
 
       {/* Accordion by status */}
+      <div data-tour="bookings-table">
       <BookingsStatusAccordion
         bookings={enrichedBookings}
         columns={columns}
         loading={loading}
         onAddBooking={openNewBookingModal}
       />
+      </div>
 
       {/* ── CSVUploader modal ───────────────────────────────────────────────── */}
       <AnimatePresence>

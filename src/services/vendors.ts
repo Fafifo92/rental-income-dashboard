@@ -1,5 +1,8 @@
 import { supabase } from '@/lib/supabase/client';
 import type { VendorRow, VendorKind } from '@/types/database';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_VENDORS } from './demo/fixtures';
 
 export type ServiceResult<T> =
   | { data: T; error: null }
@@ -41,6 +44,10 @@ const toVendor = (row: VendorRow): Vendor => ({
 export const listVendors = async (
   kind?: VendorKind,
 ): Promise<ServiceResult<Vendor[]>> => {
+  if (isDemoMode()) {
+    const filtered = kind ? DEMO_VENDORS.filter(v => v.kind === kind) : DEMO_VENDORS;
+    return { data: filtered.map(toVendor), error: null };
+  }
   let q = supabase.from('vendors').select('id, owner_id, name, kind, contact, notes, active, created_at, category, default_amount, day_of_month, is_variable, start_year_month').order('name', { ascending: true });
   if (kind) q = q.eq('kind', kind);
   const { data, error } = await q;
@@ -51,6 +58,7 @@ export const listVendors = async (
 export const createVendor = async (
   input: Omit<Vendor, 'id' | 'created_at' | 'owner_id'>,
 ): Promise<ServiceResult<Vendor>> => {
+  if (demoBlockWrite('crear vendedor')) return demoWriteBlockedResult<Vendor>();
   const { data: userData } = await supabase.auth.getUser();
   const owner_id = userData.user?.id;
   if (!owner_id) return { data: null, error: 'No autenticado.' };
@@ -68,6 +76,7 @@ export const updateVendor = async (
   id: string,
   patch: Partial<Omit<Vendor, 'id' | 'created_at' | 'owner_id'>>,
 ): Promise<ServiceResult<Vendor>> => {
+  if (demoBlockWrite('actualizar vendedor')) return demoWriteBlockedResult<Vendor>();
   const { data, error } = await supabase
     .from('vendors')
     .update(patch)
@@ -79,6 +88,7 @@ export const updateVendor = async (
 };
 
 export const deleteVendor = async (id: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar vendedor')) return demoWriteBlockedResult<true>();
   const { error } = await supabase.from('vendors').delete().eq('id', id);
   if (error) return { data: null, error: error.message };
   return { data: true, error: null };

@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 import type { AccountStatus, ProfileRow } from '@/types/database';
+import { exitDemoMode } from '@/lib/demoMode';
 
 export type AuthResult<T> = { data: T; error: null } | { data: null; error: string };
 
@@ -66,6 +67,7 @@ export async function signUp(
 }
 
 export async function signOut(): Promise<void> {
+  exitDemoMode();
   if (!isSupabaseConfigured()) return;
   await supabase.auth.signOut();
 }

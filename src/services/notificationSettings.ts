@@ -4,6 +4,9 @@ import type {
   NotificationCadence,
 } from '@/types/database';
 import type { ServiceResult } from './expenses';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_NOTIFICATION_SETTINGS } from './demo/fixtures';
 
 export const DEFAULT_NOTIFICATION_SETTINGS: Omit<UserNotificationSettingsRow, 'user_id' | 'updated_at'> = {
   reminders_enabled:   true,
@@ -21,6 +24,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: Omit<UserNotificationSettingsRow, 'u
 
 /** Obtiene (o crea por defecto) la configuración del usuario autenticado. */
 export const getNotificationSettings = async (): Promise<ServiceResult<UserNotificationSettingsRow>> => {
+  if (isDemoMode()) return { data: DEMO_NOTIFICATION_SETTINGS as UserNotificationSettingsRow, error: null };
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 
@@ -48,6 +52,7 @@ export type NotificationSettingsPatch = Partial<Omit<UserNotificationSettingsRow
 export const updateNotificationSettings = async (
   patch: NotificationSettingsPatch,
 ): Promise<ServiceResult<UserNotificationSettingsRow>> => {
+  if (demoBlockWrite('actualizar notificaciones')) return demoWriteBlockedResult<UserNotificationSettingsRow>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 

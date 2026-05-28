@@ -8,6 +8,9 @@ import type {
   InventoryMovementRow,
   InventoryMovementType,
 } from '@/types/database';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_INVENTORY_CATEGORIES, DEMO_INVENTORY_ITEMS } from './demo/fixtures';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Categorías
@@ -23,6 +26,7 @@ export const DEFAULT_CATEGORIES: Array<{ name: string; icon: string }> = [
 ];
 
 export const listInventoryCategories = async (): Promise<ServiceResult<InventoryCategoryRow[]>> => {
+  if (isDemoMode()) return { data: DEMO_INVENTORY_CATEGORIES, error: null };
   const { data, error } = await supabase
     .from('inventory_categories')
     .select('*')
@@ -33,6 +37,7 @@ export const listInventoryCategories = async (): Promise<ServiceResult<Inventory
 
 /** Si no existen categorías, crea las default para el usuario actual. */
 export const ensureDefaultCategories = async (): Promise<ServiceResult<InventoryCategoryRow[]>> => {
+  if (isDemoMode()) return { data: DEMO_INVENTORY_CATEGORIES, error: null };
   const list = await listInventoryCategories();
   if (list.error || !list.data) return list;
 
@@ -69,6 +74,7 @@ export const createInventoryCategory = async (
   name: string,
   icon?: string | null,
 ): Promise<ServiceResult<InventoryCategoryRow>> => {
+  if (demoBlockWrite('crear categoría de inventario')) return demoWriteBlockedResult<InventoryCategoryRow>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
   const trimmed = name.trim();
@@ -83,6 +89,7 @@ export const createInventoryCategory = async (
 };
 
 export const deleteInventoryCategory = async (id: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar categoría de inventario')) return demoWriteBlockedResult<true>();
   const { error } = await supabase.from('inventory_categories').delete().eq('id', id);
   if (error) return { data: null, error: error.message };
   return { data: true, error: null };
@@ -107,6 +114,28 @@ export interface InventoryItemFilters {
 export const listInventoryItems = async (
   filters: InventoryItemFilters = {},
 ): Promise<ServiceResult<InventoryItemRow[]>> => {
+  if (isDemoMode()) {
+    let items = DEMO_INVENTORY_ITEMS;
+    if (filters.property_ids && filters.property_ids.length > 0) {
+      items = items.filter(i => i.property_id != null && filters.property_ids!.includes(i.property_id));
+    }
+    if (filters.category_id !== undefined && filters.category_id !== null) {
+      items = items.filter(i => i.category_id === filters.category_id);
+    }
+    if (filters.status) items = items.filter(i => i.status === filters.status);
+    if (filters.is_consumable !== undefined && filters.is_consumable !== null) {
+      items = items.filter(i => i.is_consumable === filters.is_consumable);
+    }
+    if (filters.search && filters.search.trim()) {
+      const s = filters.search.trim().toLowerCase();
+      items = items.filter(i =>
+        i.name.toLowerCase().includes(s) ||
+        (i.description ?? '').toLowerCase().includes(s) ||
+        (i.location ?? '').toLowerCase().includes(s),
+      );
+    }
+    return { data: items, error: null };
+  }
   let q = supabase.from('inventory_items').select('*').order('updated_at', { ascending: false });
   if (filters.property_ids && filters.property_ids.length > 0) q = q.in('property_id', filters.property_ids);
   if (filters.category_id !== undefined && filters.category_id !== null) q = q.eq('category_id', filters.category_id);
@@ -133,6 +162,7 @@ export type CreateInventoryItemInput = Omit<
 export const createInventoryItem = async (
   input: CreateInventoryItemInput,
 ): Promise<ServiceResult<InventoryItemRow>> => {
+  if (demoBlockWrite('crear item de inventario')) return demoWriteBlockedResult<InventoryItemRow>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
   if (!input.name?.trim()) return { data: null, error: 'Nombre requerido' };
@@ -164,6 +194,7 @@ export const updateInventoryItem = async (
   id: string,
   patch: Partial<Omit<InventoryItemRow, 'id' | 'owner_id' | 'created_at' | 'updated_at'>>,
 ): Promise<ServiceResult<InventoryItemRow>> => {
+  if (demoBlockWrite('actualizar item de inventario')) return demoWriteBlockedResult<InventoryItemRow>();
   const { data, error } = await supabase
     .from('inventory_items')
     .update(patch)
@@ -175,6 +206,7 @@ export const updateInventoryItem = async (
 };
 
 export const deleteInventoryItem = async (id: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar item de inventario')) return demoWriteBlockedResult<true>();
   const { error } = await supabase.from('inventory_items').delete().eq('id', id);
   if (error) return { data: null, error: error.message };
   return { data: true, error: null };
@@ -187,6 +219,7 @@ export const deleteInventoryItem = async (id: string): Promise<ServiceResult<tru
 export const listInventoryMovements = async (
   itemId: string,
 ): Promise<ServiceResult<InventoryMovementRow[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const { data, error } = await supabase
     .from('inventory_movements')
     .select('*')
@@ -214,6 +247,7 @@ export interface RegisterMovementInput {
 export const registerInventoryMovement = async (
   input: RegisterMovementInput,
 ): Promise<ServiceResult<InventoryMovementRow>> => {
+  if (demoBlockWrite('registrar movimiento de inventario')) return demoWriteBlockedResult<InventoryMovementRow>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 
@@ -313,6 +347,7 @@ export interface ReportDamageResult {
 export const reportItemDamage = async (
   input: ReportDamageInput,
 ): Promise<ServiceResult<ReportDamageResult>> => {
+  if (demoBlockWrite('reportar daño')) return demoWriteBlockedResult<ReportDamageResult>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
   if (input.repair_cost < 0) return { data: null, error: 'Costo de reparación inválido' };
@@ -507,6 +542,7 @@ export const reportDamage = reportItemDamage;
 export const markDamageRepairedFromExpense = async (
   expenseId: string,
 ): Promise<ServiceResult<{ items: number; movements: number }>> => {
+  if (demoBlockWrite('marcar daño reparado')) return demoWriteBlockedResult<{ items: number; movements: number }>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 
@@ -603,6 +639,7 @@ export interface DamageReconciliation {
 }
 
 export const getDamageReconciliations = async (): Promise<ServiceResult<DamageReconciliation[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   // 1) Movements de tipo damaged
   const { data: damaged, error: e1 } = await supabase
     .from('inventory_movements')
@@ -754,6 +791,7 @@ export interface RecoverDamageInput {
 export const recoverDamageAmount = async (
   input: RecoverDamageInput,
 ): Promise<ServiceResult<{ adjustment_id: string }>> => {
+  if (demoBlockWrite('registrar recuperación de daño')) return demoWriteBlockedResult<{ adjustment_id: string }>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 
@@ -885,6 +923,7 @@ export const MOVEMENT_LABEL: Record<InventoryMovementType, string> = {
 
 /** Items que superaron su vida útil estimada y aún no tienen status end_of_life. */
 export const getEndOfLifeItems = async (): Promise<ServiceResult<InventoryItemRow[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const today = new Date().toISOString().slice(0, 10);
   const { data, error } = await supabase
     .from('inventory_items')
@@ -907,6 +946,7 @@ export const getEndOfLifeItems = async (): Promise<ServiceResult<InventoryItemRo
  * Idempotente: si ya está en end_of_life no hace nada.
  */
 export const markEndOfLife = async (id: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('marcar fin de vida útil')) return demoWriteBlockedResult<true>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 
@@ -937,6 +977,7 @@ export const extendUsefulLife = async (
   id: string,
   extraMonths: number,
 ): Promise<ServiceResult<InventoryItemRow>> => {
+  if (demoBlockWrite('extender vida útil')) return demoWriteBlockedResult<InventoryItemRow>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
   if (extraMonths <= 0) return { data: null, error: 'Meses a extender debe ser > 0' };

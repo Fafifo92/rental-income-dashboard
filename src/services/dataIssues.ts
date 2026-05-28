@@ -5,6 +5,8 @@
 import { supabase } from '@/lib/supabase/client';
 import type { BankAccountRow, BookingCleaningRow } from '@/types/database';
 import type { ServiceResult } from './expenses';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
 
 export interface DataIssuesSummary {
   expenses_paid_without_account_count: number;
@@ -39,6 +41,7 @@ const EMPTY_SUMMARY: DataIssuesSummary = {
 };
 
 export const fetchDataIssuesSummary = async (): Promise<ServiceResult<DataIssuesSummary>> => {
+  if (isDemoMode()) return { data: EMPTY_SUMMARY, error: null };
   const { data, error } = await (supabase.rpc as unknown as (
     fn: string,
   ) => Promise<{ data: DataIssuesSummary[] | null; error: { message: string } | null }>)(
@@ -68,6 +71,7 @@ export interface OrphanExpense {
 }
 
 export const listExpensesPaidWithoutAccount = async (): Promise<ServiceResult<OrphanExpense[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const { data, error } = await supabase
     .from('expenses')
     .select(`
@@ -144,6 +148,7 @@ export const assignBankAccountToExpenses = async (
   expenseIds: string[],
   bankAccountId: string,
 ): Promise<ServiceResult<number>> => {
+  if (demoBlockWrite('asignar cuenta a gastos')) return demoWriteBlockedResult<number>();
   if (expenseIds.length === 0) return { data: 0, error: null };
   if (!bankAccountId) return { data: null, error: 'Debes seleccionar una cuenta.' };
   const { error, count } = await supabase
@@ -177,6 +182,7 @@ export const listOrphanPaidCleanings = async (): Promise<ServiceResult<{
   withPaidDate: OrphanCleaning[];
   withoutPaidDate: OrphanCleaning[];
 }>> => {
+  if (isDemoMode()) return { data: { withPaidDate: [], withoutPaidDate: [] }, error: null };
   const { data, error } = await supabase
     .from('booking_cleanings')
     .select(`
@@ -258,6 +264,7 @@ export const repairOrphanCleaningWithExpense = async (
   cleaningId: string,
   bankAccountId: string,
 ): Promise<ServiceResult<string[]>> => {
+  if (demoBlockWrite('reparar aseo huérfano')) return demoWriteBlockedResult<string[]>();
   const { data, error } = await (supabase.rpc as unknown as (
     fn: string,
     params: Record<string, unknown>,
@@ -271,6 +278,7 @@ export const repairOrphanCleaningWithExpense = async (
 };
 
 export const revertCleaningToPending = async (cleaningId: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('revertir aseo')) return demoWriteBlockedResult<true>();
   const { error } = await supabase
     .from('booking_cleanings')
     .update({ status: 'pending', paid_date: null })
@@ -382,6 +390,7 @@ const toBookingLite = (row: BookingForOverlap): BookingLiteRow => ({
  * justificamos un VIEW dedicado.
  */
 export const listOverlappingBookings = async (): Promise<ServiceResult<OverlapPair[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const [bookingsRes, ignoresRes] = await Promise.all([
     supabase
       .from('bookings')
@@ -457,6 +466,7 @@ export interface BookingOrphanIncome extends BookingLiteRow {
 }
 
 export const listBookingsWithoutPayoutAccount = async (): Promise<ServiceResult<BookingOrphanIncome[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const { data, error } = await supabase
     .from('bookings')
     .select(`
@@ -483,6 +493,7 @@ export interface InconsistentPayout extends BookingLiteRow {
 }
 
 export const listInconsistentPayouts = async (): Promise<ServiceResult<InconsistentPayout[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   // Trae todos los bookings con net_payout>0 no cancelados; filtra en cliente
   // porque PostgREST no soporta XOR fácilmente.
   const { data, error } = await supabase
@@ -519,6 +530,7 @@ export interface InvalidExpense {
 }
 
 export const listInvalidExpenses = async (): Promise<ServiceResult<InvalidExpense[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const { data, error } = await supabase
     .from('expenses')
     .select('id, date, amount, category, subcategory, description, status')
@@ -552,6 +564,7 @@ export interface CleaningWithoutCleaner {
 }
 
 export const listPaidCleaningsWithoutCleaner = async (): Promise<ServiceResult<CleaningWithoutCleaner[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const { data, error } = await supabase
     .from('booking_cleanings')
     .select(`
@@ -607,6 +620,7 @@ export interface CleaningDoneWithoutDate {
 }
 
 export const listDoneCleaningsWithoutDate = async (): Promise<ServiceResult<CleaningDoneWithoutDate[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const { data, error } = await supabase
     .from('booking_cleanings')
     .select(`
@@ -660,6 +674,7 @@ export interface InvalidBookingDates extends BookingLiteRow {
 }
 
 export const listInvalidBookingDates = async (): Promise<ServiceResult<InvalidBookingDates[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const { data, error } = await supabase
     .from('bookings')
     .select(`
@@ -689,6 +704,7 @@ export interface DuplicateCodeGroup {
 }
 
 export const listDuplicateConfirmationCodes = async (): Promise<ServiceResult<DuplicateCodeGroup[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   // Trae todos los bookings con código no nulo, agrupa en cliente.
   const { data, error } = await supabase
     .from('bookings')
@@ -730,6 +746,7 @@ export const listDuplicateConfirmationCodes = async (): Promise<ServiceResult<Du
 
 /** Marca un booking como cancelado. */
 export const cancelBooking = async (bookingId: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('cancelar reserva')) return demoWriteBlockedResult<true>();
   const { error } = await supabase
     .from('bookings')
     .update({ status: 'cancelada' })
@@ -746,6 +763,15 @@ export const deleteBookingCascade = async (bookingId: string): Promise<ServiceRe
   payments_deleted: number;
   deposits_deleted: number;
 }>> => {
+  if (demoBlockWrite('eliminar reserva en cascada')) {
+    return demoWriteBlockedResult<{
+      cleanings_deleted: number;
+      expenses_deleted: number;
+      adjustments_deleted: number;
+      payments_deleted: number;
+      deposits_deleted: number;
+    }>();
+  }
   const { data, error } = await (supabase.rpc as unknown as (
     fn: string,
     params: Record<string, unknown>,
@@ -772,6 +798,7 @@ export const assignBookingPayoutAccount = async (
   bookingId: string,
   bankAccountId: string,
 ): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('asignar cuenta de payout')) return demoWriteBlockedResult<true>();
   if (!bankAccountId) return { data: null, error: 'Selecciona la cuenta.' };
   const { error } = await supabase
     .from('bookings')
@@ -783,6 +810,7 @@ export const assignBookingPayoutAccount = async (
 
 /** Limpia el payout de un booking (vuelve a no pagado). */
 export const clearBookingPayout = async (bookingId: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('limpiar payout')) return demoWriteBlockedResult<true>();
   const { error } = await supabase
     .from('bookings')
     .update({ payout_bank_account_id: null, payout_date: null })
@@ -796,6 +824,7 @@ export const setBookingPayoutDate = async (
   bookingId: string,
   payoutDate: string,
 ): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('asignar fecha de payout')) return demoWriteBlockedResult<true>();
   const { error } = await supabase
     .from('bookings')
     .update({ payout_date: payoutDate })
@@ -809,6 +838,7 @@ export const setCleaningDoneDate = async (
   cleaningId: string,
   doneDate: string,
 ): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('asignar fecha de aseo')) return demoWriteBlockedResult<true>();
   const { error } = await supabase
     .from('booking_cleanings')
     .update({ done_date: doneDate })
@@ -819,6 +849,7 @@ export const setCleaningDoneDate = async (
 
 /** Borra un gasto. */
 export const deleteExpenseById = async (expenseId: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar gasto')) return demoWriteBlockedResult<true>();
   const { error } = await supabase.from('expenses').delete().eq('id', expenseId);
   if (error) return { data: null, error: error.message };
   return { data: true, error: null };
@@ -830,6 +861,7 @@ export const ignoreDataIssue = async (
   key: string,
   note?: string,
 ): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('ignorar incidencia')) return demoWriteBlockedResult<true>();
   const { error } = await (supabase.rpc as unknown as (
     fn: string,
     params: Record<string, unknown>,
@@ -846,6 +878,7 @@ export const unignoreDataIssue = async (
   kind: string,
   key: string,
 ): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('revertir ignorado')) return demoWriteBlockedResult<true>();
   const { error } = await (supabase.rpc as unknown as (
     fn: string,
     params: Record<string, unknown>,

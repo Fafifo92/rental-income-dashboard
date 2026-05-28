@@ -1,8 +1,12 @@
 import { supabase } from '@/lib/supabase/client';
 import type { PropertyGroupRow } from '@/types/database';
 import type { ServiceResult } from './expenses';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_PROPERTY_GROUPS } from './demo/fixtures';
 
 export const listPropertyGroups = async (): Promise<ServiceResult<PropertyGroupRow[]>> => {
+  if (isDemoMode()) return { data: DEMO_PROPERTY_GROUPS, error: null };
   const { data, error } = await supabase
     .from('property_groups')
     .select('id, owner_id, name, color, sort_order, created_at')
@@ -15,6 +19,7 @@ export const listPropertyGroups = async (): Promise<ServiceResult<PropertyGroupR
 export const createPropertyGroup = async (
   input: { name: string; color?: string; sort_order?: number },
 ): Promise<ServiceResult<PropertyGroupRow>> => {
+  if (demoBlockWrite('crear grupo de propiedades')) return demoWriteBlockedResult<PropertyGroupRow>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
   const { data, error } = await supabase
@@ -35,6 +40,7 @@ export const updatePropertyGroup = async (
   id: string,
   patch: Partial<{ name: string; color: string; sort_order: number }>,
 ): Promise<ServiceResult<PropertyGroupRow>> => {
+  if (demoBlockWrite('actualizar grupo de propiedades')) return demoWriteBlockedResult<PropertyGroupRow>();
   const { data, error } = await supabase
     .from('property_groups')
     .update(patch)
@@ -50,6 +56,14 @@ export const getPropertyGroupsByIds = async (
   ids: string[],
 ): Promise<ServiceResult<Array<{ id: string; name: string; color: string }>>> => {
   if (!ids.length) return { data: [], error: null };
+  if (isDemoMode()) {
+    return {
+      data: DEMO_PROPERTY_GROUPS
+        .filter(g => ids.includes(g.id))
+        .map(g => ({ id: g.id, name: g.name, color: g.color })),
+      error: null,
+    };
+  }
   const { data, error } = await supabase
     .from('property_groups')
     .select('id, name, color')
@@ -59,6 +73,7 @@ export const getPropertyGroupsByIds = async (
 };
 
 export const deletePropertyGroup = async (id: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar grupo de propiedades')) return demoWriteBlockedResult<true>();
   const { error } = await supabase.from('property_groups').delete().eq('id', id);
   if (error) return { data: null, error: error.message };
   return { data: true, error: null };

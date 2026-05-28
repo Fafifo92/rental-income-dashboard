@@ -133,7 +133,7 @@ export default function PropertiesClient() {
 
       {/* Groups & tags admin section */}
       {authStatus === 'authed' && (
-        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6 flex flex-wrap items-center gap-3">
+        <div data-tour="properties-groups" className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6 flex flex-wrap items-center gap-3">
           <div className="flex-1 min-w-[180px]">
             <h3 className="text-sm font-bold text-slate-700">🏷️ Grupos y etiquetas</h3>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -179,7 +179,7 @@ export default function PropertiesClient() {
           </button>
         </motion.div>
       ) : isDemo || groups.length === 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div data-tour="properties-grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {properties.map((p, i) => (
             <PropertyCard
               key={p.id}

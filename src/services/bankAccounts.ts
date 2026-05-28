@@ -1,6 +1,9 @@
 import { supabase } from '@/lib/supabase/client';
 import type { ServiceResult } from './expenses';
 import type { AccountDepositRow, BankAccountRow, BookingPaymentRow } from '@/types/database';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_BANK_ACCOUNTS, DEMO_BOOKINGS, DEMO_EXPENSES, DEMO_ACCOUNT_DEPOSITS, DEMO_BOOKING_ADJUSTMENTS } from './demo/fixtures';
 
 export interface BankAccountBalance {
   account: BankAccountRow;
@@ -10,6 +13,7 @@ export interface BankAccountBalance {
 }
 
 export const listBankAccounts = async (): Promise<ServiceResult<BankAccountRow[]>> => {
+  if (isDemoMode()) return { data: DEMO_BANK_ACCOUNTS, error: null };
   const { data, error } = await supabase
     .from('bank_accounts')
     .select('id, owner_id, name, bank, account_type, account_number_mask, currency, opening_balance, is_active, notes, created_at, is_credit, credit_limit, is_cash')
@@ -25,6 +29,7 @@ export const listBankAccounts = async (): Promise<ServiceResult<BankAccountRow[]
  * Called on app load. Safe to call multiple times (is idempotent).
  */
 export const ensureCashAccount = async (): Promise<void> => {
+  if (isDemoMode()) return;
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
   const { data: existing } = await supabase
@@ -53,6 +58,7 @@ export const ensureCashAccount = async (): Promise<void> => {
 export const createBankAccount = async (
   input: Omit<BankAccountRow, 'id' | 'owner_id' | 'created_at'>,
 ): Promise<ServiceResult<BankAccountRow>> => {
+  if (demoBlockWrite('crear cuenta bancaria')) return demoWriteBlockedResult<BankAccountRow>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 
@@ -69,6 +75,7 @@ export const updateBankAccount = async (
   id: string,
   patch: Partial<Omit<BankAccountRow, 'id' | 'owner_id' | 'created_at'>>,
 ): Promise<ServiceResult<BankAccountRow>> => {
+  if (demoBlockWrite('actualizar cuenta bancaria')) return demoWriteBlockedResult<BankAccountRow>();
   const { data, error } = await supabase
     .from('bank_accounts')
     .update(patch)
@@ -80,6 +87,7 @@ export const updateBankAccount = async (
 };
 
 export const deleteBankAccount = async (id: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar cuenta bancaria')) return demoWriteBlockedResult<true>();
   const { error } = await supabase.from('bank_accounts').delete().eq('id', id);
   if (error) return { data: null, error: error.message };
   return { data: true, error: null };
@@ -90,6 +98,7 @@ export const deleteBankAccount = async (id: string): Promise<ServiceResult<true>
 export const listBookingPayments = async (
   bookingId: string,
 ): Promise<ServiceResult<BookingPaymentRow[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const { data, error } = await supabase
     .from('booking_payments')
     .select('id, owner_id, booking_id, amount, bank_account_id, payment_date, notes, created_at')
@@ -107,6 +116,7 @@ export const addBookingPayment = async (input: {
   payment_date: string | null;
   notes: string | null;
 }): Promise<ServiceResult<BookingPaymentRow>> => {
+  if (demoBlockWrite('registrar pago de reserva')) return demoWriteBlockedResult<BookingPaymentRow>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
   const { data, error } = await supabase
@@ -119,6 +129,7 @@ export const addBookingPayment = async (input: {
 };
 
 export const deleteBookingPayment = async (id: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar pago de reserva')) return demoWriteBlockedResult<true>();
   const { error } = await supabase.from('booking_payments').delete().eq('id', id);
   if (error) return { data: null, error: error.message };
   return { data: true, error: null };
@@ -133,6 +144,37 @@ export const deleteBookingPayment = async (id: string): Promise<ServiceResult<tr
  * sequential Supabase queries that caused slow load on /accounts.
  */
 export const computeBalances = async (): Promise<ServiceResult<BankAccountBalance[]>> => {
+  if (isDemoMode()) {
+    const balances: BankAccountBalance[] = DEMO_BANK_ACCOUNTS.map(account => {
+      let inflows = 0;
+      let outflows = 0;
+      for (const b of DEMO_BOOKINGS) {
+        if (b.payout_bank_account_id === account.id) {
+          const net = Number(b.net_payout ?? 0);
+          if (net > 0) inflows += net;
+          else if (net < 0 && (b.status ?? '').toLowerCase().includes('cancel')) outflows += Math.abs(net);
+        }
+      }
+      for (const a of DEMO_BOOKING_ADJUSTMENTS) {
+        if ((a as { bank_account_id?: string | null }).bank_account_id === account.id && a.kind !== 'discount') {
+          inflows += Number(a.amount);
+        }
+      }
+      for (const e of DEMO_EXPENSES) {
+        if (e.bank_account_id === account.id && e.status === 'paid') outflows += Number(e.amount);
+      }
+      for (const d of DEMO_ACCOUNT_DEPOSITS) {
+        if (d.account_id === account.id) inflows += Number(d.amount);
+      }
+      return {
+        account,
+        inflows,
+        outflows,
+        currentBalance: Number(account.opening_balance) + inflows - outflows,
+      };
+    });
+    return { data: balances, error: null };
+  }
   const accRes = await listBankAccounts();
   if (accRes.error) return { data: null, error: accRes.error };
   const accounts = accRes.data ?? [];
@@ -288,6 +330,9 @@ export interface UnassignedMoney {
  * Útil para el banner "dinero volando" en /accounts y dashboard.
  */
 export const listUnassignedMoney = async (): Promise<ServiceResult<UnassignedMoney>> => {
+  if (isDemoMode()) {
+    return { data: { unassignedPayouts: [], unassignedPaidExpenses: [], totalPayouts: 0, totalPaidExpenses: 0 }, error: null };
+  }
   const [payoutsRes, expensesRes] = await Promise.all([
     supabase
       .from('bookings')
@@ -345,6 +390,11 @@ export const validateAccountSpend = async (
   amount: number,
   excludeExpenseId?: string,
 ): Promise<ServiceResult<{ ok: boolean; account: BankAccountRow; currentBalance: number; after: number }>> => {
+  if (isDemoMode()) {
+    const acct = DEMO_BANK_ACCOUNTS.find(a => a.id === accountId);
+    if (!acct) return { data: null, error: 'Cuenta no encontrada' };
+    return { data: { ok: true, account: acct, currentBalance: 1_000_000, after: 1_000_000 - amount }, error: null };
+  }
   const { data: account, error: accErr } = await supabase
     .from('bank_accounts')
     .select('id, owner_id, name, bank, account_type, account_number_mask, currency, opening_balance, is_active, notes, created_at, is_credit, credit_limit, is_cash')
@@ -415,6 +465,53 @@ const ADJ_KIND_LABEL: Record<string, BankTxKind> = {
 export const getBankAccountTransactions = async (
   accountId: string,
 ): Promise<ServiceResult<BankTransaction[]>> => {
+  if (isDemoMode()) {
+    const txs: BankTransaction[] = [];
+    const acct = DEMO_BANK_ACCOUNTS.find(a => a.id === accountId);
+    if (acct) {
+      txs.push({
+        id: `opening-${accountId}`,
+        date: (acct.created_at ?? '2026-01-01').slice(0, 10),
+        kind: 'opening',
+        amount: Number(acct.opening_balance ?? 0),
+        description: 'Saldo de apertura',
+        reference_id: null, reference_type: null, booking_code: null, property_name: null, category: null,
+      });
+    }
+    for (const b of DEMO_BOOKINGS) {
+      if (b.payout_bank_account_id !== accountId) continue;
+      const amt = Number(b.net_payout ?? 0);
+      if (amt === 0) continue;
+      const isFine = amt < 0 && (b.status ?? '').toLowerCase().includes('cancel');
+      txs.push({
+        id: `booking-${b.id}`,
+        date: b.end_date ?? '',
+        kind: isFine ? 'cancellation_fine' : 'booking_payout',
+        amount: amt,
+        description: `${isFine ? 'Multa' : 'Payout'} reserva · ${b.guest_name ?? ''}`,
+        reference_id: b.id, reference_type: 'booking',
+        booking_code: b.confirmation_code, property_name: null, category: isFine ? 'Multa por cancelación' : null,
+      });
+    }
+    for (const e of DEMO_EXPENSES) {
+      if (e.bank_account_id !== accountId || e.status !== 'paid') continue;
+      txs.push({
+        id: `exp-${e.id}`, date: e.date, kind: 'expense', amount: -Number(e.amount),
+        description: e.description ?? e.category, reference_id: e.id, reference_type: 'expense',
+        booking_code: null, property_name: null, category: e.category,
+      });
+    }
+    for (const d of DEMO_ACCOUNT_DEPOSITS) {
+      if (d.account_id !== accountId) continue;
+      txs.push({
+        id: `dep-${d.id}`, date: d.deposit_date, kind: 'deposit', amount: Number(d.amount),
+        description: d.notes ?? 'Depósito manual', reference_id: d.id, reference_type: null,
+        booking_code: null, property_name: null, category: null,
+      });
+    }
+    txs.sort((a, b) => b.date.localeCompare(a.date));
+    return { data: txs, error: null };
+  }
   // 1) Bookings con payout a esta cuenta
   const { data: bookings, error: e1 } = await supabase
     .from('bookings')
@@ -719,6 +816,7 @@ export const createAccountDeposit= async (input: {
   deposit_date: string;
   notes?: string | null;
 }): Promise<ServiceResult<AccountDepositRow>> => {
+  if (demoBlockWrite('crear depósito')) return demoWriteBlockedResult<AccountDepositRow>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
   if (input.amount <= 0) return { data: null, error: 'El monto debe ser mayor a 0' };
@@ -734,6 +832,7 @@ export const createAccountDeposit= async (input: {
 export const listAccountDeposits = async (
   accountId: string,
 ): Promise<ServiceResult<AccountDepositRow[]>> => {
+  if (isDemoMode()) return { data: DEMO_ACCOUNT_DEPOSITS.filter(d => d.account_id === accountId), error: null };
   const { data, error } = await supabase
     .from('account_deposits')
     .select('*')
@@ -744,6 +843,7 @@ export const listAccountDeposits = async (
 };
 
 export const deleteAccountDeposit = async (id: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar depósito')) return demoWriteBlockedResult<true>();
   const { error } = await supabase.from('account_deposits').delete().eq('id', id);
   if (error) return { data: null, error: error.message };
   return { data: true, error: null };

@@ -256,7 +256,7 @@ export default function VendorsClient(): JSX.Element {
         </div>
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <table className="w-full text-sm">
+          <table data-tour="vendors-list" className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-600 text-xs uppercase">
               <tr>
                 <th className="text-left px-5 py-3">Nombre</th>

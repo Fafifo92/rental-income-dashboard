@@ -1,5 +1,8 @@
 import { supabase } from '@/lib/supabase/client';
 import type { MaintenanceScheduleRow, MaintenanceScheduleStatus } from '@/types/database';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_MAINTENANCE } from './demo/fixtures';
 
 // ─── Input types ──────────────────────────────────────────────────────────────
 
@@ -34,6 +37,13 @@ export async function listMaintenanceSchedules(filters?: {
   propertyId?: string;
   status?: MaintenanceScheduleStatus;
 }): Promise<{ data: MaintenanceScheduleRow[]; error: string | null }> {
+  if (isDemoMode()) {
+    let items = DEMO_MAINTENANCE;
+    if (filters?.itemId)     items = items.filter(i => i.item_id === filters.itemId);
+    if (filters?.propertyId) items = items.filter(i => i.property_id === filters.propertyId);
+    if (filters?.status)     items = items.filter(i => i.status === filters.status);
+    return { data: items, error: null };
+  }
   let q = supabase
     .from('inventory_maintenance_schedules')
     .select('*')
@@ -50,6 +60,7 @@ export async function listMaintenanceSchedules(filters?: {
 export async function createMaintenanceSchedule(
   input: CreateMaintenanceScheduleInput,
 ): Promise<{ data: MaintenanceScheduleRow | null; error: string | null }> {
+  if (demoBlockWrite('crear mantenimiento')) return { data: null, error: 'demo_read_only' };
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
   if (authErr || !user) return { data: null, error: 'No autenticado' };
 
@@ -79,6 +90,7 @@ export async function updateMaintenanceSchedule(
   id: string,
   patch: UpdateMaintenanceScheduleInput,
 ): Promise<{ data: MaintenanceScheduleRow | null; error: string | null }> {
+  if (demoBlockWrite('actualizar mantenimiento')) return { data: null, error: 'demo_read_only' };
   const { data, error } = await supabase
     .from('inventory_maintenance_schedules')
     .update(patch)
@@ -92,6 +104,7 @@ export async function updateMaintenanceSchedule(
 export async function deleteMaintenanceSchedule(
   id: string,
 ): Promise<{ error: string | null }> {
+  if (demoBlockWrite('eliminar mantenimiento')) return { error: 'demo_read_only' };
   const { error } = await supabase
     .from('inventory_maintenance_schedules')
     .delete()
@@ -110,6 +123,7 @@ export async function completeMaintenanceSchedule(
   id: string,
   options: { expenseRegistered?: boolean } = {},
 ): Promise<{ data: MaintenanceScheduleRow | null; error: string | null }> {
+  if (demoBlockWrite('completar mantenimiento')) return { data: null, error: 'demo_read_only' };
   // Fetch current to check recurrence
   const { data: current, error: fetchErr } = await supabase
     .from('inventory_maintenance_schedules')
@@ -153,6 +167,9 @@ export async function getUpcomingAndOverdueSchedules(): Promise<{
   data: MaintenanceScheduleRow[];
   error: string | null;
 }> {
+  if (isDemoMode()) {
+    return { data: DEMO_MAINTENANCE.filter(m => m.status === 'pending'), error: null };
+  }
   const { data, error } = await supabase
     .from('inventory_maintenance_schedules')
     .select('*')
@@ -167,6 +184,7 @@ export async function getSchedulesDoneNeedingExpense(): Promise<{
   data: MaintenanceScheduleRow[];
   error: string | null;
 }> {
+  if (isDemoMode()) return { data: [], error: null };
   const { data, error } = await supabase
     .from('inventory_maintenance_schedules')
     .select('*')

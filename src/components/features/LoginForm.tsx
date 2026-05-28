@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ShieldCheck } from 'lucide-react';
 import { signIn, signUp, signOut, isSupabaseConfigured } from '@/services/auth';
+import { enterDemoMode } from '@/lib/demoMode';
 
 type Mode = 'login' | 'signup' | 'admin';
 
@@ -69,6 +70,7 @@ export default function LoginForm() {
   };
 
   const enterDemo = () => {
+    enterDemoMode();
     window.location.href = '/dashboard';
   };
 
@@ -237,8 +239,7 @@ export default function LoginForm() {
                   whileTap={{ scale: 0.99 }}
                   className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/15 text-white/80 font-medium rounded-xl text-sm transition-colors flex items-center justify-center gap-2"
                 >
-                  <span>🚀</span>
-                  {configured ? 'Entrar en modo demo' : 'Continuar en modo demo (sin cuenta)'}
+                  {configured ? 'Probar el demo' : 'Continuar en modo demo (sin cuenta)'}
                 </motion.button>
               </>
             )}

@@ -5,6 +5,9 @@ import { datesOverlap, type ParsedBooking, type ConflictEntry, type DuplicateEnt
 import { findOrCreateListing } from './listings';
 import { inferOperationalFlags, isCancelled } from '@/lib/bookingStatus';
 import { todayISO } from '@/lib/dateUtils';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_BOOKINGS, DEMO_LISTINGS, DEMO_PROPERTIES, DEMO_BOOKING_ADJUSTMENTS } from './demo/fixtures';
 
 // ─── Public Types ────────────────────────────────────────────────────────────
 
@@ -82,6 +85,7 @@ export const upsertBookings = async (
   bookings: ParsedBooking[],
   listingMap: Record<string, string>,
 ): Promise<ServiceResult<ImportResult>> => {
+  if (demoBlockWrite('importar reservas')) return demoWriteBlockedResult<ImportResult>();
   const errors: string[] = [];
   const skippedCodes: string[] = [];
 
@@ -176,6 +180,10 @@ export type BookingWithListingRow = BookingRow & {
 export const getBooking = async (
   id: string,
 ): Promise<ServiceResult<BookingWithListingRow>> => {
+  if (isDemoMode()) {
+    const enriched = demoBookingsWithListings().find(b => b.id === id);
+    return enriched ? { data: enriched, error: null } : { data: null, error: 'No encontrada' };
+  }
   const { data, error } = await supabase
     .from('bookings')
     .select('*, listings(id, external_name, property_id, properties(id, name))')
@@ -185,9 +193,59 @@ export const getBooking = async (
   return { data: data as unknown as BookingWithListingRow, error: null };
 };
 
+// ── Demo helper: enrich DEMO_BOOKINGS with listing+property nested objects ──
+const demoBookingsWithListings = (): BookingWithListingRow[] => {
+  return DEMO_BOOKINGS.map(b => {
+    const listing = DEMO_LISTINGS.find(l => l.id === b.listing_id);
+    const property = listing ? DEMO_PROPERTIES.find(p => p.id === listing.property_id) : undefined;
+    const adjustments = DEMO_BOOKING_ADJUSTMENTS
+      .filter(a => a.booking_id === b.id)
+      .map(a => ({ kind: a.kind, amount: a.amount, bank_account_id: a.bank_account_id }));
+    return {
+      ...b,
+      listings: listing ? {
+        id: listing.id,
+        external_name: listing.external_name,
+        property_id: listing.property_id,
+        properties: property ? { id: property.id, name: property.name } : null,
+      } : null,
+      booking_adjustments: adjustments,
+      booking_deposit_applications: null,
+    };
+  });
+};
+
 export const listBookings = async (
   filters?: BookingFilters,
 ): Promise<ServiceResult<BookingWithListingRow[]>> => {
+  if (isDemoMode()) {
+    let rows = demoBookingsWithListings();
+    const propIds: string[] | undefined =
+      filters?.propertyIds && filters.propertyIds.length > 0
+        ? filters.propertyIds
+        : filters?.propertyId ? [filters.propertyId] : undefined;
+    if (propIds) {
+      rows = rows.filter(b => b.listings?.property_id && propIds.includes(b.listings.property_id));
+    }
+    if (filters?.listingId) rows = rows.filter(b => b.listing_id === filters.listingId);
+    if (filters?.status) rows = rows.filter(b => b.status === filters.status);
+    if (filters?.channel) rows = rows.filter(b => b.channel === filters.channel);
+    if (filters?.dateFrom) rows = rows.filter(b => b.start_date >= filters.dateFrom!);
+    if (filters?.dateTo) rows = rows.filter(b => b.start_date <= filters.dateTo!);
+    if (filters?.search) {
+      const s = filters.search.toLowerCase();
+      rows = rows.filter(b =>
+        (b.guest_name?.toLowerCase().includes(s) ?? false) ||
+        b.confirmation_code.toLowerCase().includes(s)
+      );
+    }
+    rows.sort((a, b) => b.start_date.localeCompare(a.start_date));
+    if (filters?.page && filters?.pageSize) {
+      const from = (filters.page - 1) * filters.pageSize;
+      rows = rows.slice(from, from + filters.pageSize);
+    }
+    return { data: rows, error: null };
+  }
   // If filtering by property, resolve listing IDs first
   let allowedListingIds: string[] | undefined;
   const propIds: string[] | undefined =
@@ -297,6 +355,21 @@ export interface BookingAlert {
 export const listBookingAlerts = async (
   daysBack = 45,
 ): Promise<ServiceResult<BookingAlert[]>> => {
+  if (isDemoMode()) {
+    // Generar 3 alertas demo coherentes
+    const enriched = demoBookingsWithListings();
+    const today = todayISO();
+    const past = enriched.filter(b => b.end_date < today && b.status !== 'Cancelada').slice(0, 3);
+    const alerts: BookingAlert[] = past.map((b, i) => ({
+      id: b.id,
+      confirmation_code: b.confirmation_code,
+      guest_name: b.guest_name,
+      end_date: b.end_date,
+      property_id: b.listings?.property_id ?? null,
+      issues: i === 0 ? ['payout'] : i === 1 ? ['inventory'] : ['cleaning'],
+    }));
+    return { data: alerts, error: null };
+  }
   const today = todayISO();
   const [ty, tm, td] = today.split('-').map(Number);
   const fromDate = new Date(ty, tm - 1, td - daysBack);
@@ -422,6 +495,20 @@ export const listTodayActivity = async (
   propertyIds?: string[],
 ): Promise<ServiceResult<TodayActivity>> => {
   const today = todayISO();
+
+  if (isDemoMode()) {
+    let rows = demoBookingsWithListings().filter(b => !isCancelled(b));
+    if (propertyIds?.length) {
+      rows = rows.filter(b => b.listings?.property_id && propertyIds.includes(b.listings.property_id));
+    }
+    return {
+      data: {
+        checkins: rows.filter(b => b.start_date === today),
+        checkouts: rows.filter(b => b.end_date === today),
+      },
+      error: null,
+    };
+  }
 
   let allowedListingIds: string[] | undefined;
   if (propertyIds && propertyIds.length > 0) {
@@ -626,6 +713,21 @@ export const listBookingsForOccupancy = async (opts: {
   excludeCancelled?: boolean;
 }): Promise<ServiceResult<OccupancyBooking[]>> => {
   if (!opts.listingIds.length) return { data: [], error: null };
+  if (isDemoMode()) {
+    let rows = DEMO_BOOKINGS.filter(b =>
+      opts.listingIds.includes(b.listing_id) &&
+      b.end_date >= opts.from && b.start_date <= opts.to
+    );
+    if (opts.excludeCancelled) rows = rows.filter(b => !(b.status ?? '').toLowerCase().includes('cancel'));
+    return {
+      data: rows.map(b => ({
+        id: b.id, listing_id: b.listing_id, confirmation_code: b.confirmation_code,
+        guest_name: b.guest_name, start_date: b.start_date, end_date: b.end_date,
+        status: b.status, channel: b.channel,
+      })),
+      error: null,
+    };
+  }
   let q = supabase
     .from('bookings')
     .select('id, listing_id, confirmation_code, guest_name, start_date, end_date, status, channel')
@@ -721,6 +823,7 @@ export const insertBooking = async (
     security_deposit?: number | null;
   },
 ): Promise<ServiceResult<BookingRow>> => {
+  if (demoBlockWrite('crear reserva')) return demoWriteBlockedResult<BookingRow>();
   const { data: row, error } = await supabase
     .from('bookings')
     .insert({
@@ -781,6 +884,7 @@ export const updateBooking = async (
     security_deposit?: number | null;
   },
 ): Promise<ServiceResult<BookingRow>> => {
+  if (demoBlockWrite('editar reserva')) return demoWriteBlockedResult<BookingRow>();
   const dbPatch: Partial<Omit<BookingRow, 'id' | 'created_at'>> = { ...patch } as Partial<Omit<BookingRow, 'id' | 'created_at'>>;
   // mantener gross_revenue en sync con total_revenue
   if (patch.total_revenue !== undefined && patch.gross_revenue === undefined) {
@@ -797,6 +901,7 @@ export const updateBooking = async (
 };
 
 export const deleteBooking = async (bookingId: string): Promise<ServiceResult<null>> => {
+  if (demoBlockWrite('eliminar reserva')) return demoWriteBlockedResult<null>();
   const { error } = await supabase.from('bookings').delete().eq('id', bookingId);
   if (error) return { data: null, error: error.message };
   return { data: null, error: null };
@@ -816,6 +921,7 @@ export const updateBookingPayout = async (
     notes?: string | null;
   },
 ): Promise<ServiceResult<BookingRow>> => {
+  if (demoBlockWrite('actualizar payout')) return demoWriteBlockedResult<BookingRow>();
   // Si se modifica el bruto, también sincronizamos total_revenue
   // (campo legado que alimenta KPIs históricos).
   const dbPatch: Partial<Omit<BookingRow, 'id' | 'created_at'>> = { ...patch } as Partial<Omit<BookingRow, 'id' | 'created_at'>>;
@@ -843,6 +949,7 @@ export const updateBookingDeposit = async (
     deposit_return_date?: string | null;
   },
 ): Promise<ServiceResult<BookingRow>> => {
+  if (demoBlockWrite('actualizar depósito')) return demoWriteBlockedResult<BookingRow>();
   const { data, error } = await supabase
     .from('bookings')
     .update(patch)

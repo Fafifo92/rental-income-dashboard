@@ -1,6 +1,8 @@
 ---
 import '../styles/global.css';
 import ToastProvider from '../components/ToastProvider';
+import DemoBanner from '../components/features/DemoBanner';
+import DemoUpgradeModal from '../components/features/DemoUpgradeModal';
 const { title } = Astro.props;
 ---
 <!doctype html>
@@ -16,7 +18,9 @@ const { title } = Astro.props;
     <title>{title}</title>
 </head>
 <body class="antialiased bg-background text-foreground">
+    <DemoBanner client:load />
     <slot />
+    <DemoUpgradeModal client:load />
     <ToastProvider client:load />
 </body>
 </html>

@@ -33,6 +33,8 @@ import type {
 } from '@/types/database';
 import { todayISO } from '@/lib/dateUtils';
 import { computeDepositBalance, type DepositBalance } from '@/lib/depositMath';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
 
 // ── Balance helpers ─────────────────────────────────────────────────────────
 
@@ -44,6 +46,7 @@ export type { DepositBalance };
 export const listDepositApplications = async (
   bookingId: string,
 ): Promise<ServiceResult<BookingDepositApplicationRow[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const { data, error } = await supabase
     .from('booking_deposit_applications')
     .select('*')
@@ -57,6 +60,12 @@ export const listDepositApplications = async (
 export const getDepositBalance = async (
   bookingId: string,
 ): Promise<ServiceResult<DepositBalance>> => {
+  if (isDemoMode()) {
+    return {
+      data: computeDepositBalance(0, []),
+      error: null,
+    };
+  }
   const [bRes, aRes] = await Promise.all([
     supabase.from('bookings').select('security_deposit').eq('id', bookingId).single(),
     supabase
@@ -99,6 +108,7 @@ const insertApplication = async (
 export const applyDepositToDamage = async (
   input: ApplyToDamageInput,
 ): Promise<ServiceResult<BookingDepositApplicationRow>> => {
+  if (demoBlockWrite('aplicar depósito a daño')) return demoWriteBlockedResult<BookingDepositApplicationRow>();
   if (input.amount <= 0) return { data: null, error: 'Monto inválido' };
   const bal = await getDepositBalance(input.booking_id);
   if (bal.error || !bal.data) return { data: null, error: bal.error ?? 'Sin balance' };
@@ -128,6 +138,7 @@ interface ReturnInput {
 export const returnDepositToGuest = async (
   input: ReturnInput,
 ): Promise<ServiceResult<BookingDepositApplicationRow>> => {
+  if (demoBlockWrite('devolver depósito al huésped')) return demoWriteBlockedResult<BookingDepositApplicationRow>();
   if (input.amount <= 0) return { data: null, error: 'Monto inválido' };
   const bal = await getDepositBalance(input.booking_id);
   if (bal.error || !bal.data) return { data: null, error: bal.error ?? 'Sin balance' };
@@ -171,6 +182,7 @@ interface SurplusInput {
 export const convertDepositSurplusToIncome = async (
   input: SurplusInput,
 ): Promise<ServiceResult<BookingDepositApplicationRow>> => {
+  if (demoBlockWrite('convertir excedente de depósito')) return demoWriteBlockedResult<BookingDepositApplicationRow>();
   if (input.amount <= 0) return { data: null, error: 'Monto inválido' };
   const bal = await getDepositBalance(input.booking_id);
   if (bal.error || !bal.data) return { data: null, error: bal.error ?? 'Sin balance' };
@@ -209,6 +221,7 @@ export const convertDepositSurplusToIncome = async (
 export const deleteDepositApplication = async (
   id: string,
 ): Promise<ServiceResult<void>> => {
+  if (demoBlockWrite('eliminar aplicación de depósito')) return demoWriteBlockedResult<void>();
   const { error } = await supabase
     .from('booking_deposit_applications')
     .delete()
@@ -240,6 +253,16 @@ export interface DepositsGlobalSummary {
 }
 
 export const getDepositsSummary = async (): Promise<ServiceResult<DepositsGlobalSummary>> => {
+  if (isDemoMode()) {
+    return {
+      data: {
+        total_held: 0, total_received: 0, total_returned: 0,
+        total_applied_to_damage: 0, total_surplus_to_income: 0,
+        held_by_account: {}, rows: [],
+      },
+      error: null,
+    };
+  }
   // Reservas con depósito > 0
   const bRes = await supabase
     .from('bookings')
@@ -337,6 +360,7 @@ export interface PendingDepositReturn {
 export const listPendingDepositReturns = async (
   propertyIds?: string[] | null,
 ): Promise<ServiceResult<PendingDepositReturn[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   let allowedListingIds: string[] | undefined;
   if (propertyIds && propertyIds.length > 0) {
     const lRes = await supabase
@@ -403,6 +427,7 @@ export const listPendingDepositReturns = async (
 export const getDepositLedger = async (
   bookingId: string,
 ): Promise<ServiceResult<DepositLedgerEntry[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const [bRes, aRes] = await Promise.all([
     supabase
       .from('bookings')

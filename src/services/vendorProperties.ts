@@ -1,10 +1,16 @@
 import { supabase } from '@/lib/supabase/client';
 import type { VendorPropertyRow } from '@/types/database';
 import type { ServiceResult } from './vendors';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_VENDOR_PROPERTIES } from './demo/fixtures';
 
 export const listVendorProperties = async (
   vendorId: string,
 ): Promise<ServiceResult<VendorPropertyRow[]>> => {
+  if (isDemoMode()) {
+    return { data: DEMO_VENDOR_PROPERTIES.filter(v => v.vendor_id === vendorId), error: null };
+  }
   const { data, error } = await supabase
     .from('vendor_properties')
     .select('*')
@@ -14,6 +20,7 @@ export const listVendorProperties = async (
 };
 
 export const listAllVendorProperties = async (): Promise<ServiceResult<VendorPropertyRow[]>> => {
+  if (isDemoMode()) return { data: DEMO_VENDOR_PROPERTIES, error: null };
   const { data, error } = await supabase.from('vendor_properties').select('*');
   if (error) return { data: null, error: error.message };
   return { data: (data ?? []) as VendorPropertyRow[], error: null };
@@ -31,6 +38,7 @@ export const setVendorProperties = async (
   vendorId: string,
   items: { propertyId: string; sharePercent: number | null; fixedAmount?: number | null }[],
 ): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('actualizar propiedades del vendedor')) return demoWriteBlockedResult<true>();
   const { error: delErr } = await supabase
     .from('vendor_properties')
     .delete()

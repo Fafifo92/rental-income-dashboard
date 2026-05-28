@@ -461,6 +461,7 @@ export default function InventoryClient(): JSX.Element {
           </button>
         </div>
       ) : (
+        <div data-tour="inventory-list">
         <CategorizedInventoryView
           items={filteredItems}
           properties={properties}
@@ -477,6 +478,7 @@ export default function InventoryClient(): JSX.Element {
           onDelete={handleDelete}
           onScheduleMaintenance={(it, s) => setMaintenanceTarget({ item: it, schedule: s ?? null })}
         />
+        </div>
       )}
         </>
       )}

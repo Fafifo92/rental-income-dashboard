@@ -20,6 +20,7 @@
 import { supabase } from '@/lib/supabase/client';
 import { listBookings } from './bookings';
 import type { ServiceResult } from './expenses';
+import { isDemoMode } from '@/lib/demoMode';
 
 // ─── Public interface ─────────────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ export const listTransactions = async (
   toISO: string,
   propertyIds?: string[],
 ): Promise<ServiceResult<FinancialTransaction[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const txs: FinancialTransaction[] = [];
 
   // 1. Bank accounts for name lookup

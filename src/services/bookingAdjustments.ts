@@ -1,10 +1,16 @@
 import { supabase } from '@/lib/supabase/client';
 import type { ServiceResult } from './expenses';
 import type { BookingAdjustmentRow } from '@/types/database';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_BOOKING_ADJUSTMENTS } from './demo/fixtures';
 
 export const listBookingAdjustments = async (
   bookingId: string,
 ): Promise<ServiceResult<BookingAdjustmentRow[]>> => {
+  if (isDemoMode()) {
+    return { data: DEMO_BOOKING_ADJUSTMENTS.filter(a => a.booking_id === bookingId), error: null };
+  }
   const { data, error } = await supabase
     .from('booking_adjustments')
     .select('*')
@@ -17,6 +23,7 @@ export const listBookingAdjustments = async (
 export const createBookingAdjustment = async (
   input: Omit<BookingAdjustmentRow, 'id' | 'created_at'>,
 ): Promise<ServiceResult<BookingAdjustmentRow>> => {
+  if (demoBlockWrite('crear ajuste de reserva')) return demoWriteBlockedResult<BookingAdjustmentRow>();
   const { data, error } = await supabase
     .from('booking_adjustments')
     .insert(input)
@@ -30,6 +37,7 @@ export const updateBookingAdjustment = async (
   id: string,
   patch: Partial<Pick<BookingAdjustmentRow, 'bank_account_id' | 'amount' | 'description' | 'date'>>,
 ): Promise<ServiceResult<BookingAdjustmentRow>> => {
+  if (demoBlockWrite('actualizar ajuste de reserva')) return demoWriteBlockedResult<BookingAdjustmentRow>();
   const { data, error } = await supabase
     .from('booking_adjustments')
     .update(patch)
@@ -43,6 +51,7 @@ export const updateBookingAdjustment = async (
 export const deleteBookingAdjustment = async (
   id: string,
 ): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar ajuste de reserva')) return demoWriteBlockedResult<true>();
   const { error } = await supabase
     .from('booking_adjustments')
     .delete()
@@ -60,6 +69,14 @@ export const deleteBookingAdjustment = async (
 export const listAllBookingAdjustmentsForOwner = async (): Promise<
   ServiceResult<Pick<BookingAdjustmentRow, 'kind' | 'amount' | 'date' | 'bank_account_id'>[]>
 > => {
+  if (isDemoMode()) {
+    return {
+      data: DEMO_BOOKING_ADJUSTMENTS.map(a => ({
+        kind: a.kind, amount: a.amount, date: a.date, bank_account_id: a.bank_account_id,
+      })),
+      error: null,
+    };
+  }
   const { data, error } = await supabase
     .from('booking_adjustments')
     .select('kind, amount, date, bank_account_id');
@@ -81,6 +98,14 @@ export const netAdjustment = (adj: BookingAdjustmentRow[]): number =>
 export const listAllBookingAdjustmentsForExport = async (): Promise<
   ServiceResult<Pick<BookingAdjustmentRow, 'booking_id' | 'kind' | 'amount' | 'date' | 'description'>[]>
 > => {
+  if (isDemoMode()) {
+    return {
+      data: DEMO_BOOKING_ADJUSTMENTS.map(a => ({
+        booking_id: a.booking_id, kind: a.kind, amount: a.amount, date: a.date, description: a.description,
+      })),
+      error: null,
+    };
+  }
   const { data, error } = await supabase
     .from('booking_adjustments')
     .select('booking_id, kind, amount, date, description')

@@ -1,5 +1,8 @@
 import { supabase } from '@/lib/supabase/client';
 import type { BookingCleaningRow, CleaningStatus, ExpenseRow } from '@/types/database';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_CLEANINGS } from './demo/fixtures';
 
 export type ServiceResult<T>=
   | { data: T; error: null }
@@ -36,6 +39,9 @@ const toCleaning = (row: BookingCleaningRow): BookingCleaning => ({
 export const listCleaningsByBooking = async (
   bookingId: string,
 ): Promise<ServiceResult<BookingCleaning[]>> => {
+  if (isDemoMode()) {
+    return { data: DEMO_CLEANINGS.filter(c => c.booking_id === bookingId).map(toCleaning), error: null };
+  }
   const { data, error } = await supabase
     .from('booking_cleanings')
     .select('*')
@@ -46,6 +52,7 @@ export const listCleaningsByBooking = async (
 };
 
 export const listAllCleanings = async (): Promise<ServiceResult<BookingCleaning[]>> => {
+  if (isDemoMode()) return { data: DEMO_CLEANINGS.map(toCleaning), error: null };
   const { data, error } = await supabase
     .from('booking_cleanings')
     .select('*')
@@ -69,6 +76,7 @@ export interface CleaningHistoryRow extends BookingCleaning {
 export const listCleaningsByCleaner = async (
   cleanerId: string,
 ): Promise<ServiceResult<CleaningHistoryRow[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   // 1) Cleanings de este cleaner.
   const { data: cleaningRows, error: cErr } = await supabase
     .from('booking_cleanings')
@@ -152,6 +160,7 @@ export const listAllCleaningsEnriched = async (options?: {
   cleanerIds?: string[];
   statuses?: CleaningStatus[];
 }): Promise<ServiceResult<CleaningHistoryRow[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   let query = supabase
     .from('booking_cleanings')
     .select('*');
@@ -244,6 +253,7 @@ export const createCleaning = async (
   input: Omit<BookingCleaning, 'id' | 'created_at'>,
   options?: { bankAccountId?: string | null },
 ): Promise<ServiceResult<BookingCleaning>> => {
+  if (demoBlockWrite('crear limpieza')) return demoWriteBlockedResult<BookingCleaning>();
   const bankAccountId = options?.bankAccountId ?? null;
 
   if (input.status === 'paid') {
@@ -304,6 +314,7 @@ export const updateCleaning = async (
   id: string,
   patch: Partial<Omit<BookingCleaning, 'id' | 'created_at' | 'booking_id'>>,
 ): Promise<ServiceResult<BookingCleaning>> => {
+  if (demoBlockWrite('actualizar limpieza')) return demoWriteBlockedResult<BookingCleaning>();
   const { data, error } = await supabase
     .from('booking_cleanings')
     .update(patch)
@@ -315,6 +326,7 @@ export const updateCleaning = async (
 };
 
 export const deleteCleaning = async (id: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar limpieza')) return demoWriteBlockedResult<true>();
   const { error } = await supabase.from('booking_cleanings').delete().eq('id', id);
   if (error) return { data: null, error: error.message };  return { data: true, error: null };
 };
@@ -367,6 +379,7 @@ export const updateBookingOperational = async (
     operational_notes?: string | null;
   },
 ): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('actualizar operativa de reserva')) return demoWriteBlockedResult<true>();
   const { error } = await supabase.from('bookings').update(patch).eq('id', bookingId);
   if (error) return { data: null, error: error.message };
   return { data: true, error: null };
@@ -391,6 +404,7 @@ export const payoutCleanerConsolidated = async (args: {
   bankAccountId?: string | null;
   includePending?: boolean;  // si true, también liquida cleanings aún en status 'pending'
 }): Promise<ServiceResult<{ expense_ids: string[]; cleaning_ids: string[]; total: number }>> => {
+  if (demoBlockWrite('liquidar aseos')) return demoWriteBlockedResult<{ expense_ids: string[]; cleaning_ids: string[]; total: number }>();
   const { cleanerId, cleanerName, paidDate, bankAccountId = null, includePending = false } = args;
 
   // 1. Traer cleanings elegibles
@@ -605,6 +619,7 @@ export const payoutCleanerConsolidated = async (args: {
 export const getLooseCleanerSuppliesTotals = async (): Promise<
   ServiceResult<Map<string, { amount: number; count: number }>>
 > => {
+  if (isDemoMode()) return { data: new Map(), error: null };
   const { data, error } = await supabase
     .from('expenses')
     .select('vendor_id, amount')
@@ -646,6 +661,7 @@ export interface LooseSupplyRow {
 export const listCleanerLooseSupplies = async (
   cleanerId: string,
 ): Promise<ServiceResult<LooseSupplyRow[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const { data, error } = await supabase
     .from('expenses')
     .select('id, date, amount, status, description, property_id, expense_group_id')

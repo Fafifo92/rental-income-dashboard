@@ -32,10 +32,14 @@ import type {
   CreditPoolConsumptionRow,
   CreditPoolConsumptionRule,
 } from '@/types/database';
+import { isDemoMode } from '@/lib/demoMode';
+import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { DEMO_CREDIT_POOLS } from './demo/fixtures';
 
 // ─── CRUD básico ─────────────────────────────────────────────────────────────
 
 export const listCreditPools = async (): Promise<ServiceResult<CreditPoolRow[]>> => {
+  if (isDemoMode()) return { data: DEMO_CREDIT_POOLS, error: null };
   const { data, error } = await supabase
     .from('credit_pools')
     .select('*')
@@ -68,6 +72,7 @@ export interface CreateCreditPoolInput {
 export const createCreditPool = async (
   input: CreateCreditPoolInput,
 ): Promise<ServiceResult<CreditPoolRow>> => {
+  if (demoBlockWrite('crear bolsa de créditos')) return demoWriteBlockedResult<CreditPoolRow>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 
@@ -121,6 +126,7 @@ export const updateCreditPool = async (
   id: string,
   patch: Partial<Omit<CreditPoolRow, 'id' | 'owner_id' | 'created_at'>>,
 ): Promise<ServiceResult<CreditPoolRow>> => {
+  if (demoBlockWrite('actualizar bolsa de créditos')) return demoWriteBlockedResult<CreditPoolRow>();
   const { data, error } = await supabase
     .from('credit_pools')
     .update(patch)
@@ -132,6 +138,7 @@ export const updateCreditPool = async (
 };
 
 export const archiveCreditPool = async (id: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('archivar bolsa de créditos')) return demoWriteBlockedResult<true>();
   const { error } = await supabase
     .from('credit_pools')
     .update({ status: 'archived' })
@@ -141,6 +148,7 @@ export const archiveCreditPool = async (id: string): Promise<ServiceResult<true>
 };
 
 export const hardDeleteCreditPool = async (id: string): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar bolsa de créditos')) return demoWriteBlockedResult<true>();
   const { error } = await supabase
     .from('credit_pools')
     .delete()
@@ -164,6 +172,7 @@ export const hardDeleteCreditPool = async (id: string): Promise<ServiceResult<tr
 export const deleteCreditPoolConsumptions = async (
   poolId: string,
 ): Promise<ServiceResult<{ deleted: number }>> => {
+  if (demoBlockWrite('eliminar consumos de bolsa')) return demoWriteBlockedResult<{ deleted: number }>();
   const { data: existing, error: countErr } = await supabase
     .from('credit_pool_consumptions')
     .select('id')
@@ -206,6 +215,7 @@ export const deleteCreditPoolConsumptions = async (
 export const recomputeCreditPoolSnapshots = async (
   poolId: string,
 ): Promise<ServiceResult<{ updated: number; unitPrice: number }>> => {
+  if (demoBlockWrite('recalcular snapshots de bolsa')) return demoWriteBlockedResult<{ updated: number; unitPrice: number }>();
   const { data: pool, error: pErr } = await supabase
     .from('credit_pools')
     .select('id, total_price, credits_total')
@@ -238,6 +248,7 @@ export const recomputeCreditPoolSnapshots = async (
 export const listConsumptionsForPool = async (
   poolId: string,
 ): Promise<ServiceResult<CreditPoolConsumptionRow[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
   const { data, error } = await supabase
     .from('credit_pool_consumptions')
     .select('*')
@@ -279,6 +290,7 @@ export const setCreditPoolProperties = async (
   poolId: string,
   propertyIds: string[],
 ): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('actualizar propiedades de la bolsa')) return demoWriteBlockedResult<true>();
   const { data: pool } = await supabase
     .from('credit_pools')
     .select('vendor_id')
@@ -423,6 +435,7 @@ const sumConsumedByVendorForBooking = async (
 export const consumeCreditsForCheckin = async (
   bookingId: string,
 ): Promise<ServiceResult<ConsumeResult>> => {
+  if (demoBlockWrite('consumir créditos en check-in')) return demoWriteBlockedResult<ConsumeResult>();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 

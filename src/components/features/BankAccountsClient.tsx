@@ -272,7 +272,7 @@ export default function BankAccountsClient() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div data-tour="accounts-list" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           <DepositLedgerCard
             accountsMap={Object.fromEntries(balances.map(b => [b.account.id, b.account.name]))}
           />
@@ -617,7 +617,7 @@ function BankHistoryModal({
         className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
       >
-        <header className="p-5 border-b border-slate-200">
+        <header data-tour="accounts-tx" className="p-5 border-b border-slate-200">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="text-lg font-bold text-slate-800">Historial de transacciones</h3>
