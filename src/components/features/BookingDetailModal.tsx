@@ -191,6 +191,13 @@ export default function BookingDetailModal({
   }, [onClose]);
 
   const totalExpenses = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
+  const isCleaningExpense = (e: Expense) => {
+    const sub = (e.subcategory ?? '').toLowerCase();
+    const cat = (e.category ?? '').toLowerCase();
+    return sub === 'cleaning' || cat === 'aseo' || cat === 'insumos de aseo';
+  };
+  const linkedExpenses = expenses.filter(e => !isCleaningExpense(e));
   const netAdj = netAdjustment(adjustments);
   const gross = Number(booking.gross_revenue ?? booking.total_revenue ?? 0);
   const fees = Number(booking.channel_fees ?? 0);
@@ -684,7 +691,7 @@ export default function BookingDetailModal({
 
               {loading ? (
                 <p className="text-sm text-slate-400 text-center py-4">Cargando…</p>
-              ) : expenses.length === 0 ? (
+              ) : linkedExpenses.length === 0 ? (
                 <p className="text-sm text-slate-400 text-center py-6 bg-slate-50 rounded-lg border border-dashed border-slate-200">
                   Sin gastos vinculados todavía.
                 </p>
@@ -701,7 +708,7 @@ export default function BookingDetailModal({
                       </tr>
                     </thead>
                     <tbody>
-                      {expenses.map(e => (
+                      {linkedExpenses.map(e => (
                         <tr key={e.id} className="border-t border-slate-100 hover:bg-slate-50/50">
                           <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{formatDateDisplay(e.date)}</td>
                           <td className="px-3 py-2">
@@ -737,7 +744,7 @@ export default function BookingDetailModal({
                     <tfoot className="bg-slate-50 border-t-2 border-slate-200">
                       <tr>
                         <td colSpan={3} className="px-3 py-2 text-right text-xs font-semibold text-slate-600 uppercase">Total</td>
-                        <td className="px-3 py-2 text-right font-bold text-rose-700 tabular-nums">{formatCurrency(totalExpenses)}</td>
+                        <td className="px-3 py-2 text-right font-bold text-rose-700 tabular-nums">{formatCurrency(linkedExpenses.reduce((s, e) => s + Number(e.amount), 0))}</td>
                         <td />
                       </tr>
                     </tfoot>

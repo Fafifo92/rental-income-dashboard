@@ -5,6 +5,7 @@ import {
   updateBooking, deleteBooking, checkBookingOverlap,
   generateDirectBookingCode, getBooking, listBookingAlerts, type BookingFilters,
 } from '@/services/bookings';
+import { listAllCleanings } from '@/services/cleanings';
 import { findOrCreateListing } from '@/services/listings';
 import { runAutoCheckins } from '@/services/creditPools';
 import { formatCurrency } from '@/lib/utils';
@@ -52,7 +53,10 @@ export default function BookingsClient() {
   const [deleteTarget, setDeleteTarget] = useState<DisplayBooking | null>(null);
   const [payoutTarget, setPayoutTarget] = useState<DisplayBooking | null>(null);
   const [detailTarget, setDetailTarget] = useState<DisplayBooking | null>(null);
-  const [pendingCleaningIds, setPendingCleaningIds] = useState<Set<string>>(new Set());const [showExportModal, setShowExportModal] = useState(false);
+  const [pendingCleaningIds, setPendingCleaningIds] = useState<Set<string>>(new Set());
+  const [cleaningStatusMap, setCleaningStatusMap] = useState<Map<string, 'unassigned' | 'pending' | 'done' | 'paid'>>(new Map());
+  const [cleaningFilter, setCleaningFilter] = useState<'all' | 'unassigned' | 'pending' | 'done' | 'paid'>('all');
+  const [showExportModal, setShowExportModal] = useState(false);
 
   // Deep-link: capture ?booking=<id> at mount and clear from URL immediately
   const [deepLinkBookingId] = useState<string | null>(() => {
@@ -122,6 +126,23 @@ export default function BookingsClient() {
           res.data.filter(a => a.issues.includes('cleaning')).map(a => a.id),
         );
         setPendingCleaningIds(ids);
+      }
+    }).catch(() => { /* silent */ });
+
+    listAllCleanings().then(res => {
+      if (!res.error && res.data) {
+        const map = new Map<string, 'unassigned' | 'pending' | 'done' | 'paid'>();
+        for (const c of res.data) {
+          const prev = map.get(c.booking_id);
+          if (c.status === 'pending') {
+            map.set(c.booking_id, 'pending');
+          } else if (c.status === 'done' && prev !== 'pending') {
+            map.set(c.booking_id, 'done');
+          } else if (c.status === 'paid' && prev !== 'pending' && prev !== 'done') {
+            map.set(c.booking_id, 'paid');
+          }
+        }
+        setCleaningStatusMap(map);
       }
     }).catch(() => { /* silent */ });
   }, [authStatus]);
@@ -463,7 +484,13 @@ export default function BookingsClient() {
   });
 
   // ── Derived values (must be before any early returns) ────────────────────
-  const enrichedBookings = bookings;
+  const enrichedBookings = useMemo(() => {
+    if (cleaningFilter === 'all') return bookings;
+    return bookings.filter(b => {
+      const status = cleaningStatusMap.get(b.id) ?? 'unassigned';
+      return status === cleaningFilter;
+    });
+  }, [bookings, cleaningFilter, cleaningStatusMap]);
 
   const { kpis, incompleteCount } = useMemo(
     () => buildBookingKPIs(enrichedBookings),
@@ -473,6 +500,7 @@ export default function BookingsClient() {
   const handleClearFilters = useCallback(() => {
     setFilters(EMPTY_FILTERS);
     setSearch('');
+    setCleaningFilter('all');
   }, []);
 
   const handleCloseFormModal = useCallback(() => {
@@ -554,6 +582,8 @@ export default function BookingsClient() {
         filters={filters}
         setFilters={setFilters}
         onClear={handleClearFilters}
+        cleaningFilter={cleaningFilter}
+        setCleaningFilter={setCleaningFilter}
       />
       </div>
 

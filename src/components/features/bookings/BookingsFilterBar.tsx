@@ -8,12 +8,14 @@ interface Props {
   filters: BookingFilters;
   setFilters: React.Dispatch<React.SetStateAction<BookingFilters>>;
   onClear: () => void;
+  cleaningFilter: 'all' | 'unassigned' | 'pending' | 'done' | 'paid';
+  setCleaningFilter: (v: 'all' | 'unassigned' | 'pending' | 'done' | 'paid') => void;
 }
 
 export default function BookingsFilterBar({
-  search, setSearch, applySearch, filters, setFilters, onClear,
+  search, setSearch, applySearch, filters, setFilters, onClear, cleaningFilter, setCleaningFilter,
 }: Props) {
-  const hasFilters = !!(filters.dateFrom || filters.dateTo || filters.search || filters.channel);
+  const hasFilters = !!(filters.dateFrom || filters.dateTo || filters.search || filters.channel || cleaningFilter !== 'all');
 
   return (
     <motion.div
@@ -73,6 +75,22 @@ export default function BookingsFilterBar({
             <option value="vrbo">Vrbo</option>
             <option value="direct">Directo</option>
             <option value="other">Otro</option>
+          </select>
+        </div>
+
+        {/* Aseo */}
+        <div className="lg:w-40">
+          <label className="block text-xs font-medium text-slate-500 mb-1">🧹 Aseo</label>
+          <select
+            value={cleaningFilter}
+            onChange={e => setCleaningFilter(e.target.value as typeof cleaningFilter)}
+            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+          >
+            <option value="all">Todos</option>
+            <option value="unassigned">Sin asignar</option>
+            <option value="pending">Pendiente</option>
+            <option value="done">Hecho (sin pagar)</option>
+            <option value="paid">Pagado</option>
           </select>
         </div>
 
