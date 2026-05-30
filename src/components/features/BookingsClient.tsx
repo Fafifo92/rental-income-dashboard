@@ -81,7 +81,7 @@ export default function BookingsClient() {
     return demo;
   }, []);
 
-  const { bookings, loading, isDemo, reload } = useBookingsList({
+  const { bookings, loading, isDemo, reload, silentReload } = useBookingsList({
     filters, propertyIds, demoFallback,
   });
 
@@ -616,7 +616,7 @@ export default function BookingsClient() {
               booking={detailTarget}
               properties={properties}
               bankAccounts={bankAccounts}
-              onClose={() => { setDetailTarget(null); reload(); }}
+              onClose={() => { setDetailTarget(null); silentReload(); }}
               resolvePropertyId={(lid) => {
                 if (!lid) return null;
                 return listings.find(l => l.id === lid)?.property_id ?? null;

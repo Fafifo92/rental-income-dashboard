@@ -111,7 +111,7 @@ export default function SharedBillsPendingPanel({
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-slate-800 text-sm truncate">{p.vendor.name}</p>
                         <p className="text-xs text-slate-500 truncate">
-                          {ymLabel(p.yearMonth)} · cubre {p.propertiesCount} propiedad{p.propertiesCount > 1 ? 'es' : ''}
+                          {ymLabel(p.yearMonth)} · <span title={p.propertyNames.join('\n')} className="cursor-help underline decoration-dotted">cubre {p.propertiesCount} propiedad{p.propertiesCount > 1 ? 'es' : ''}</span>
                         </p>
                       </div>
                       <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap ${

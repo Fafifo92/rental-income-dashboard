@@ -87,6 +87,17 @@ export default function VendorsClient(): JSX.Element {
     return m;
   }, [allVps]);
 
+  const propNamesByVendor = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const vp of allVps) {
+      const name = properties.find(p => p.id === vp.property_id)?.name ?? vp.property_id;
+      const arr = m.get(vp.vendor_id) ?? [];
+      arr.push(name);
+      m.set(vp.vendor_id, arr);
+    }
+    return m;
+  }, [allVps, properties]);
+
   // Últimos 6 meses (incluido el actual) para la matriz
   const months = useMemo(() => {
     const nowYm = currentYearMonth();
@@ -279,7 +290,7 @@ export default function VendorsClient(): JSX.Element {
                   </td>
                   <td className="px-5 py-3 text-slate-600">
                     {propsCountByVendor.get(v.id)
-                      ? <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-semibold">{propsCountByVendor.get(v.id)} propiedad{propsCountByVendor.get(v.id)! > 1 ? 'es' : ''}</span>
+                      ? <span title={propNamesByVendor.get(v.id)?.join('\n')} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-semibold cursor-help">{propsCountByVendor.get(v.id)} propiedad{propsCountByVendor.get(v.id)! > 1 ? 'es' : ''}</span>
                       : <span className="text-xs text-slate-400">— sin asignar</span>}
                   </td>
                   <td className="px-5 py-3">

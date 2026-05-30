@@ -331,6 +331,89 @@ export const deleteCleaning = async (id: string): Promise<ServiceResult<true>> =
   if (error) return { data: null, error: error.message };  return { data: true, error: null };
 };
 
+/**
+ * Paga un aseo individual desde el modal de detalles de reserva:
+ * crea el gasto contable y marca el cleaning como pagado.
+ */
+export const paySingleCleaning = async (args: {
+  cleaning: BookingCleaning;
+  cleanerName: string;
+  propertyId: string | null;
+  propertyName: string;
+  bookingCode: string;
+  paidDate: string;
+  bankAccountId: string;
+}): Promise<ServiceResult<BookingCleaning>> => {
+  if (demoBlockWrite('pagar aseo')) return demoWriteBlockedResult<BookingCleaning>();
+  const { cleaning, cleanerName, propertyId, propertyName, bookingCode, paidDate, bankAccountId } = args;
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { data: null, error: 'No autenticado.' };
+
+  const doneDate = cleaning.done_date ?? paidDate;
+  const expensesToInsert: Array<Omit<ExpenseRow, 'id' | 'created_at'>> = [];
+
+  if (cleaning.fee > 0) {
+    expensesToInsert.push({
+      owner_id: user.id,
+      property_id: propertyId,
+      category: 'Aseo',
+      type: 'variable',
+      amount: cleaning.fee,
+      currency: 'COP',
+      date: paidDate,
+      description: `Aseo – ${propertyName} · Reserva ${bookingCode} (${doneDate}) · ${cleanerName}`,
+      status: 'paid',
+      bank_account_id: bankAccountId,
+      booking_id: cleaning.booking_id,
+      vendor: cleanerName,
+      person_in_charge: null,
+      adjustment_id: null,
+      vendor_id: cleaning.cleaner_id,
+      shared_bill_id: null,
+      subcategory: 'cleaning',
+      expense_group_id: null,
+    });
+  }
+
+  if (cleaning.reimburse_to_cleaner && cleaning.supplies_amount > 0) {
+    expensesToInsert.push({
+      owner_id: user.id,
+      property_id: propertyId,
+      category: 'Insumos de aseo',
+      type: 'variable',
+      amount: cleaning.supplies_amount,
+      currency: 'COP',
+      date: paidDate,
+      description: `Insumos de aseo – ${propertyName} · Reserva ${bookingCode} (${doneDate}) · ${cleanerName}`,
+      status: 'paid',
+      bank_account_id: bankAccountId,
+      booking_id: cleaning.booking_id,
+      vendor: cleanerName,
+      person_in_charge: null,
+      adjustment_id: null,
+      vendor_id: cleaning.cleaner_id,
+      shared_bill_id: null,
+      subcategory: 'cleaning',
+      expense_group_id: null,
+    });
+  }
+
+  if (expensesToInsert.length > 0) {
+    const { error: eErr } = await supabase.from('expenses').insert(expensesToInsert);
+    if (eErr) return { data: null, error: eErr.message };
+  }
+
+  const { data, error } = await supabase
+    .from('booking_cleanings')
+    .update({ status: 'paid', paid_date: paidDate })
+    .eq('id', cleaning.id)
+    .select('*')
+    .single();
+  if (error) return { data: null, error: error.message };
+  return { data: toCleaning(data as BookingCleaningRow), error: null };
+};
+
 export interface CleanerBalance {
   cleaner_id: string;
   pending_count: number;

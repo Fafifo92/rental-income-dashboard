@@ -41,5 +41,16 @@ export function useBookingsList({ filters, propertyIds, demoFallback, enabled = 
 
   const reload = useCallback(() => load({ ...filters, propertyIds }), [load, filters, propertyIds]);
 
-  return { bookings, setBookings, loading, isDemo, reload };
+  const silentReload = useCallback(async () => {
+    const result = await listBookings({ ...filters, propertyIds });
+    if (result.error) {
+      setBookings(demoFallback({ ...filters, propertyIds }));
+      setIsDemo(true);
+    } else {
+      setBookings((result.data ?? []).map(fromRow));
+      setIsDemo(false);
+    }
+  }, [filters, propertyIds, demoFallback]);
+
+  return { bookings, setBookings, loading, isDemo, reload, silentReload };
 }

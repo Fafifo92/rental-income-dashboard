@@ -172,6 +172,7 @@ export type PendingSharedBill = {
   yearMonth: string;
   propertiesCount: number;
   propertyIds: string[];
+  propertyNames: string[];
   estimatedAmount: number;
   isCurrentMonth: boolean;
 };
@@ -183,10 +184,11 @@ export const listPendingSharedBills = async (
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado' };
 
-  const [vRes, vpRes, billsRes] = await Promise.all([
+  const [vRes, vpRes, billsRes, propRes] = await Promise.all([
     supabase.from('vendors').select('*').eq('owner_id', user.id).eq('active', true),
     supabase.from('vendor_properties').select('*'),
     supabase.from('shared_bills').select('vendor_id, year_month'),
+    supabase.from('properties').select('id, name').eq('owner_id', user.id),
   ]);
   if (vRes.error)     return { data: null, error: vRes.error.message };
   if (vpRes.error)    return { data: null, error: vpRes.error.message };
@@ -196,6 +198,9 @@ export const listPendingSharedBills = async (
   const vps     = (vpRes.data ?? []) as VendorPropertyRow[];
   const paidSet = new Set<string>(
     (billsRes.data ?? []).map((b: { vendor_id: string; year_month: string }) => `${b.vendor_id}::${b.year_month}`),
+  );
+  const propNameMap = new Map<string, string>(
+    ((propRes.data ?? []) as { id: string; name: string }[]).map(p => [p.id, p.name]),
   );
 
   const vpsByVendor = new Map<string, VendorPropertyRow[]>();
@@ -230,6 +235,7 @@ export const listPendingSharedBills = async (
         yearMonth: ym,
         propertiesCount: props.length,
         propertyIds: props.map(vp => vp.property_id),
+        propertyNames: props.map(vp => propNameMap.get(vp.property_id) ?? vp.property_id),
         estimatedAmount: estimated,
         isCurrentMonth: ym === nowYm,
       });

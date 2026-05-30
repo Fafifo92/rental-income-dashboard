@@ -12,7 +12,7 @@ import {
 } from '@/services/bookingAdjustments';
 import {
   listCleaningsByBooking, createCleaning, updateCleaning, deleteCleaning,
-  updateBookingOperational, type BookingCleaning,
+  updateBookingOperational, paySingleCleaning, type BookingCleaning,
 } from '@/services/cleanings';
 import { listVendors, type Vendor } from '@/services/vendors';
 import { consumeCreditsForCheckin, quoteBookingPoolCost, listConsumptionsForPool } from '@/services/creditPools';
@@ -95,6 +95,10 @@ export default function BookingDetailModal({
   const [cleanings, setCleanings] = useState<BookingCleaning[]>([]);
   const [cleaners, setCleaners] = useState<Vendor[]>([]);
   const [showAddCleaning, setShowAddCleaning] = useState(false);
+  const [cleaningToPay, setCleaningToPay] = useState<BookingCleaning | null>(null);
+  const [payingCleaning, setPayingCleaning] = useState(false);
+  const [cleaningPayDate, setCleaningPayDate] = useState('');
+  const [cleaningPayAccount, setCleaningPayAccount] = useState('');
 
   // Use property_id from the booking (pre-resolved via join), with fallback to resolvePropertyId
   const propertyId = booking.property_id ?? resolvePropertyId?.(booking.listing_id) ?? null;
@@ -365,15 +369,40 @@ export default function BookingDetailModal({
 
   const setCleaningStatus = useCallback(async (
     c: BookingCleaning,
-    next: 'pending' | 'done' | 'paid',
+    next: 'pending' | 'done',
   ) => {
     const today = todayISO();
     const patch: Partial<BookingCleaning> = { status: next };
     if (next === 'done' && !c.done_date) patch.done_date = today;
-    if (next === 'paid' && !c.paid_date) patch.paid_date = today;
     await updateCleaning(c.id, patch);
     await load();
   }, [load]);
+
+  const openPayCleaning = useCallback((c: BookingCleaning) => {
+    setCleaningToPay(c);
+    setCleaningPayDate(todayISO());
+    setCleaningPayAccount('');
+  }, []);
+
+  const confirmPayCleaning = useCallback(async () => {
+    if (!cleaningToPay || !cleaningPayAccount) return;
+    setPayingCleaning(true);
+    const cleaner = cleaners.find(v => v.id === cleaningToPay.cleaner_id);
+    const res = await paySingleCleaning({
+      cleaning: cleaningToPay,
+      cleanerName: cleaner?.name ?? 'Sin asignar',
+      propertyId: property?.id ?? null,
+      propertyName: property?.name ?? 'Sin propiedad',
+      bookingCode: booking.confirmation_code,
+      paidDate: cleaningPayDate,
+      bankAccountId: cleaningPayAccount,
+    });
+    setPayingCleaning(false);
+    if (res.error) { toast.error(res.error); return; }
+    setCleaningToPay(null);
+    toast.success('Aseo pagado y gasto registrado');
+    await load();
+  }, [cleaningToPay, cleaningPayAccount, cleaningPayDate, cleaners, property, booking.confirmation_code, load]);
 
   const removeCleaning = useCallback(async (id: string) => {
     await deleteCleaning(id);
@@ -606,6 +635,9 @@ export default function BookingDetailModal({
                             <p className="font-semibold text-slate-800">
                               {cleaner?.name ?? 'Sin asignar'}
                               <span className="ml-2 text-xs font-normal text-slate-500">{formatCurrency(c.fee)}</span>
+                              {c.supplies_amount > 0 && (
+                                <span className="ml-1.5 text-xs font-normal text-indigo-500">· {formatCurrency(c.supplies_amount)} de insumos</span>
+                              )}
                             </p>
                             {c.done_date && <p className="text-xs text-slate-500">Hecho {formatDateDisplay(c.done_date)}</p>}
                           </div>
@@ -614,7 +646,7 @@ export default function BookingDetailModal({
                             {c.status === 'done' && (
                               <>
                                 <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-semibold">Hecho</span>
-                                <button onClick={() => setCleaningStatus(c, 'paid')} className="text-xs text-emerald-700 font-semibold hover:underline">Pagar</button>
+                                <button onClick={() => openPayCleaning(c)} className="text-xs text-emerald-700 font-semibold hover:underline">Pagar</button>
                               </>
                             )}
                             {c.status === 'pending' && (
@@ -1031,6 +1063,73 @@ export default function BookingDetailModal({
               onClose={() => { setShowCompleteModal(false); setCompleteError(null); }}
               onConfirm={markCompleted}
             />
+          )}
+        </AnimatePresence>
+
+        {/* Pay cleaning modal */}
+        <AnimatePresence>
+          {cleaningToPay && (
+            <motion.div
+              className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={(e) => { if (e.target === e.currentTarget) setCleaningToPay(null); }}
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4"
+              >
+                <h3 className="text-base font-bold text-slate-800">Registrar pago de aseo</h3>
+                <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 space-y-1">
+                  <p className="text-xs font-semibold text-emerald-800">
+                    {cleaners.find(v => v.id === cleaningToPay.cleaner_id)?.name ?? 'Sin asignar'}
+                  </p>
+                  <p className="text-sm font-bold text-emerald-700">
+                    {formatCurrency(cleaningToPay.fee + (cleaningToPay.reimburse_to_cleaner ? cleaningToPay.supplies_amount : 0))}
+                    {cleaningToPay.reimburse_to_cleaner && cleaningToPay.supplies_amount > 0 && (
+                      <span className="text-xs font-normal text-emerald-600 ml-1">
+                        ({formatCurrency(cleaningToPay.fee)} aseo + {formatCurrency(cleaningToPay.supplies_amount)} insumos)
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Fecha de pago <span className="text-rose-500">*</span></label>
+                  <input
+                    type="date"
+                    value={cleaningPayDate}
+                    onChange={e => setCleaningPayDate(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Cuenta de salida <span className="text-rose-500">*</span></label>
+                  <select
+                    value={cleaningPayAccount}
+                    onChange={e => setCleaningPayAccount(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                  >
+                    <option value="">— Selecciona la cuenta —</option>
+                    {bankAccounts.map(b => (
+                      <option key={b.id} value={b.id}>{b.name}{b.bank ? ` — ${b.bank}` : ''}</option>
+                    ))}
+                  </select>
+                  {bankAccounts.length === 0 && (
+                    <p className="text-[11px] text-amber-700 mt-1">No tienes cuentas. <a href="/cuentas" className="underline font-semibold">Agregar →</a></p>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500">Se creará el gasto contable de aseo y se descontará de la cuenta seleccionada.</p>
+                <div className="flex gap-2 justify-end pt-1">
+                  <button onClick={() => setCleaningToPay(null)} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 font-medium">Cancelar</button>
+                  <button
+                    onClick={confirmPayCleaning}
+                    disabled={!cleaningPayDate || !cleaningPayAccount || payingCleaning}
+                    className="px-4 py-2 text-sm font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {payingCleaning ? 'Registrando…' : 'Confirmar pago'}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
           )}
         </AnimatePresence>
       </motion.div>
