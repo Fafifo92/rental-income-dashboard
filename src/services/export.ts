@@ -424,12 +424,11 @@ function fmtAseoDate(iso: string | null): string {
 }
 
 export function exportAseoToCsv(rows: AseoExportRow[], periodLabel: string) {
-  const header = toCsvRow(['Personal', 'Fecha aseo', 'Código reserva', 'Propiedad', 'Huésped', 'Check-in', 'Check-out', 'Valor', 'Estado', 'Fecha liquidado']);
+  const header = toCsvRow(['Personal', 'Fecha aseo', 'Código reserva', 'Cliente', 'Check-in', 'Check-out', 'Valor', 'Estado', 'Fecha liquidado']);
   const dataRows = rows.map(r => toCsvRow([
     r.cleaner_name,
     fmtAseoDate(r.done_date),
     r.booking_code ?? '',
-    r.property_name ?? '',
     r.guest_name ?? '',
     fmtAseoDate(r.check_in),
     fmtAseoDate(r.check_out),
@@ -441,12 +440,11 @@ export function exportAseoToCsv(rows: AseoExportRow[], periodLabel: string) {
 }
 
 export function exportAseoToExcel(rows: AseoExportRow[], periodLabel: string) {
-  const headerRow = ['Personal', 'Fecha aseo', 'Código reserva', 'Propiedad', 'Huésped', 'Check-in', 'Check-out', 'Valor', 'Estado', 'Fecha liquidado'];
+  const headerRow = ['Personal', 'Fecha aseo', 'Código reserva', 'Cliente', 'Check-in', 'Check-out', 'Valor', 'Estado', 'Fecha liquidado'];
   const dataRows: (string | number)[][] = rows.map(r => [
     r.cleaner_name,
     fmtAseoDate(r.done_date),
     r.booking_code ?? '',
-    r.property_name ?? '',
     r.guest_name ?? '',
     fmtAseoDate(r.check_in),
     fmtAseoDate(r.check_out),
@@ -467,7 +465,6 @@ export function exportAseoToPdf(rows: AseoExportRow[], periodLabel: string) {
       <td>${escXml(r.cleaner_name)}</td>
       <td>${fmtAseoDate(r.done_date) || '—'}</td>
       <td>${r.booking_code ?? '—'}</td>
-      <td>${escXml(r.property_name ?? '—')}</td>
       <td>${escXml(r.guest_name ?? '—')}</td>
       <td>${fmtAseoDate(r.check_in) || '—'}</td>
       <td>${fmtAseoDate(r.check_out) || '—'}</td>
@@ -508,14 +505,14 @@ export function exportAseoToPdf(rows: AseoExportRow[], periodLabel: string) {
     <thead>
       <tr>
         <th>Personal</th><th>Fecha aseo</th><th>Código reserva</th>
-        <th>Propiedad</th><th>Huésped</th><th>Check-in</th><th>Check-out</th>
+        <th>Cliente</th><th>Check-in</th><th>Check-out</th>
         <th>Valor</th><th>Estado</th><th>Fecha liquidado</th>
       </tr>
     </thead>
     <tbody>${tableRows}</tbody>
     <tfoot>
       <tr>
-        <td colspan="7">Total</td>
+        <td colspan="6">Total</td>
         <td class="num">${formatCurrency(total)}</td>
         <td colspan="2"></td>
       </tr>

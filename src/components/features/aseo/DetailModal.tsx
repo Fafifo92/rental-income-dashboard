@@ -121,6 +121,7 @@ export default function DetailModal({ cleaner, onClose }: Props) {
                           <th className="text-left py-2 px-2">Huésped</th>
                           <th className="text-left py-2 px-2">Fecha aseo</th>
                           <th className="text-left py-2 px-2">Pagado</th>
+                          <th className="text-left py-2 px-2">Cuenta</th>
                           <th className="text-right py-2 px-2">Tarifa</th>
                           <th className="text-right py-2 px-2">Insumos</th>
                         </tr>
@@ -153,6 +154,9 @@ export default function DetailModal({ cleaner, onClose }: Props) {
                             </td>
                             <td className="py-2 px-2 text-slate-500">{r.done_date ?? r.check_out ?? '—'}</td>
                             <td className="py-2 px-2 text-slate-500">{r.paid_date ?? '—'}</td>
+                            <td className="py-2 px-2 text-slate-500 text-xs">
+                              {r.status === 'paid' ? (r.bank_account_name ?? '—') : <span className="text-slate-300">—</span>}
+                            </td>
                             <td className="py-2 px-2 text-right font-semibold">{formatCurrency(r.fee)}</td>
                             <td className="py-2 px-2 text-right">
                               {r.supplies_amount > 0 ? (

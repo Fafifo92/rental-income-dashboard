@@ -19,7 +19,6 @@ const CHECKOUT_HOUR = 12; // 12:00 PM (mediodía) hora local del owner
 
 interface BookingLite {
   id: string;
-  owner_id: string;
   end_date: string;
   status: string | null;
   checkin_done: boolean | null;
@@ -80,10 +79,29 @@ Deno.serve(async (req) => {
       return d.toISOString().slice(0, 10);
     })();
 
+    // Bookings are not directly scoped by owner_id; ownership is resolved
+    // through listings → properties. Fetch the listing IDs for this owner first.
+    const { data: propsData, error: propErr } = await admin
+      .from('properties')
+      .select('listings(id)')
+      .eq('owner_id', settings.user_id);
+
+    if (propErr) { errors++; results[settings.user_id] = { processed, skipped, errors, date: today }; continue; }
+
+    const listingIds: string[] = (propsData ?? []).flatMap(
+      (p: { listings: Array<{ id: string }> | null }) =>
+        (p.listings ?? []).map((l) => l.id),
+    );
+
+    if (listingIds.length === 0) {
+      results[settings.user_id] = { processed, skipped, errors, date: today };
+      continue;
+    }
+
     const { data: bookings, error: bErr } = await admin
       .from('bookings')
-      .select('id, owner_id, end_date, status, checkin_done, checkout_done')
-      .eq('owner_id', settings.user_id)
+      .select('id, end_date, status, checkin_done, checkout_done')
+      .in('listing_id', listingIds)
       .lte('end_date', cutoffDate)
       .or('checkout_done.is.null,checkout_done.eq.false');
 

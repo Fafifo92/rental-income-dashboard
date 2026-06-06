@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getBookingStatus } from './bookingStatus';
+import { getBookingStatus, inferOperationalFlags } from './bookingStatus';
 
 const TODAY = '2026-05-21';
 
@@ -59,5 +59,31 @@ describe('getBookingStatus', () => {
 
   it('completed (checkout_done) takes precedence over checkout_today', () => {
     expect(getBookingStatus({ start_date: '2026-05-18', end_date: TODAY, checkin_done: true, checkout_done: true }, TODAY)).toBe('completed');
+  });
+});
+
+describe('inferOperationalFlags', () => {
+  it('fully past booking → both flags true', () => {
+    expect(inferOperationalFlags('2026-05-10', '2026-05-15', TODAY)).toEqual({ checkin_done: true, checkout_done: true });
+  });
+
+  it('checking out TODAY → checkin done, checkout NOT done (edge function handles it)', () => {
+    expect(inferOperationalFlags('2026-05-18', TODAY, TODAY)).toEqual({ checkin_done: true, checkout_done: false });
+  });
+
+  it('in-progress booking → checkin done, checkout not done', () => {
+    expect(inferOperationalFlags('2026-05-20', '2026-05-25', TODAY)).toEqual({ checkin_done: true, checkout_done: false });
+  });
+
+  it('checking in today → checkin done, checkout not done', () => {
+    expect(inferOperationalFlags(TODAY, '2026-05-25', TODAY)).toEqual({ checkin_done: true, checkout_done: false });
+  });
+
+  it('future booking → both flags false', () => {
+    expect(inferOperationalFlags('2026-05-25', '2026-05-30', TODAY)).toEqual({ checkin_done: false, checkout_done: false });
+  });
+
+  it('single-day booking today → checkin done, checkout not done', () => {
+    expect(inferOperationalFlags(TODAY, TODAY, TODAY)).toEqual({ checkin_done: true, checkout_done: false });
   });
 });

@@ -97,10 +97,16 @@ export const inferOperationalFlags = (
   endDate: string,
   today: string = todayISO(),
 ): { checkin_done: boolean; checkout_done: boolean } => {
-  if (endDate && endDate <= today) {
+  // Fully past (end_date strictly before today): guest has already left.
+  if (endDate && endDate < today) {
     return { checkin_done: true, checkout_done: true };
   }
-  if (startDate && startDate <= today && (!endDate || today < endDate)) {
+  // Started but not yet fully past — includes:
+  //   • checking out today (end_date == today)
+  //   • currently in progress (start_date <= today < end_date)
+  // checkout_done is intentionally left false so the auto-checkout edge
+  // function marks it at the appropriate hour (12:00 local time).
+  if (startDate && startDate <= today) {
     return { checkin_done: true, checkout_done: false };
   }
   return { checkin_done: false, checkout_done: false };

@@ -224,6 +224,12 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
     .filter(a => a.bank_account_id)
     .reduce((s, a) => s + Number(a.amount), 0);
 
+  // ── Derived display values ────────────────────────────────────────────────
+  // displayedBruto = gross + income adjustments − discounts (matches Bruto chip).
+  // displayedFees is ALWAYS computed from the difference so Bruto − Fees = Neto.
+  const displayedBruto = addMoney(bruto, totalIncomeAdjs) - totalDiscounts;
+  const displayedFees  = subMoney(displayedBruto, netoVal);
+
   // ══════════════════════════════════════════════════════════════════════
   // SECTION C — DEPOSITO DE SEGURIDAD
   // ══════════════════════════════════════════════════════════════════════
@@ -366,7 +372,7 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
     });
     if (res.error) { setTotalError(res.error); setSavingTotal(false); return; }
     await updateBookingPayout(booking.id, {
-      gross_revenue: bruto, channel_fees: feesVal, net_payout: totalAmount,
+      gross_revenue: bruto, channel_fees: subMoney(bruto, totalAmount ?? 0), net_payout: totalAmount,
       payout_bank_account_id: totalAccount || null, payout_date: totalDate || null,
     });
     setSavingTotal(false);
@@ -395,7 +401,7 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
     const currentPayments = await listBookingPayments(booking.id);
     const newTotal = (currentPayments.data ?? []).reduce((s, p) => s + Number(p.amount), 0);
     await updateBookingPayout(booking.id, {
-      gross_revenue: bruto, channel_fees: feesVal, net_payout: newTotal,
+      gross_revenue: bruto, channel_fees: subMoney(bruto, newTotal), net_payout: newTotal,
       payout_bank_account_id: newAccount || (payments[0]?.bank_account_id ?? null),
       payout_date: newDate || null,
     });
@@ -409,7 +415,7 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
     setPayments(updated);
     const newTotal = updated.reduce((s, p) => s + Number(p.amount), 0);
     await updateBookingPayout(booking.id, {
-      gross_revenue: bruto, channel_fees: feesVal,
+      gross_revenue: bruto, channel_fees: subMoney(bruto, newTotal || 0),
       net_payout: newTotal || null,
       payout_bank_account_id: updated[0]?.bank_account_id ?? null,
       payout_date: updated[0]?.payment_date ?? null,
@@ -420,9 +426,11 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
   };
 
   const totalPaid   = payments.reduce((s, p) => s + Number(p.amount), 0);
-  const remaining   = Math.max(0, subMoney(netoVal, totalPaid));
-  const pct         = netoVal > 0 ? Math.min(100, Math.round((totalPaid / netoVal) * 100)) : 0;
-  const isFullyPaid = netoVal > 0 && totalPaid >= netoVal;
+  // Track receipt against the gross (displayed bruto) so that "fully received"
+  // only triggers when the full gross amount has been collected — not just the net.
+  const remaining   = Math.max(0, subMoney(displayedBruto, totalPaid));
+  const pct         = displayedBruto > 0 ? Math.min(100, Math.round((totalPaid / displayedBruto) * 100)) : 0;
+  const isFullyPaid = displayedBruto > 0 && totalPaid >= displayedBruto;
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -488,8 +496,8 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
               {/* ═══ CHIPS financieros ═══ */}
               <div className="flex gap-3">
                 {[
-                { label: 'Bruto', value: addMoney(bruto, totalIncomeAdjs) - totalDiscounts, color: 'bg-slate-50 text-slate-700 border-slate-200' },
-                  { label: 'Fees', value: feesVal, color: 'bg-amber-50 text-amber-700 border-amber-200' },
+                { label: 'Bruto', value: displayedBruto, color: 'bg-slate-50 text-slate-700 border-slate-200' },
+                  { label: 'Fees', value: displayedFees, color: 'bg-amber-50 text-amber-700 border-amber-200' },
                   { label: 'Neto', value: netoVal, color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
                 ].map(chip => (
                   <div key={chip.label} className={`flex-1 rounded-xl border px-3 py-2 text-center ${chip.color}`}>
@@ -650,7 +658,7 @@ export default function BookingPayoutModal({ booking, bankAccounts, onClose, onS
                               style={{ width: `${pct}%` }}
                             />
                           </div>
-                          <p className="text-[10px] text-slate-400 mt-1">{pct}% de {formatCurrency(netoVal)}</p>
+                          <p className="text-[10px] text-slate-400 mt-1">{pct}% de {formatCurrency(displayedBruto)}</p>
                         </div>
                       )}
 

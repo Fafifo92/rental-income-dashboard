@@ -71,6 +71,7 @@ export interface CleaningHistoryRow extends BookingCleaning {
   property_id: string | null;
   property_name: string | null;
   listing_source: string | null;
+  bank_account_name: string | null;
 }
 
 export const listCleaningsByCleaner = async (
@@ -132,11 +133,41 @@ export const listCleaningsByCleaner = async (
   }
   const propertyMap = new Map(properties.map(p => [p.id, p]));
 
+  // 5) Bank accounts for paid cleanings (via their expense records).
+  const paidBookingIds = cleanings.filter(c => c.status === 'paid').map(c => c.booking_id);
+  const bookingBankAccountMap = new Map<string, string>();
+  if (paidBookingIds.length > 0) {
+    const { data: expRows } = await supabase
+      .from('expenses')
+      .select('booking_id, bank_account_id')
+      .in('booking_id', paidBookingIds)
+      .eq('vendor_id', cleanerId)
+      .eq('subcategory', 'cleaning')
+      .not('bank_account_id', 'is', null);
+    for (const e of expRows ?? []) {
+      if (e.booking_id && !bookingBankAccountMap.has(e.booking_id)) {
+        bookingBankAccountMap.set(e.booking_id, e.bank_account_id as string);
+      }
+    }
+  }
+  const bankAccountIds = Array.from(new Set(bookingBankAccountMap.values()));
+  type BankMini = { id: string; name: string };
+  let bankAccounts: BankMini[] = [];
+  if (bankAccountIds.length > 0) {
+    const { data: baRows } = await supabase
+      .from('bank_accounts')
+      .select('id, name')
+      .in('id', bankAccountIds);
+    bankAccounts = (baRows ?? []) as BankMini[];
+  }
+  const bankAccountNameMap = new Map(bankAccounts.map(b => [b.id, b.name]));
+
   const rows: CleaningHistoryRow[] = cleanings.map((r) => {
     const base = toCleaning(r);
     const booking = bookingMap.get(r.booking_id);
     const listing = booking ? listingMap.get(booking.listing_id) : undefined;
     const property = listing ? propertyMap.get(listing.property_id) : undefined;
+    const baId = bookingBankAccountMap.get(r.booking_id);
     return {
       ...base,
       booking_code: booking?.confirmation_code ?? null,
@@ -146,6 +177,7 @@ export const listCleaningsByCleaner = async (
       property_id: property?.id ?? null,
       property_name: property?.name ?? null,
       listing_source: listing?.source ?? null,
+      bank_account_name: baId ? (bankAccountNameMap.get(baId) ?? null) : null,
     };
   });
 
@@ -222,11 +254,42 @@ export const listAllCleaningsEnriched = async (options?: {
   }
   const propertyMap = new Map(properties.map(p => [p.id, p]));
 
+  // 5) Bank accounts for paid cleanings (via their expense records, multi-cleaner).
+  const paidCleaning = cleanings.filter(c => c.status === 'paid');
+  const paidBookingIdsAll = paidCleaning.map(c => c.booking_id);
+  const cleaningBankAccountMap = new Map<string, string>(); // `${booking_id}|${cleaner_id}` → bank_account_id
+  if (paidBookingIdsAll.length > 0) {
+    const { data: expRows } = await supabase
+      .from('expenses')
+      .select('booking_id, vendor_id, bank_account_id')
+      .in('booking_id', paidBookingIdsAll)
+      .eq('subcategory', 'cleaning')
+      .not('bank_account_id', 'is', null);
+    for (const e of expRows ?? []) {
+      const key = `${e.booking_id}|${e.vendor_id}`;
+      if (!cleaningBankAccountMap.has(key)) {
+        cleaningBankAccountMap.set(key, e.bank_account_id as string);
+      }
+    }
+  }
+  const bankAccountIdsAll = Array.from(new Set(cleaningBankAccountMap.values()));
+  type BankMini = { id: string; name: string };
+  let bankAccountsAll: BankMini[] = [];
+  if (bankAccountIdsAll.length > 0) {
+    const { data: baRows } = await supabase
+      .from('bank_accounts')
+      .select('id, name')
+      .in('id', bankAccountIdsAll);
+    bankAccountsAll = (baRows ?? []) as BankMini[];
+  }
+  const bankAccountNameMapAll = new Map(bankAccountsAll.map(b => [b.id, b.name]));
+
   const rows: CleaningHistoryRow[] = cleanings.map((r) => {
     const base = toCleaning(r);
     const booking = bookingMap.get(r.booking_id);
     const listing = booking ? listingMap.get(booking.listing_id) : undefined;
     const property = listing ? propertyMap.get(listing.property_id) : undefined;
+    const baId = cleaningBankAccountMap.get(`${r.booking_id}|${r.cleaner_id}`);
     return {
       ...base,
       booking_code: booking?.confirmation_code ?? null,
@@ -236,6 +299,7 @@ export const listAllCleaningsEnriched = async (options?: {
       property_id: property?.id ?? null,
       property_name: property?.name ?? null,
       listing_source: listing?.source ?? null,
+      bank_account_name: baId ? (bankAccountNameMapAll.get(baId) ?? null) : null,
     };
   });
 
@@ -327,8 +391,23 @@ export const updateCleaning = async (
 
 export const deleteCleaning = async (id: string): Promise<ServiceResult<true>> => {
   if (demoBlockWrite('eliminar limpieza')) return demoWriteBlockedResult<true>();
+  const { data: cleaning, error: fetchErr } = await supabase
+    .from('booking_cleanings')
+    .select('booking_id, cleaner_id, status')
+    .eq('id', id)
+    .single();
+  if (fetchErr) return { data: null, error: fetchErr.message };
+  if (cleaning.status === 'paid' && cleaning.cleaner_id) {
+    await supabase
+      .from('expenses')
+      .delete()
+      .eq('booking_id', cleaning.booking_id)
+      .eq('vendor_id', cleaning.cleaner_id)
+      .eq('subcategory', 'cleaning');
+  }
   const { error } = await supabase.from('booking_cleanings').delete().eq('id', id);
-  if (error) return { data: null, error: error.message };  return { data: true, error: null };
+  if (error) return { data: null, error: error.message };
+  return { data: true, error: null };
 };
 
 /**
@@ -346,6 +425,7 @@ export const paySingleCleaning = async (args: {
 }): Promise<ServiceResult<BookingCleaning>> => {
   if (demoBlockWrite('pagar aseo')) return demoWriteBlockedResult<BookingCleaning>();
   const { cleaning, cleanerName, propertyId, propertyName, bookingCode, paidDate, bankAccountId } = args;
+  if (cleaning.status === 'paid') return { data: null, error: 'Este aseo ya fue pagado.' };
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'No autenticado.' };
