@@ -156,6 +156,7 @@ export default function BookingsExportModal({
         status:       b.status ?? '',
         channel:      b.channel,
         property_name: (b.listings?.properties as { name: string } | null | undefined)?.name ?? null,
+        channel_fees: b.channel_fees !== null && b.channel_fees !== undefined ? Number(b.channel_fees) : null,
         net_adjustment: includeAdjustments ? (adjMap.get(b.id) ?? 0) : null,
       }));
 

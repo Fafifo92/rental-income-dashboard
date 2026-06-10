@@ -156,7 +156,7 @@ export default function DashboardClient() {
     authStatus, withProperties: true, withBankAccounts: true,
   });
 
-  const { kpis, monthlyPnL, exportMonthly, exportMonthlyByBookings, payoutBreakdown, granularity, transactions, loading, txLoading } =
+  const { kpis, monthlyPnL, exportMonthly, exportMonthlyByBookings, channelBreakdown, payoutBreakdown, granularity, transactions, loading, txLoading } =
     useDashboardData({ period, authStatus, propertyIds, customRange });
 
   const handleCalendarBookingClick = useCallback(async (bookingId: string) => {
@@ -209,7 +209,7 @@ export default function DashboardClient() {
               </span>
             )}
             {activeTab !== 'pendientes' && activeTab !== 'hoy' && !loading && kpis && (
-              <ExportMenu kpis={kpis} monthly={exportMonthly} monthlyByBookings={exportMonthlyByBookings} period={period} customRange={customRange} propertyIds={propertyIds} />
+              <ExportMenu kpis={kpis} monthly={exportMonthly} monthlyByBookings={exportMonthlyByBookings} channels={channelBreakdown} period={period} customRange={customRange} propertyIds={propertyIds} />
             )}
           </div>
         </motion.div>

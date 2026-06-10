@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { exportKpisToCsv, exportMonthlyToCsv, exportToExcel, type BookingExportRow } from '@/services/export';
-import { resolvePeriodRange, type FinancialKPIs, type MonthlyPnL, type Period } from '@/services/financial';
+import { resolvePeriodRange, type ChannelBreakdownRow, type FinancialKPIs, type MonthlyPnL, type Period } from '@/services/financial';
 import { listBookings, type BookingWithListingRow } from '@/services/bookings';
 import { listAllBookingAdjustmentsForExport } from '@/services/bookingAdjustments';
 
@@ -17,6 +17,8 @@ interface Props {
   monthly: MonthlyPnL[];
   /** @deprecated retained for prop-compatibility with DashboardClient — not used */
   monthlyByBookings: MonthlyPnL[];
+  /** Desglose por canal (Directo / Airbnb / Booking…) — utilidad bruta/neta y gastos de reservas */
+  channels?: ChannelBreakdownRow[];
   period: Period;
   customRange?: { from: string; to: string };
   propertyIds?: string[];
@@ -32,7 +34,7 @@ interface ExportOption {
   action: (bookings?: BookingExportRow[]) => void | Promise<void>;
 }
 
-export default function ExportMenu({ kpis, monthly, period, customRange, propertyIds }: Props) {
+export default function ExportMenu({ kpis, monthly, channels, period, customRange, propertyIds }: Props) {
   const [open, setOpen]                   = useState(false);
   const [loading, setLoading]             = useState<string | null>(null);
   const [pendingOption, setPendingOption] = useState<ExportOption | null>(null);
@@ -53,15 +55,15 @@ export default function ExportMenu({ kpis, monthly, period, customRange, propert
     },
     {
       label: 'P&L Mensual — CSV',
-      description: 'Ingresos / gastos mes a mes + reservas (opcional)',
+      description: 'Ingresos / gastos mes a mes + canales + reservas (opcional)',
       supportsBookings: true,
-      action: (bookings) => exportMonthlyToCsv(monthly, bookings),
+      action: (bookings) => exportMonthlyToCsv(monthly, bookings, channels),
     },
     {
       label: 'Reporte Excel',
-      description: 'KPIs + P&L + hoja de reservas (opcional)',
+      description: 'KPIs + P&L + canales + hoja de reservas (opcional)',
       supportsBookings: true,
-      action: (bookings) => exportToExcel(kpis, monthly, periodLabel, bookings),
+      action: (bookings) => exportToExcel(kpis, monthly, periodLabel, bookings, channels),
     },
     {
       label: 'Imprimir / PDF',
@@ -146,6 +148,7 @@ export default function ExportMenu({ kpis, monthly, period, customRange, propert
             status: b.status ?? '',
             channel: b.channel,
             property_name: (b.listings?.properties as { name: string } | null | undefined)?.name ?? null,
+            channel_fees: b.channel_fees !== null && b.channel_fees !== undefined ? Number(b.channel_fees) : null,
             net_adjustment: includeAdjustments ? (adjMap.get(b.id) ?? 0) : null,
           }));
         }

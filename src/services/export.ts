@@ -1,9 +1,14 @@
 import { formatCurrency } from '@/lib/utils';
 import { todayISO, formatDateDisplay } from '@/lib/dateUtils';
-import type { FinancialKPIs, MonthlyPnL } from './financial';
+import { addMoney, subMoney } from '@/lib/money';
+import type { FinancialKPIs, MonthlyPnL, ChannelBreakdownRow } from './financial';
 import type { InventoryItemRow } from '@/types/database';
 import type { Expense } from '@/types';
 import { flattenExpensesForExport } from '@/lib/expenseGrouping';
+
+/** Suma money-safe (centavos enteros) — evita drift de coma flotante de JS. */
+const sumM = (vals: Array<number | null | undefined>): number =>
+  vals.reduce<number>((s, v) => addMoney(s, v ?? 0), 0);
 
 // ─── Booking Export Row ───────────────────────────────────────────────────────
 
@@ -18,9 +23,13 @@ export interface BookingExportRow {
   status: string;
   channel: string | null;
   property_name: string | null;
+  /** Fee cobrado por el canal (Airbnb, Booking…). null = no registrado */
+  channel_fees: number | null;
   /** Net of adjustments (damages, extras, discounts). null = not included */
   net_adjustment: number | null;
 }
+
+const isCancelledRow = (b: { status: string }) => b.status.toLowerCase().includes('cancel');
 
 const BOOKING_STATUS_LABEL = (b: { status: string; check_in: string; check_out: string }): string => {
   if (b.status.toLowerCase().includes('cancel')) return 'Cancelada';
@@ -56,35 +65,108 @@ function toCsvRow(cells: (string | number)[]): string {
     .join(',');
 }
 
+/**
+ * Filas de KPIs con desglose completo para que cada métrica sea reproducible:
+ *  - Ingreso Bruto = Hospedaje + Cancelaciones cobradas + Ajustes netos
+ *  - ADR    = Hospedaje ÷ Noches reservadas
+ *  - RevPAR = Hospedaje ÷ Noches disponibles
+ *  - Utilidad Neta = Ingreso Bruto − Total Gastos
+ */
+type KpiRowKind = 'money' | 'pct' | 'int' | 'text';
+
+function buildKpiRows(kpis: FinancialKPIs, period: string): [string, string | number, KpiRowKind][] {
+  // Ingresos por hospedaje: base de ADR/RevPAR (solo tarifa de reservas activas)
+  const lodgingRevenue = subMoney(subMoney(kpis.grossRevenue, kpis.netAdjustmentIncome), kpis.cancelledRevenue);
+  return [
+    ['Período', period, 'text'],
+    ['— INGRESOS —', '', 'text'],
+    ['Ingresos por Hospedaje (base ADR/RevPAR)', lodgingRevenue, 'money'],
+    ['(+) Ingresos por Cancelación Cobrada',     kpis.cancelledRevenue, 'money'],
+    ['(+) Ajustes Netos (daños, extras, descuentos)', kpis.netAdjustmentIncome, 'money'],
+    ['(=) Ingreso Bruto',                        kpis.grossRevenue, 'money'],
+    ['Fees de Canal (informativo — no se resta de la utilidad)', kpis.totalChannelFees, 'money'],
+    ['— GASTOS —', '', 'text'],
+    ['Gastos Fijos',        kpis.totalFixedExpenses, 'money'],
+    ['Gastos Variables (incluye multas de cancelación)', kpis.totalVariableExpenses, 'money'],
+    ['  de las cuales: Multas por Cancelación', kpis.cancelledFines, 'money'],
+    ['(=) Total Gastos',    kpis.totalExpenses, 'money'],
+    ['— RESULTADOS —', '', 'text'],
+    ['Margen Contribución (Ingreso Bruto − Gastos Variables)', kpis.contributionMargin, 'money'],
+    ['Utilidad Neta (Ingreso Bruto − Total Gastos)',           kpis.netProfit, 'money'],
+    ['— OPERACIÓN —', '', 'text'],
+    ['Ocupación %',          +(kpis.occupancyRate * 100).toFixed(1), 'pct'],
+    ['ADR (Hospedaje ÷ Noches Reservadas)',     kpis.adr, 'money'],
+    ['RevPAR (Hospedaje ÷ Noches Disponibles)', kpis.revpar, 'money'],
+    ['Noches Reservadas',    kpis.totalNights, 'int'],
+    ['Noches Disponibles',   kpis.availableNights, 'int'],
+    ['Propiedades',          kpis.propertyCount, 'int'],
+    ['Break-even Noches',    kpis.breakEvenNights, 'int'],
+    ['Break-even Ocu. %',    kpis.breakEvenOccupancy, 'pct'],
+    ['Total Reservas',       kpis.totalBookings, 'int'],
+    ['Canceladas',           kpis.cancelledCount, 'int'],
+    ['', '', 'text'],
+    ['Nota', 'ADR y RevPAR usan solo los Ingresos por Hospedaje (sin ajustes ni cancelaciones). Valores redondeados al peso: ADR × noches puede diferir en pocos pesos.', 'text'],
+  ];
+}
+
 export function exportKpisToCsv(kpis: FinancialKPIs, period: string) {
   const rows = [
     toCsvRow(['Métrica', 'Valor']),
-    toCsvRow(['Período', period]),
-    toCsvRow(['Ingreso Bruto',       kpis.grossRevenue]),
-    toCsvRow(['Gastos Fijos',        kpis.totalFixedExpenses]),
-    toCsvRow(['Gastos Variables',    kpis.totalVariableExpenses]),
-    toCsvRow(['Total Gastos',        kpis.totalExpenses]),
-    toCsvRow(['Margen Contribución', kpis.contributionMargin]),
-    toCsvRow(['Utilidad Neta',       kpis.netProfit]),
-    toCsvRow(['Ocupación %',         (kpis.occupancyRate * 100).toFixed(1)]),
-    toCsvRow(['ADR',                 kpis.adr]),
-    toCsvRow(['RevPAR',              kpis.revpar]),
-    toCsvRow(['Noches Totales',      kpis.totalNights]),
-    toCsvRow(['Break-even Noches',   kpis.breakEvenNights]),
-    toCsvRow(['Break-even Ocu. %',   kpis.breakEvenOccupancy]),
-    toCsvRow(['Total Reservas',      kpis.totalBookings]),
-    toCsvRow(['Canceladas',          kpis.cancelledCount]),
+    ...buildKpiRows(kpis, period).map(([label, value]) => toCsvRow([label, value])),
   ];
   downloadUtf8Csv(rows.join('\n'), `str-kpis-${today()}.csv`);
 }
 
-export function exportMonthlyToCsv(data: MonthlyPnL[], bookings?: BookingExportRow[]) {
-  const rows = [
-    toCsvRow(['Mes', 'Ingresos', 'Gastos', 'Utilidad Neta', 'Noches', 'Ocupación %']),
-    ...data.map(d =>
-      toCsvRow([d.month, d.revenue, d.expenses, d.netProfit, d.nights, d.occupancy])
-    ),
+// ─── Channel breakdown rows (shared CSV/Excel) ───────────────────────────────
+
+const CHANNEL_HEADER = [
+  'Canal', 'Reservas', 'Noches', 'Ingreso Bruto', 'Fees Canal',
+  'Neto (tras fees)', 'Gastos de Reservas', 'Utilidad Bruta', 'Utilidad Neta',
+];
+
+function buildChannelRows(channels: ChannelBreakdownRow[]): (string | number)[][] {
+  const dataRows: (string | number)[][] = channels.map(c => [
+    c.channel, c.bookings, c.nights, c.grossRevenue, c.channelFees,
+    c.netPayout, c.bookingExpenses, c.grossProfit, c.netProfit,
+  ]);
+  const total: (string | number)[] = [
+    'TOTAL',
+    channels.reduce((s, c) => s + c.bookings, 0),
+    channels.reduce((s, c) => s + c.nights, 0),
+    sumM(channels.map(c => c.grossRevenue)),
+    sumM(channels.map(c => c.channelFees)),
+    sumM(channels.map(c => c.netPayout)),
+    sumM(channels.map(c => c.bookingExpenses)),
+    sumM(channels.map(c => c.grossProfit)),
+    sumM(channels.map(c => c.netProfit)),
   ];
+  return [CHANNEL_HEADER, ...dataRows, total];
+}
+
+export function exportMonthlyToCsv(data: MonthlyPnL[], bookings?: BookingExportRow[], channels?: ChannelBreakdownRow[]) {
+  const totNights = data.reduce((s, d) => s + d.nights, 0);
+  const totAvail  = data.reduce((s, d) => s + d.availableNights, 0);
+  const rows = [
+    toCsvRow(['Mes', 'Ingresos', 'Gastos', 'Utilidad Neta', 'Noches', 'Noches Disp.', 'Ocupación %']),
+    ...data.map(d =>
+      toCsvRow([d.month, d.revenue, d.expenses, d.netProfit, d.nights, d.availableNights, d.occupancy])
+    ),
+    toCsvRow([
+      'TOTAL',
+      sumM(data.map(d => d.revenue)),
+      sumM(data.map(d => d.expenses)),
+      sumM(data.map(d => d.netProfit)),
+      totNights,
+      totAvail,
+      totAvail > 0 ? +((totNights / totAvail) * 100).toFixed(1) : 0,
+    ]),
+  ];
+
+  if (channels && channels.length > 0) {
+    rows.push('');
+    rows.push(toCsvRow(['--- DESGLOSE POR CANAL ---']));
+    for (const r of buildChannelRows(channels)) rows.push(toCsvRow(r));
+  }
 
   if (bookings && bookings.length > 0) {
     const hasAdj = bookings.some(b => b.net_adjustment !== null);
@@ -92,7 +174,7 @@ export function exportMonthlyToCsv(data: MonthlyPnL[], bookings?: BookingExportR
     rows.push(toCsvRow(['--- DETALLE DE RESERVAS ---']));
     const header = [
       'Código', 'Huésped', 'Check-in', 'Check-out', 'Noches',
-      'Ingresos', 'Neto Pago', 'Estado', 'Canal', 'Propiedad',
+      'Ingresos', 'Fee Canal', 'Neto Pago', 'Estado', 'Canal', 'Propiedad',
       ...(hasAdj ? ['Ajustes Neto'] : []),
     ];
     rows.push(toCsvRow(header));
@@ -104,6 +186,7 @@ export function exportMonthlyToCsv(data: MonthlyPnL[], bookings?: BookingExportR
         formatDateDisplay(b.check_out),
         b.nights,
         b.revenue,
+        b.channel_fees ?? '',
         b.net_payout ?? '',
         BOOKING_STATUS_LABEL(b),
         b.channel ?? '',
@@ -111,6 +194,20 @@ export function exportMonthlyToCsv(data: MonthlyPnL[], bookings?: BookingExportR
         ...(hasAdj ? [b.net_adjustment ?? 0] : []),
       ]));
     }
+    // Totales (solo reservas activas — las canceladas no suman ingresos/noches)
+    const active  = bookings.filter(b => !isCancelledRow(b));
+    const withNet = active.filter(b => b.net_payout != null);
+    rows.push(toCsvRow([
+      `TOTAL (${active.length} activas)`,
+      '', '', '',
+      active.reduce((s, b) => s + b.nights, 0),
+      sumM(active.map(b => b.revenue)),
+      sumM(active.map(b => b.channel_fees ?? 0)),
+      sumM(withNet.map(b => b.net_payout)),
+      '', '', '',
+      ...(hasAdj ? [sumM(active.map(b => b.net_adjustment ?? 0))] : []),
+    ]));
+    rows.push(toCsvRow([`Nota: Neto Pago total suma solo las ${withNet.length} reservas con neto registrado.`]));
   }
 
   downloadUtf8Csv(rows.join('\n'), `str-pnl-mensual-${today()}.csv`);
@@ -153,29 +250,32 @@ function buildSpreadsheetML(
   ].join('');
 }
 
-export function exportToExcel(kpis: FinancialKPIs, monthly: MonthlyPnL[], period: string, bookings?: BookingExportRow[]) {
+export function exportToExcel(kpis: FinancialKPIs, monthly: MonthlyPnL[], period: string, bookings?: BookingExportRow[], channels?: ChannelBreakdownRow[]) {
   const kpiRows: (string | number)[][] = [
     ['Métrica', 'Valor', 'Formato'],
-    ['Período', period, ''],
-    ['Ingreso Bruto',       kpis.grossRevenue,          formatCurrency(kpis.grossRevenue)],
-    ['Gastos Fijos',        kpis.totalFixedExpenses,    formatCurrency(kpis.totalFixedExpenses)],
-    ['Gastos Variables',    kpis.totalVariableExpenses, formatCurrency(kpis.totalVariableExpenses)],
-    ['Total Gastos',        kpis.totalExpenses,         formatCurrency(kpis.totalExpenses)],
-    ['Margen Contribución', kpis.contributionMargin,    formatCurrency(kpis.contributionMargin)],
-    ['Utilidad Neta',       kpis.netProfit,             formatCurrency(kpis.netProfit)],
-    ['Ocupación %',         +(kpis.occupancyRate * 100).toFixed(1), `${(kpis.occupancyRate * 100).toFixed(1)}%`],
-    ['ADR',                 kpis.adr,                   formatCurrency(kpis.adr)],
-    ['RevPAR',              kpis.revpar,                formatCurrency(kpis.revpar)],
-    ['Noches Totales',      kpis.totalNights,           ''],
-    ['Break-even Noches',   kpis.breakEvenNights,       ''],
-    ['Break-even Ocu. %',   kpis.breakEvenOccupancy,    `${kpis.breakEvenOccupancy}%`],
-    ['Total Reservas',      kpis.totalBookings,         ''],
-    ['Canceladas',          kpis.cancelledCount,        ''],
+    ...buildKpiRows(kpis, period).map(([label, value, kind]): (string | number)[] => [
+      label,
+      value,
+      kind === 'money' && typeof value === 'number' ? formatCurrency(value)
+        : kind === 'pct' && typeof value === 'number' ? `${value}%`
+        : '',
+    ]),
   ];
 
+  const totNights = monthly.reduce((s, d) => s + d.nights, 0);
+  const totAvail  = monthly.reduce((s, d) => s + d.availableNights, 0);
   const monthRows: (string | number)[][] = [
-    ['Mes', 'Ingresos (COP)', 'Gastos (COP)', 'Utilidad Neta (COP)', 'Noches', 'Ocupación %'],
-    ...monthly.map(d => [d.month, d.revenue, d.expenses, d.netProfit, d.nights, d.occupancy]),
+    ['Mes', 'Ingresos (COP)', 'Gastos (COP)', 'Utilidad Neta (COP)', 'Noches', 'Noches Disp.', 'Ocupación %'],
+    ...monthly.map(d => [d.month, d.revenue, d.expenses, d.netProfit, d.nights, d.availableNights, d.occupancy]),
+    [
+      'TOTAL',
+      sumM(monthly.map(d => d.revenue)),
+      sumM(monthly.map(d => d.expenses)),
+      sumM(monthly.map(d => d.netProfit)),
+      totNights,
+      totAvail,
+      totAvail > 0 ? +((totNights / totAvail) * 100).toFixed(1) : 0,
+    ],
   ];
 
   const sheets: Array<{ name: string; rows: (string | number | null | undefined)[][] }> = [];
@@ -184,7 +284,7 @@ export function exportToExcel(kpis: FinancialKPIs, monthly: MonthlyPnL[], period
     const hasAdj = bookings.some(b => b.net_adjustment !== null);
     const bookingHeader = [
       'Código', 'Huésped', 'Check-in', 'Check-out', 'Noches',
-      'Ingresos (COP)', 'Neto Pago (COP)', 'Estado', 'Canal', 'Propiedad',
+      'Ingresos (COP)', 'Fee Canal (COP)', 'Neto Pago (COP)', 'Estado', 'Canal', 'Propiedad',
       ...(hasAdj ? ['Ajustes Neto (COP)'] : []),
     ];
     const bookingDataRows: (string | number | null)[][] = bookings.map(b => [
@@ -194,13 +294,37 @@ export function exportToExcel(kpis: FinancialKPIs, monthly: MonthlyPnL[], period
       formatDateDisplay(b.check_out),
       b.nights,
       b.revenue,
+      b.channel_fees ?? null,
       b.net_payout ?? null,
       BOOKING_STATUS_LABEL(b),
       b.channel ?? '',
       b.property_name ?? '',
       ...(hasAdj ? [b.net_adjustment ?? 0] : []),
     ]);
-    sheets.push({ name: 'Reservas', rows: [bookingHeader, ...bookingDataRows] });
+    const active  = bookings.filter(b => !isCancelledRow(b));
+    const withNet = active.filter(b => b.net_payout != null);
+    const totalRow: (string | number)[] = [
+      `TOTAL (${active.length} activas)`, '', '', '',
+      active.reduce((s, b) => s + b.nights, 0),
+      sumM(active.map(b => b.revenue)),
+      sumM(active.map(b => b.channel_fees ?? 0)),
+      sumM(withNet.map(b => b.net_payout)),
+      '', '', '',
+      ...(hasAdj ? [sumM(active.map(b => b.net_adjustment ?? 0))] : []),
+    ];
+    const noteRow = [`Nota: totales solo de reservas activas. Neto Pago suma las ${withNet.length} reservas con neto registrado.`];
+    sheets.push({ name: 'Reservas', rows: [bookingHeader, ...bookingDataRows, totalRow, noteRow] });
+  }
+
+  if (channels && channels.length > 0) {
+    sheets.push({
+      name: 'Por Canal',
+      rows: [
+        ...buildChannelRows(channels),
+        [''],
+        ['Utilidad Bruta = Ingreso Bruto − Gastos de Reservas · Utilidad Neta = Neto (tras fees) − Gastos de Reservas'],
+      ],
+    });
   }
 
   sheets.push({ name: 'P&L Mensual', rows: monthRows });
@@ -459,7 +583,7 @@ export function exportAseoToExcel(rows: AseoExportRow[], periodLabel: string) {
 }
 
 export function exportAseoToPdf(rows: AseoExportRow[], periodLabel: string) {
-  const total = rows.reduce((s, r) => s + r.fee, 0);
+  const total = sumM(rows.map(r => r.fee));
   const tableRows = rows.map(r => `
     <tr>
       <td>${escXml(r.cleaner_name)}</td>
@@ -531,7 +655,7 @@ export function exportBookingsToCsv(rows: BookingExportRow[], title: string) {
   const hasAdj = rows.some(b => b.net_adjustment !== null);
   const header = toCsvRow([
     'Código', 'Huésped', 'Check-in', 'Check-out', 'Noches',
-    'Ingresos', 'Neto Pago', 'Estado', 'Canal', 'Propiedad',
+    'Ingresos', 'Fee Canal', 'Neto Pago', 'Estado', 'Canal', 'Propiedad',
     ...(hasAdj ? ['Ajustes Neto'] : []),
   ]);
   const dataRows = rows.map(b => toCsvRow([
@@ -541,20 +665,32 @@ export function exportBookingsToCsv(rows: BookingExportRow[], title: string) {
     formatDateDisplay(b.check_out),
     b.nights,
     b.revenue,
+    b.channel_fees ?? '',
     b.net_payout ?? '',
     BOOKING_STATUS_LABEL(b),
     b.channel ?? '',
     b.property_name ?? '',
     ...(hasAdj ? [b.net_adjustment ?? 0] : []),
   ]));
-  downloadUtf8Csv([header, ...dataRows].join('\n'), `reservas-${title}-${today()}.csv`);
+  const active  = rows.filter(b => !isCancelledRow(b));
+  const withNet = active.filter(b => b.net_payout != null);
+  const totalRow = toCsvRow([
+    `TOTAL (${active.length} activas)`, '', '', '',
+    active.reduce((s, b) => s + b.nights, 0),
+    sumM(active.map(b => b.revenue)),
+    sumM(active.map(b => b.channel_fees ?? 0)),
+    sumM(withNet.map(b => b.net_payout)),
+    '', '', '',
+    ...(hasAdj ? [sumM(active.map(b => b.net_adjustment ?? 0))] : []),
+  ]);
+  downloadUtf8Csv([header, ...dataRows, totalRow].join('\n'), `reservas-${title}-${today()}.csv`);
 }
 
 export function exportBookingsToExcel(rows: BookingExportRow[], title: string) {
   const hasAdj = rows.some(b => b.net_adjustment !== null);
   const headerRow = [
     'Código', 'Huésped', 'Check-in', 'Check-out', 'Noches',
-    'Ingresos (COP)', 'Neto Pago (COP)', 'Estado', 'Canal', 'Propiedad',
+    'Ingresos (COP)', 'Fee Canal (COP)', 'Neto Pago (COP)', 'Estado', 'Canal', 'Propiedad',
     ...(hasAdj ? ['Ajustes Neto (COP)'] : []),
   ];
   const dataRows: (string | number | null)[][] = rows.map(b => [
@@ -564,20 +700,28 @@ export function exportBookingsToExcel(rows: BookingExportRow[], title: string) {
     formatDateDisplay(b.check_out),
     b.nights,
     b.revenue,
+    b.channel_fees ?? null,
     b.net_payout ?? null,
     BOOKING_STATUS_LABEL(b),
     b.channel ?? '',
     b.property_name ?? '',
     ...(hasAdj ? [b.net_adjustment ?? 0] : []),
   ]);
-  const totalRevenue = rows.reduce((s, b) => s + b.revenue, 0);
-  const totalNights  = rows.reduce((s, b) => s + b.nights, 0);
+  // Totales solo de reservas activas — las canceladas no aportan ingresos ni noches
+  const active       = rows.filter(b => !isCancelledRow(b));
+  const withNet      = active.filter(b => b.net_payout != null);
+  const totalRevenue = sumM(active.map(b => b.revenue));
+  const totalNights  = active.reduce((s, b) => s + b.nights, 0);
   const summaryRows: (string | number)[][] = [
     ['Resumen', ''],
-    ['Total reservas',  rows.length],
-    ['Total ingresos',  totalRevenue],
-    ['Total noches',    totalNights],
-    ['Ingreso promedio por noche', rows.length > 0 ? +(totalRevenue / totalNights).toFixed(0) : 0],
+    ['Total reservas',           rows.length],
+    ['Reservas activas',         active.length],
+    ['Canceladas',               rows.length - active.length],
+    ['Total ingresos (activas)', totalRevenue],
+    ['Total fees de canal (activas)', sumM(active.map(b => b.channel_fees ?? 0))],
+    [`Total neto pago (${withNet.length} reservas con neto registrado)`, sumM(withNet.map(b => b.net_payout))],
+    ['Total noches (activas)',   totalNights],
+    ['Ingreso promedio por noche', totalNights > 0 ? Math.round(totalRevenue / totalNights) : 0],
   ];
   const xml = buildSpreadsheetML([
     { name: 'Reservas',  rows: [headerRow, ...dataRows] },
@@ -766,8 +910,13 @@ function buildOccupancyCalendarHtml(
 export function exportBookingsToPdf(rows: BookingExportRow[], title: string, opts: { periodFrom?: string; periodTo?: string; includeCalendar?: boolean } = {}) {
   const { includeCalendar = true } = opts;
   const hasAdj = rows.some(b => b.net_adjustment !== null);
-  const totalRevenue = rows.reduce((s, b) => s + b.revenue, 0);
-  const totalNights  = rows.reduce((s, b) => s + b.nights, 0);
+  // Totales solo de reservas activas — las canceladas no aportan ingresos ni noches
+  const active       = rows.filter(b => !isCancelledRow(b));
+  const withNet      = active.filter(b => b.net_payout != null);
+  const totalRevenue = sumM(active.map(b => b.revenue));
+  const totalNights  = active.reduce((s, b) => s + b.nights, 0);
+  const totalFees    = sumM(active.map(b => b.channel_fees ?? 0));
+  const totalNet     = sumM(withNet.map(b => b.net_payout));
 
   const tableRows = rows.map(b => `
     <tr>
@@ -777,6 +926,7 @@ export function exportBookingsToPdf(rows: BookingExportRow[], title: string, opt
       <td>${formatDateDisplay(b.check_out)}</td>
       <td class="num">${b.nights}</td>
       <td class="num">${formatCurrency(b.revenue)}</td>
+      <td class="num">${b.channel_fees != null ? formatCurrency(b.channel_fees) : '—'}</td>
       <td class="num">${b.net_payout != null ? formatCurrency(b.net_payout) : '—'}</td>
       <td><span class="chip">${escXml(BOOKING_STATUS_LABEL(b))}</span></td>
       <td>${escXml(b.channel ?? '—')}</td>
@@ -834,20 +984,24 @@ export function exportBookingsToPdf(rows: BookingExportRow[], title: string, opt
   <p class="sub">Período: ${escXml(title)} — ${rows.length} reserva${rows.length !== 1 ? 's' : ''}</p>
   <div class="summary">
     <div class="kpi">
-      <div class="kpi-label">Total ingresos</div>
+      <div class="kpi-label">Ingresos (activas)</div>
       <div class="kpi-value">${formatCurrency(totalRevenue)}</div>
     </div>
     <div class="kpi">
-      <div class="kpi-label">Total noches</div>
+      <div class="kpi-label">Fees de canal</div>
+      <div class="kpi-value">${formatCurrency(totalFees)}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Noches (activas)</div>
       <div class="kpi-value">${totalNights}</div>
     </div>
     <div class="kpi">
       <div class="kpi-label">Ingreso / noche</div>
-      <div class="kpi-value">${totalNights > 0 ? formatCurrency(totalRevenue / totalNights) : '—'}</div>
+      <div class="kpi-value">${totalNights > 0 ? formatCurrency(Math.round(totalRevenue / totalNights)) : '—'}</div>
     </div>
     <div class="kpi">
-      <div class="kpi-label">Total reservas</div>
-      <div class="kpi-value">${rows.length}</div>
+      <div class="kpi-label">Reservas (activas)</div>
+      <div class="kpi-value">${rows.length} (${active.length})</div>
     </div>
   </div>
 
@@ -858,20 +1012,26 @@ export function exportBookingsToPdf(rows: BookingExportRow[], title: string, opt
     <thead>
       <tr>
         <th>Código</th><th>Huésped</th><th>Check-in</th><th>Check-out</th><th>Noches</th>
-        <th>Ingresos</th><th>Neto pago</th><th>Estado</th><th>Canal</th><th>Propiedad</th>
+        <th>Ingresos</th><th>Fee canal</th><th>Neto pago</th><th>Estado</th><th>Canal</th><th>Propiedad</th>
         ${hasAdj ? '<th>Ajustes</th>' : ''}
       </tr>
     </thead>
     <tbody>${tableRows}</tbody>
     <tfoot>
       <tr>
-        <td colspan="4">Total</td>
+        <td colspan="4">Total (${active.length} activas)</td>
         <td class="num">${totalNights}</td>
         <td class="num">${formatCurrency(totalRevenue)}</td>
-        <td colspan="${hasAdj ? 5 : 4}"></td>
+        <td class="num">${formatCurrency(totalFees)}</td>
+        <td class="num">${formatCurrency(totalNet)}</td>
+        <td colspan="${hasAdj ? 4 : 3}"></td>
       </tr>
     </tfoot>
   </table>
+  <p style="font-size:9px;color:#94a3b8;margin-top:6px">
+    Totales calculados solo sobre reservas activas (no canceladas).
+    El total «Neto pago» suma únicamente las ${withNet.length} reservas con neto registrado.
+  </p>
   ${calendarSection}
 </body>
 </html>`;
@@ -942,7 +1102,7 @@ export function exportExpensesToExcel(
     e.amount,
     EXPENSE_STATUS_LABEL[e.status] ?? e.status,
   ]);
-  const total = flat.reduce((s, e) => s + e.amount, 0);
+  const total = sumM(flat.map(e => e.amount));
   const summaryRows: (string | number)[][] = [
     ['Resumen', ''],
     ['Total gastos',   flat.length],
@@ -965,8 +1125,8 @@ export function exportExpensesToPdf(
   title: string,
 ) {
   const flat = flattenExpensesForExport(rows);
-  const total = flat.reduce((s, e) => s + e.amount, 0);
-  const pendingTotal = flat.filter(e => e.status === 'pending').reduce((s, e) => s + e.amount, 0);
+  const total = sumM(flat.map(e => e.amount));
+  const pendingTotal = sumM(flat.filter(e => e.status === 'pending').map(e => e.amount));
 
   const tableRows = flat.map(e => {
     const groupTypeLabel = e._isSharedBillGroup

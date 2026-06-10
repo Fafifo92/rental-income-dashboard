@@ -1,5 +1,6 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { computeFinancials, resolvePeriodRange, type FinancialKPIs, type MonthlyPnL, type PayoutBreakdown, type Period } from '@/services/financial';
+import { computeFinancials, resolvePeriodRange, type ChannelBreakdownRow, type FinancialKPIs, type MonthlyPnL, type PayoutBreakdown, type Period } from '@/services/financial';
+import { addMoney } from '@/lib/money';
 import { listProperties } from '@/services/properties';
 import { listBookings, type BookingWithListingRow } from '@/services/bookings';
 import { listAllBookingAdjustmentsForExport } from '@/services/bookingAdjustments';
@@ -36,6 +37,7 @@ interface BookingForReport {
   status: string;
   channel: string | null;
   property_name: string | null;
+  channel_fees: number | null;
 }
 
 interface AdjForReport {
@@ -344,6 +346,7 @@ export default function PrintReport() {
   const [dateRangeLabel, setDateRangeLabel] = useState('');
   const [periodShortLabel, setPeriodShortLabel] = useState('');
   const [expensesInPeriod, setExpensesInPeriod] = useState<Expense[]>([]);
+  const [channelBreakdown, setChannelBreakdown] = useState<ChannelBreakdownRow[]>([]);
 
   // Booking detail state
   const [includeBookings, setIncludeBookings]       = useState(false);
@@ -390,6 +393,7 @@ export default function PrintReport() {
       setMonthly(main.exportMonthly);
       setPayout(main.payoutBreakdown);
       setExpensesInPeriod(main.expensesInPeriod);
+      setChannelBreakdown(main.channelBreakdown);
 
       const allProps    = propsRes.data ?? [];
       const targetProps = propertyIds && propertyIds.length > 0
@@ -430,6 +434,7 @@ export default function PrintReport() {
             status: b.status ?? '',
             channel: b.channel,
             property_name: (b.listings?.properties as { name: string } | null | undefined)?.name ?? null,
+            channel_fees: b.channel_fees !== null && b.channel_fees !== undefined ? Number(b.channel_fees) : null,
           }));
           setReportBookings(mapped);
 
@@ -976,6 +981,64 @@ export default function PrintReport() {
           </Section>
         )}
 
+        {/* ── DESGLOSE POR CANAL (Directo / Airbnb / Booking…) ───────────── */}
+        {channelBreakdown.length > 0 && (() => {
+          const totB     = channelBreakdown.reduce((s, c) => s + c.bookings, 0);
+          const totN     = channelBreakdown.reduce((s, c) => s + c.nights, 0);
+          const totGross = channelBreakdown.reduce((s, c) => addMoney(s, c.grossRevenue), 0);
+          const totFees  = channelBreakdown.reduce((s, c) => addMoney(s, c.channelFees), 0);
+          const totNet   = channelBreakdown.reduce((s, c) => addMoney(s, c.netPayout), 0);
+          const totExp   = channelBreakdown.reduce((s, c) => addMoney(s, c.bookingExpenses), 0);
+          const totGP    = channelBreakdown.reduce((s, c) => addMoney(s, c.grossProfit), 0);
+          const totNP    = channelBreakdown.reduce((s, c) => addMoney(s, c.netProfit), 0);
+          return (
+            <Section num={S()} title="Desglose por Canal">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b-2 border-slate-200">
+                    {['Canal','Reservas','Noches','Ingreso Bruto','Fees Canal','Neto (tras fees)','Gastos Reservas','Ut. Bruta','Ut. Neta'].map(h => (
+                      <th key={h} className="pb-2 pr-2 text-left font-semibold text-slate-500 text-[10px] uppercase tracking-wider">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {channelBreakdown.map(c => (
+                    <tr key={c.channel} className="border-b border-slate-100">
+                      <td className="py-1.5 pr-2 font-semibold text-slate-800">{c.channel}</td>
+                      <td className="py-1.5 pr-2 text-right text-slate-600">{c.bookings}</td>
+                      <td className="py-1.5 pr-2 text-right text-slate-600">{c.nights}</td>
+                      <td className="py-1.5 pr-2 text-right font-mono text-blue-700">{formatCurrency(c.grossRevenue)}</td>
+                      <td className="py-1.5 pr-2 text-right font-mono text-slate-500">{formatCurrency(c.channelFees)}</td>
+                      <td className="py-1.5 pr-2 text-right font-mono text-slate-700">{formatCurrency(c.netPayout)}</td>
+                      <td className="py-1.5 pr-2 text-right font-mono text-red-600">{formatCurrency(c.bookingExpenses)}</td>
+                      <td className={`py-1.5 pr-2 text-right font-mono font-semibold ${c.grossProfit >= 0 ? 'text-teal-700' : 'text-red-700'}`}>{formatCurrency(c.grossProfit)}</td>
+                      <td className={`py-1.5 text-right font-mono font-bold ${c.netProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatCurrency(c.netProfit)}</td>
+                    </tr>
+                  ))}
+                  <tr className="font-bold bg-slate-50 border-t-2 border-slate-300">
+                    <td className="py-2 pr-2 text-slate-700 text-[10px]">TOTAL</td>
+                    <td className="py-2 pr-2 text-right text-slate-700">{totB}</td>
+                    <td className="py-2 pr-2 text-right text-slate-700">{totN}</td>
+                    <td className="py-2 pr-2 text-right font-mono text-blue-800">{formatCurrency(totGross)}</td>
+                    <td className="py-2 pr-2 text-right font-mono text-slate-600">{formatCurrency(totFees)}</td>
+                    <td className="py-2 pr-2 text-right font-mono text-slate-800">{formatCurrency(totNet)}</td>
+                    <td className="py-2 pr-2 text-right font-mono text-red-700">{formatCurrency(totExp)}</td>
+                    <td className={`py-2 pr-2 text-right font-mono ${totGP >= 0 ? 'text-teal-800' : 'text-red-800'}`}>{formatCurrency(totGP)}</td>
+                    <td className={`py-2 text-right font-mono ${totNP >= 0 ? 'text-green-800' : 'text-red-800'}`}>{formatCurrency(totNP)}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
+                <strong className="text-slate-500">Definiciones:</strong>{' '}
+                Neto (tras fees) = pago neto registrado, o ingreso − fee si no hay neto registrado.
+                Gastos de Reservas = gastos vinculados a reservas del canal (aseo, lavandería, daños…).
+                Utilidad Bruta = Ingreso Bruto − Gastos de Reservas · Utilidad Neta = Neto (tras fees) − Gastos de Reservas.
+                Solo reservas activas con check-in en el período. Los gastos generales (fijos, no vinculados a reservas) no se distribuyen por canal.
+              </p>
+            </Section>
+          );
+        })()}
+
         {/* ── Atribución de bolsas (informativo) ──────────────────────────── */}
         {propertyMap.size > 0 && periodFrom && periodTo && (
           <Section num={S()} title="Atribución de bolsas de créditos">
@@ -1015,15 +1078,19 @@ export default function PrintReport() {
               ))}
               {/* Totals row */}
               {monthly.length > 1 && (() => {
+                // Sumas money-safe (centavos) y totales coherentes con las filas:
+                // Disp. = Σ noches disponibles de los meses listados (no las del período KPI)
                 const tot = monthly.reduce(
                   (acc, r) => ({
-                    revenue:  acc.revenue  + r.revenue,
-                    expenses: acc.expenses + r.expenses,
-                    netProfit: acc.netProfit + r.netProfit,
+                    revenue:  addMoney(acc.revenue,  r.revenue),
+                    expenses: addMoney(acc.expenses, r.expenses),
+                    netProfit: addMoney(acc.netProfit, r.netProfit),
                     nights:   acc.nights   + r.nights,
+                    avail:    acc.avail    + r.availableNights,
                   }),
-                  { revenue: 0, expenses: 0, netProfit: 0, nights: 0 },
+                  { revenue: 0, expenses: 0, netProfit: 0, nights: 0, avail: 0 },
                 );
+                const totOcc = tot.avail > 0 ? ((tot.nights / tot.avail) * 100).toFixed(1) : '0';
                 return (
                   <tr className="font-bold bg-slate-50 border-t-2 border-slate-300">
                     <td className="py-2 text-slate-700">TOTAL</td>
@@ -1033,8 +1100,8 @@ export default function PrintReport() {
                       {formatCurrency(tot.netProfit)}
                     </td>
                     <td className="py-2 text-right text-slate-700">{tot.nights}</td>
-                    <td className="py-2 text-right text-slate-500">{kpis.availableNights}</td>
-                    <td className="py-2 text-right text-slate-700">{occupancyPct}%</td>
+                    <td className="py-2 text-right text-slate-500">{tot.avail}</td>
+                    <td className="py-2 text-right text-slate-700">{totOcc}%</td>
                   </tr>
                 );
               })()}
@@ -1158,7 +1225,7 @@ export default function PrintReport() {
           const adjMap = new Map<string, number>();
           for (const a of reportAdjustments) {
             const delta = a.kind === 'discount' ? -Number(a.amount) : Number(a.amount);
-            adjMap.set(a.booking_id, (adjMap.get(a.booking_id) ?? 0) + delta);
+            adjMap.set(a.booking_id, addMoney(adjMap.get(a.booking_id) ?? 0, delta));
           }
 
           // ── Property legend (one entry per unique property) ───────────────
@@ -1167,7 +1234,7 @@ export default function PrintReport() {
             colorIndex,
           }));
 
-          const totalRevenue = active.reduce((s, b) => s + b.total_revenue, 0);
+          const totalRevenue = active.reduce((s, b) => addMoney(s, b.total_revenue), 0);
           const totalNights  = active.reduce((s, b) => s + b.num_nights, 0);
 
           return (
@@ -1246,7 +1313,7 @@ export default function PrintReport() {
                     {[
                       '#', 'Código', 'Huésped', 'Propiedad',
                       'Check-in', 'Check-out', 'Noches',
-                      'Ingresos', 'Neto pago', 'Estado',
+                      'Ingresos', 'Fee canal', 'Neto pago', 'Estado',
                       ...(includeAdjustments ? ['Ajustes'] : []),
                     ].map(h => (
                       <th key={h} className="pb-2 pr-1 text-left font-semibold text-slate-500 text-[10px] uppercase tracking-wider">{h}</th>
@@ -1289,6 +1356,9 @@ export default function PrintReport() {
                           <td className="py-1.5 pr-1 text-right font-mono text-blue-700 font-semibold">
                             {cancelled ? '—' : formatCurrency(b.total_revenue)}
                           </td>
+                          <td className="py-1.5 pr-1 text-right font-mono text-slate-500">
+                            {!cancelled && b.channel_fees !== null ? formatCurrency(b.channel_fees) : '—'}
+                          </td>
                           <td className="py-1.5 pr-1 text-right font-mono text-slate-600">
                             {b.net_payout !== null ? formatCurrency(b.net_payout) : '—'}
                           </td>
@@ -1314,21 +1384,33 @@ export default function PrintReport() {
                       );
                     })
                   }
-                  {/* Totals */}
-                  <tr className="font-bold bg-slate-50 border-t-2 border-slate-300">
-                    <td colSpan={6} className="py-2 text-slate-700 text-[10px]">TOTAL ({active.length} activas)</td>
-                    <td className="py-2 text-right text-slate-700">{totalNights}</td>
-                    <td className="py-2 text-right font-mono text-blue-800">{formatCurrency(totalRevenue)}</td>
-                    <td className="py-2 text-right font-mono text-slate-600">
-                      {formatCurrency(active.reduce((s, b) => s + (b.net_payout ?? b.total_revenue), 0))}
-                    </td>
-                    <td />
-                    {includeAdjustments && (
-                      <td className="py-2 text-right font-mono text-emerald-700">
-                        {formatCurrency(active.reduce((s, b) => s + (adjMap.get(b.id) ?? 0), 0))}
-                      </td>
-                    )}
-                  </tr>
+                  {/* Totals — solo activas; Neto suma únicamente reservas con neto registrado
+                      (las filas sin neto muestran «—», así la columna siempre cuadra con el total) */}
+                  {(() => {
+                    const withNet = active.filter(b => b.net_payout !== null);
+                    const totalFees = active.reduce((s, b) => addMoney(s, b.channel_fees ?? 0), 0);
+                    const totalNet  = withNet.reduce((s, b) => addMoney(s, b.net_payout ?? 0), 0);
+                    return (
+                      <tr className="font-bold bg-slate-50 border-t-2 border-slate-300">
+                        <td colSpan={6} className="py-2 text-slate-700 text-[10px]">
+                          TOTAL ({active.length} activas)
+                        </td>
+                        <td className="py-2 text-right text-slate-700">{totalNights}</td>
+                        <td className="py-2 text-right font-mono text-blue-800">{formatCurrency(totalRevenue)}</td>
+                        <td className="py-2 text-right font-mono text-slate-600">{formatCurrency(totalFees)}</td>
+                        <td className="py-2 text-right font-mono text-slate-600">
+                          {formatCurrency(totalNet)}
+                          {withNet.length < active.length && <span className="block text-[8px] font-normal text-slate-400">({withNet.length} con neto reg.)</span>}
+                        </td>
+                        <td />
+                        {includeAdjustments && (
+                          <td className="py-2 text-right font-mono text-emerald-700">
+                            {formatCurrency(active.reduce((s, b) => addMoney(s, adjMap.get(b.id) ?? 0), 0))}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })()}
                 </tbody>
               </table>
 

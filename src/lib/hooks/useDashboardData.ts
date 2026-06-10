@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   computeFinancials, resolvePeriodRange,
-  type Period, type FinancialKPIs, type MonthlyPnL, type PayoutBreakdown, type ChartGranularity,
+  type Period, type FinancialKPIs, type MonthlyPnL, type PayoutBreakdown, type ChartGranularity, type ChannelBreakdownRow,
 } from '@/services/financial';
 import { listTransactions, type FinancialTransaction } from '@/services/transactions';
 import type { AuthStatus } from '@/lib/useAuth';
@@ -22,6 +22,7 @@ export function useDashboardData({ period, authStatus, propertyIds, customRange 
   const [monthlyPnL, setMonthlyPnL] = useState<MonthlyPnL[]>([]);
   const [exportMonthly, setExportMonthly] = useState<MonthlyPnL[]>([]);
   const [exportMonthlyByBookings, setExportMonthlyByBookings] = useState<MonthlyPnL[]>([]);
+  const [channelBreakdown, setChannelBreakdown] = useState<ChannelBreakdownRow[]>([]);
   const [payoutBreakdown, setPayoutBreakdown] = useState<PayoutBreakdown | null>(null);
   const [granularity, setGranularity] = useState<ChartGranularity>('week');
   const [transactions, setTransactions] = useState<FinancialTransaction[]>([]);
@@ -40,6 +41,7 @@ export function useDashboardData({ period, authStatus, propertyIds, customRange 
       setMonthlyPnL(result.monthlyPnL);
       setExportMonthly(result.exportMonthly);
       setExportMonthlyByBookings(result.exportMonthlyByBookings);
+      setChannelBreakdown(result.channelBreakdown);
       setPayoutBreakdown(result.payoutBreakdown);
       setGranularity(result.granularity);
       setLoading(false);
@@ -56,5 +58,5 @@ export function useDashboardData({ period, authStatus, propertyIds, customRange 
     return () => { cancelled = true; };
   }, [period, authStatus, propertyIds, customRange]);
 
-  return { kpis, monthlyPnL, exportMonthly, exportMonthlyByBookings, payoutBreakdown, granularity, transactions, loading, txLoading };
+  return { kpis, monthlyPnL, exportMonthly, exportMonthlyByBookings, channelBreakdown, payoutBreakdown, granularity, transactions, loading, txLoading };
 }

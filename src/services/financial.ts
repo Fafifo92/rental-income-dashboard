@@ -94,6 +94,7 @@ export interface PayoutBreakdown {
 // ─── Internal types ───────────────────────────────────────────────────────────
 
 interface BookingData {
+  id?: string;
   start_date: string;
   end_date: string;
   num_nights: number;
@@ -102,6 +103,8 @@ interface BookingData {
   listing_id?: string | null;
   payout_bank_account_id?: string | null;
   net_payout?: number | null;
+  channel?: string | null;
+  channel_fees?: number | null;
 }
 
 /**
@@ -264,17 +267,18 @@ const computeCore = (
   const completed = filtered.filter(b => !b.status.toLowerCase().includes('cancel'));
   const cancelled = filtered.filter(b =>  b.status.toLowerCase().includes('cancel'));
 
-  const bookingRevenue = completed.reduce((s, b) => s + b.revenue, 0);
+  // Sumas en centavos enteros (addMoney) para evitar drift de coma flotante de JS
+  const bookingRevenue = completed.reduce((s, b) => addMoney(s, b.revenue), 0);
   const totalNights    = completed.reduce((s, b) => s + b.num_nights, 0);
 
   // Cancelled bookings with positive revenue: cancellation fee earned (counts as income)
   const cancelledRevenue = cancelled
     .filter(b => b.revenue > 0)
-    .reduce((s, b) => s + b.revenue, 0);
+    .reduce((s, b) => addMoney(s, b.revenue), 0);
   // Cancelled bookings with negative revenue: host was fined (counts as variable expense)
   const cancelledFines = cancelled
     .filter(b => b.revenue < 0)
-    .reduce((s, b) => s + Math.abs(b.revenue), 0);
+    .reduce((s, b) => addMoney(s, Math.abs(b.revenue)), 0);
 
   // Ajustes de reserva en el rango: cobros de daños, ingresos extra, descuentos dados
   const adjInRange = adjustments.filter(a => a.date && inRange(a.date));
@@ -283,15 +287,18 @@ const computeCore = (
   const netAdjustmentIncome = subMoney(incomeFromAdj, discountsGiven);
 
   // grossRevenue includes cancelled-with-revenue (cancellation fees earned)
-  const grossRevenue = bookingRevenue + netAdjustmentIncome + cancelledRevenue;
+  const grossRevenue = addMoney(bookingRevenue, netAdjustmentIncome, cancelledRevenue);
 
   const expInRange          = expenses.filter(e => e.date && inRange(e.date));
-  const totalFixedExpenses  = expInRange.filter(e => e.type === 'fixed').reduce((s, e) => s + e.amount, 0);
+  const totalFixedExpenses  = expInRange.filter(e => e.type === 'fixed').reduce((s, e) => addMoney(s, e.amount), 0);
   // cancelledFines are multas charged to the host — treated as variable expense
-  const totalVariableExpenses = expInRange.filter(e => e.type === 'variable').reduce((s, e) => s + e.amount, 0) + cancelledFines;
-  const totalExpenses       = totalFixedExpenses + totalVariableExpenses;
-  const contributionMargin  = grossRevenue - totalVariableExpenses;
-  const netProfit           = contributionMargin - totalFixedExpenses;
+  const totalVariableExpenses = addMoney(
+    expInRange.filter(e => e.type === 'variable').reduce((s, e) => addMoney(s, e.amount), 0),
+    cancelledFines,
+  );
+  const totalExpenses       = addMoney(totalFixedExpenses, totalVariableExpenses);
+  const contributionMargin  = subMoney(grossRevenue, totalVariableExpenses);
+  const netProfit           = subMoney(contributionMargin, totalFixedExpenses);
 
   // availableNights = días del período × número de propiedades en el portafolio
   const availableNights = daysInRange(range) * Math.max(1, propertyCount);
@@ -374,7 +381,16 @@ const buildMonthlyPnL = (
 
   // Pro-rate booking revenue night-by-night into the appropriate bucket
   for (const b of bookings) {
-    if (b.status.toLowerCase().includes('cancel') || !b.start_date || !b.end_date || b.num_nights === 0) continue;
+    if (!b.start_date) continue;
+    if (b.status.toLowerCase().includes('cancel')) {
+      // Reconciliación con KPIs: tarifa de cancelación cobrada (+) cuenta como
+      // ingreso; multa al anfitrión (−) cuenta como gasto, en el bucket del check-in.
+      const k = keyFn(new Date(b.start_date + 'T12:00:00'));
+      if (b.revenue > 0) add(revMap, k, b.revenue);
+      else if (b.revenue < 0) add(expMap, k, Math.abs(b.revenue));
+      continue;
+    }
+    if (!b.end_date || b.num_nights === 0) continue;
     const ratePerNight = b.revenue / b.num_nights;
     const cur = new Date(b.start_date + 'T12:00:00');
     const end = new Date(b.end_date + 'T12:00:00');
@@ -412,7 +428,7 @@ const buildMonthlyPnL = (
       const nights         = nightsMap.get(k) ?? 0;
       const daysInMo       = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate();
       const availableNights = daysInMo * pc;
-      result.push({ month: `${MONTHS_ES[cur.getMonth()]} ${yr2}`, revenue, expenses: expense, netProfit: revenue - expense, nights, availableNights, occupancy: Math.round(nights / availableNights * 100) });
+      result.push({ month: `${MONTHS_ES[cur.getMonth()]} ${yr2}`, revenue, expenses: expense, netProfit: revenue - expense, nights, availableNights, occupancy: Math.min(100, Math.round(nights / availableNights * 100)) });
       cur.setMonth(cur.getMonth() + 1);
     }
   } else if (granularity === 'week') {
@@ -465,8 +481,15 @@ const buildMonthlyPnLByBookings = (
 
   // Revenue attributed to check-in month in full (no pro-rating)
   for (const b of bookings) {
-    if (b.status.toLowerCase().includes('cancel') || !b.start_date || b.num_nights === 0) continue;
+    if (!b.start_date) continue;
     const k = monthFmt(new Date(b.start_date + 'T12:00:00'));
+    if (b.status.toLowerCase().includes('cancel')) {
+      // Reconciliación con KPIs: cancelación cobrada (+) → ingreso; multa (−) → gasto.
+      if (b.revenue > 0) add(revMap, k, b.revenue);
+      else if (b.revenue < 0) add(expMap, k, Math.abs(b.revenue));
+      continue;
+    }
+    if (b.num_nights === 0) continue;
     add(revMap, k, b.revenue);
     add(nightsMap, k, b.num_nights);
   }
@@ -494,10 +517,87 @@ const buildMonthlyPnLByBookings = (
     const nights         = nightsMap.get(k) ?? 0;
     const daysInMo       = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate();
     const availableNights = daysInMo * pc;
-    result.push({ month: `${MONTHS_ES[cur.getMonth()]} ${yr2}`, revenue, expenses: expense, netProfit: revenue - expense, nights, availableNights, occupancy: Math.round(nights / availableNights * 100) });
+    result.push({ month: `${MONTHS_ES[cur.getMonth()]} ${yr2}`, revenue, expenses: expense, netProfit: revenue - expense, nights, availableNights, occupancy: Math.min(100, Math.round(nights / availableNights * 100)) });
     cur.setMonth(cur.getMonth() + 1);
   }
   return result;
+};
+
+// ─── Channel Breakdown (Directo / Airbnb / Booking / …) ───────────────────────
+
+export interface ChannelBreakdownRow {
+  channel: string;
+  /** Reservas activas (no canceladas) con check-in en el período */
+  bookings: number;
+  nights: number;
+  /** Ingresos brutos por reservas del canal */
+  grossRevenue: number;
+  /** Fees cobrados por el canal */
+  channelFees: number;
+  /** Neto tras fees: Σ net_payout; si no está registrado, ingreso − fee */
+  netPayout: number;
+  /** Gastos vinculados a reservas del canal (aseo, lavandería, daños, etc.) */
+  bookingExpenses: number;
+  /** Utilidad bruta = ingresos brutos − gastos de reservas */
+  grossProfit: number;
+  /** Utilidad neta = neto tras fees − gastos de reservas */
+  netProfit: number;
+}
+
+/**
+ * Agrupa reservas activas del período por canal y les atribuye los gastos
+ * vinculados (expense.booking_id). Toda la aritmética usa centavos enteros
+ * (money.ts) para evitar errores de coma flotante.
+ */
+export const buildChannelBreakdown = (
+  bookings: BookingData[],
+  expenses: Expense[],
+  range: DateRange,
+): ChannelBreakdownRow[] => {
+  const inRange = (d: string) => { const t = new Date(d + 'T12:00:00'); return t >= range.from && t <= range.to; };
+  const active = bookings.filter(b =>
+    b.start_date && inRange(b.start_date) && !b.status.toLowerCase().includes('cancel'));
+
+  const channelOf = (b: BookingData) =>
+    (b.channel && b.channel.trim().length > 0) ? b.channel.trim() : 'Directo';
+
+  const map = new Map<string, ChannelBreakdownRow>();
+  const get = (ch: string): ChannelBreakdownRow => {
+    let row = map.get(ch);
+    if (!row) {
+      row = { channel: ch, bookings: 0, nights: 0, grossRevenue: 0, channelFees: 0, netPayout: 0, bookingExpenses: 0, grossProfit: 0, netProfit: 0 };
+      map.set(ch, row);
+    }
+    return row;
+  };
+
+  const channelByBookingId = new Map<string, string>();
+  for (const b of active) {
+    const ch = channelOf(b);
+    if (b.id) channelByBookingId.set(b.id, ch);
+    const row = get(ch);
+    row.bookings += 1;
+    row.nights   += b.num_nights;
+    const fee = Number(b.channel_fees ?? 0);
+    row.grossRevenue = addMoney(row.grossRevenue, b.revenue);
+    row.channelFees  = addMoney(row.channelFees, fee);
+    row.netPayout    = addMoney(row.netPayout, b.net_payout != null ? b.net_payout : subMoney(b.revenue, fee));
+  }
+
+  for (const e of expenses) {
+    if (!e.booking_id || !e.date || !inRange(e.date)) continue;
+    const ch = channelByBookingId.get(e.booking_id);
+    if (!ch) continue; // gasto de una reserva fuera del período o cancelada
+    const row = get(ch);
+    row.bookingExpenses = addMoney(row.bookingExpenses, e.amount);
+  }
+
+  for (const row of map.values()) {
+    row.grossProfit = subMoney(row.grossRevenue, row.bookingExpenses);
+    row.netProfit   = subMoney(row.netPayout,    row.bookingExpenses);
+  }
+
+  return Array.from(map.values()).sort((a, b) => b.grossRevenue - a.grossRevenue);
 };
 
 // ─── Payout Breakdown (confirmed vs expected) ─────────────────────────────────
@@ -660,7 +760,7 @@ export const computeFinancials = async (
   isAuthenticated = false,
   propertyIdOrIds?: string | string[],
   customDateRange?: { from: string; to: string },
-): Promise<{ kpis: FinancialKPIs; monthlyPnL: MonthlyPnL[]; exportMonthly: MonthlyPnL[]; exportMonthlyByBookings: MonthlyPnL[]; payoutBreakdown: PayoutBreakdown; granularity: ChartGranularity; expensesInPeriod: Expense[] }> => {
+): Promise<{ kpis: FinancialKPIs; monthlyPnL: MonthlyPnL[]; exportMonthly: MonthlyPnL[]; exportMonthlyByBookings: MonthlyPnL[]; payoutBreakdown: PayoutBreakdown; granularity: ChartGranularity; expensesInPeriod: Expense[]; channelBreakdown: ChannelBreakdownRow[] }> => {
   const propertyIds: string[] | undefined = Array.isArray(propertyIdOrIds)
     ? (propertyIdOrIds.length > 0 ? propertyIdOrIds : undefined)
     : (propertyIdOrIds ? [propertyIdOrIds] : undefined);
@@ -674,6 +774,7 @@ export const computeFinancials = async (
     const bookingRes = await listBookings(bookingFilters);
     if (!bookingRes.error && bookingRes.data) {
       bookings = bookingRes.data.map(r => ({
+        id:         r.id,
         start_date: r.start_date,
         end_date:   r.end_date,
         num_nights: r.num_nights,
@@ -682,6 +783,8 @@ export const computeFinancials = async (
         listing_id: r.listing_id ?? null,
         payout_bank_account_id: r.payout_bank_account_id ?? null,
         net_payout: r.net_payout !== null && r.net_payout !== undefined ? Number(r.net_payout) : null,
+        channel:      r.channel ?? null,
+        channel_fees: r.channel_fees !== null && r.channel_fees !== undefined ? Number(r.channel_fees) : null,
       }));
       rawBookingFees = bookingRes.data.map(r => ({
         start_date: r.start_date ?? null,
@@ -698,6 +801,7 @@ export const computeFinancials = async (
       isDemo = true;
     } else {
       bookings = (bookingRes.data ?? []).map(r => ({
+        id:         r.id,
         start_date: r.start_date,
         end_date:   r.end_date,
         num_nights: r.num_nights,
@@ -706,6 +810,8 @@ export const computeFinancials = async (
         listing_id: r.listing_id ?? null,
         payout_bank_account_id: r.payout_bank_account_id ?? null,
         net_payout: r.net_payout !== null && r.net_payout !== undefined ? Number(r.net_payout) : null,
+        channel:      r.channel ?? null,
+        channel_fees: r.channel_fees !== null && r.channel_fees !== undefined ? Number(r.channel_fees) : null,
       }));
     }
   }
@@ -864,5 +970,10 @@ export const computeFinancials = async (
   const inPeriod = (d: string) => { const t = new Date(d + 'T12:00:00'); return t >= range.from && t <= range.to; };
   const expensesInPeriod = expenses.filter(e => e.date && inPeriod(e.date));
 
-  return { kpis, monthlyPnL, exportMonthly, exportMonthlyByBookings, payoutBreakdown, granularity, expensesInPeriod };
+  const channelBreakdown = buildChannelBreakdown(bookings, expenses, range);
+
+  return { kpis, monthlyPnL, exportMonthly, exportMonthlyByBookings, payoutBreakdown, granularity, expensesInPeriod, channelBreakdown };
 };
+
+// ─── Internals exportados solo para pruebas unitarias ─────────────────────────
+export const __testables = { computeCore, buildMonthlyPnL, buildMonthlyPnLByBookings };
