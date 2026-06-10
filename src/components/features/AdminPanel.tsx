@@ -38,6 +38,7 @@ export default function AdminPanel() {
 
   useEffect(() => {
     void bootstrap();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function bootstrap() {

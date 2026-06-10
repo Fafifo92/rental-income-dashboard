@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase/client';
 import type { MaintenanceScheduleRow, MaintenanceScheduleStatus } from '@/types/database';
 import { isDemoMode } from '@/lib/demoMode';
-import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { demoBlockWrite } from '@/lib/demoGuard';
 import { DEMO_MAINTENANCE } from './demo/fixtures';
 
 // ─── Input types ──────────────────────────────────────────────────────────────

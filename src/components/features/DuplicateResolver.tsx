@@ -1,8 +1,7 @@
 import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { formatCurrency } from '@/lib/utils';
-import type { DuplicateEntry, DuplicateAction, DuplicateResolutions, ParsedBooking } from '@/services/etl';
-import { buildMergedBooking } from '@/services/etl';
+import { buildMergedBooking, type DuplicateEntry, type DuplicateAction, type DuplicateResolutions, type ParsedBooking } from '@/services/etl';
 import { formatDateDisplay } from '@/lib/dateUtils';
 
 interface Props {
