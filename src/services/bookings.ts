@@ -151,16 +151,56 @@ export const upsertBookings = async (
     return { data: { upserted: 0, skipped: skippedCodes.length, errors }, error: null };
   }
 
-  // 3. Upsert — confirmation_code is UNIQUE in DB
-  const { data, error } = await supabase
+  // 3. Separar filas nuevas vs existentes (confirmation_code es UNIQUE en BD).
+  //    Las existentes se actualizan SOLO en los campos del archivo — un upsert
+  //    completo borraría payout, notas, depósitos y demás datos manuales.
+  const codes = rows.map(r => r.confirmation_code);
+  const { data: existingRows, error: exErr } = await supabase
     .from('bookings')
-    .upsert(rows, { onConflict: 'confirmation_code' })
-    .select('id');
+    .select('confirmation_code')
+    .in('confirmation_code', codes);
+  if (exErr) return { data: null, error: exErr.message };
 
-  if (error) return { data: null, error: error.message };
+  const existingCodes = new Set((existingRows ?? []).map(r => r.confirmation_code));
+  const inserts = rows.filter(r => !existingCodes.has(r.confirmation_code));
+  const updates = rows.filter(r => existingCodes.has(r.confirmation_code));
+
+  let upserted = 0;
+
+  if (inserts.length > 0) {
+    const { data, error } = await supabase
+      .from('bookings')
+      .insert(inserts)
+      .select('id');
+    if (error) return { data: null, error: error.message };
+    upserted += data.length;
+  }
+
+  for (const r of updates) {
+    const { error } = await supabase
+      .from('bookings')
+      .update({
+        listing_id: r.listing_id,
+        guest_name: r.guest_name,
+        start_date: r.start_date,
+        end_date: r.end_date,
+        num_nights: r.num_nights,
+        total_revenue: r.total_revenue,
+        gross_revenue: r.gross_revenue,
+        status: r.status,
+        checkin_done: r.checkin_done,
+        checkout_done: r.checkout_done,
+      })
+      .eq('confirmation_code', r.confirmation_code);
+    if (error) {
+      errors.push(`${r.confirmation_code}: ${error.message}`);
+    } else {
+      upserted++;
+    }
+  }
 
   return {
-    data: { upserted: data.length, skipped: skippedCodes.length, errors },
+    data: { upserted, skipped: skippedCodes.length, errors },
     error: null,
   };
 };
@@ -882,6 +922,7 @@ export const updateBooking = async (
     notes?: string | null;
     listing_id?: string | null;
     security_deposit?: number | null;
+    confirmation_code?: string;
   },
 ): Promise<ServiceResult<BookingRow>> => {
   if (demoBlockWrite('editar reserva')) return demoWriteBlockedResult<BookingRow>();
@@ -965,6 +1006,20 @@ export const generateDirectBookingCode = (): string => {
   const year = new Date().getFullYear();
   const rand = Math.floor(Math.random() * 99999).toString().padStart(5, '0');
   return `DIR-${year}-${rand}`;
+};
+
+/**
+ * Random code for bookings created manually SIN código de confirmación.
+ * Sólo se usa como fallback: si el usuario escribe un código, se respeta tal cual.
+ * Alfabeto sin caracteres ambiguos (0/O, 1/I/L).
+ */
+export const generateRandomBookingCode = (): string => {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 10; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
 };
 export const getDemoKPIs = (bookings: ParsedBooking[]): BookingKPIs => {
   const completed = bookings.filter(b => !b.status.toLowerCase().includes('cancel'));

@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   getDemoBookings, saveDemoBookings, insertBooking,
   updateBooking, deleteBooking, checkBookingOverlap,
-  generateDirectBookingCode, getBooking, listBookingAlerts, type BookingFilters,
+  generateDirectBookingCode, generateRandomBookingCode,
+  getBooking, listBookingAlerts, type BookingFilters,
 } from '@/services/bookings';
 import { listAllCleanings } from '@/services/cleanings';
 import { findOrCreateListing } from '@/services/listings';
@@ -302,8 +303,11 @@ export default function BookingsClient() {
     setFormWarning('');
     const nights  = parseInt(form.num_nights) || 0;
     const revenue = parseMoney(form.total_revenue) ?? 0;
-    const code = form.confirmation_code
-      || (form.channel === 'direct' ? generateDirectBookingCode() : `MANUAL-${Date.now()}`);
+    // Si el usuario escribió un código, se usa EXACTAMENTE como lo escribió.
+    // Sólo si el campo queda vacío se genera uno: DIR-… para canal directo,
+    // o un código aleatorio para los demás canales.
+    const code = form.confirmation_code.trim()
+      || (form.channel === 'direct' ? generateDirectBookingCode() : generateRandomBookingCode());
 
     try {
       if (editingId) {
@@ -344,6 +348,7 @@ export default function BookingsClient() {
           num_children: parseInt(form.num_children) || 0,
           notes: form.notes || null,
           security_deposit: parseMoney(form.security_deposit) ?? null,
+          ...(form.confirmation_code.trim() ? { confirmation_code: form.confirmation_code.trim() } : {}),
           ...(targetListingId !== editingListingId ? { listing_id: targetListingId } : {}),
         });
         if (res.error) { toast.error(res.error); setFormLoading(false); return; }
@@ -420,10 +425,11 @@ export default function BookingsClient() {
     setEditingId(b.id);
     setEditingListingId(b.listing_id ?? null);
     setEditingPropertyId(b.property_id ?? null);
-    // Auto-normalize: if end_date is past but status is still "active", correct to Completada
+    // Auto-normalize: si el check-out ya pasó O es hoy y el estado sigue "activo",
+    // corregir a Completada (una reserva cuyo check-out es hoy ya terminó su estadía).
     const today = todayISO();
     let normalizedStatus = b.status;
-    if (b.end_date && b.end_date < today &&
+    if (b.end_date && b.end_date <= today &&
         (normalizedStatus === 'Reservada' || normalizedStatus === 'En curso' || normalizedStatus === 'Inicia hoy')) {
       normalizedStatus = 'Completada';
     }

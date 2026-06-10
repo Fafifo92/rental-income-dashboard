@@ -849,6 +849,10 @@ export default function PrintReport() {
                   <td className="py-1.5 pl-4 text-slate-500">Noches disponibles</td>
                   <td className="py-1.5 text-right font-mono text-slate-700">{kpis.availableNights}</td>
                 </tr>
+                <tr className="border-b border-slate-50">
+                  <td className="py-1.5 pl-4 text-slate-500">Ingresos por hospedaje (base ADR/RevPAR)</td>
+                  <td className="py-1.5 text-right font-mono text-slate-700">{formatCurrency(bookingRevenue)}</td>
+                </tr>
                 <tr className="border-b border-slate-100">
                   <td className="py-1.5 text-slate-700">ADR (Tarifa Diaria Prom.)</td>
                   <td className="py-1.5 text-right font-mono text-slate-800 font-semibold">{formatCurrency(kpis.adr)}</td>
@@ -917,6 +921,15 @@ export default function PrintReport() {
               />
             </div>
           </div>
+          {/* Metodología de cálculo */}
+          <p className="mt-3 text-[10px] leading-relaxed text-slate-400">
+            <strong className="text-slate-500">Metodología:</strong>{' '}
+            ADR = ingresos por hospedaje ÷ noches reservadas · RevPAR = ingresos por hospedaje ÷ noches disponibles.
+            Los «ingresos por hospedaje» son la base de estas métricas: incluyen sólo la tarifa de las reservas
+            no canceladas con check-in dentro del período (excluyen ajustes, cobros por daños y tarifas de cancelación,
+            que sí forman parte de los Ingresos Brutos). Las noches disponibles = días del período × propiedades.
+            Todos los valores se redondean al peso, por lo que ADR × noches puede diferir en pocos pesos del total.
+          </p>
         </Section>
 
         {/* ── S4: DESGLOSE POR PROPIEDAD (solo si hay múltiples) ─────────── */}

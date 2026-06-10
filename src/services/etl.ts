@@ -170,8 +170,32 @@ export interface DuplicateEntry {
   differingFields: string[];
 }
 
-export type DuplicateAction = 'use_incoming' | 'keep_existing';
+export type DuplicateAction = 'use_incoming' | 'keep_existing' | 'merge';
 export type DuplicateResolutions = Record<string, DuplicateAction>;
+
+/**
+ * Builds a merged booking for the 'merge' duplicate action.
+ * `incomingFields` lists which fields should come from `incoming`;
+ * all other comparable fields are taken from `existing`.
+ */
+export const buildMergedBooking = (
+  incoming: ParsedBooking,
+  existing: DuplicateExisting,
+  incomingFields: string[],
+): ParsedBooking => {
+  const merged: ParsedBooking = { ...incoming };
+  const incomingSet = new Set(incomingFields);
+  const comparableFields = ['status', 'guest_name', 'start_date', 'end_date', 'num_nights', 'listing_name', 'revenue'] as const;
+  for (const field of comparableFields) {
+    if (!incomingSet.has(field)) {
+      const exVal = existing[field as keyof typeof existing];
+      if (exVal !== undefined) {
+        (merged as unknown as Record<string, unknown>)[field] = exVal;
+      }
+    }
+  }
+  return merged;
+};
 
 const DUPLICATE_COMPARE_FIELDS = ['status', 'guest_name', 'start_date', 'end_date', 'num_nights', 'listing_name', 'revenue'] as const;
 

@@ -22,6 +22,7 @@ import {
   deleteExpenseById,
   revertCleaningToPending,
   ignoreDataIssue,
+  keepCleaningDeleteOthers,
   type OverlapPair,
   type BookingOrphanIncome,
   type InconsistentPayout,
@@ -30,6 +31,7 @@ import {
   type CleaningDoneWithoutDate,
   type InvalidBookingDates,
   type DuplicateCodeGroup,
+  type DuplicateCleaning,
 } from '@/services/dataIssues';
 
 // ─── Helpers compartidos ────────────────────────────────────────────────────
@@ -862,6 +864,107 @@ export function SectionDuplicateCodes({
             </div>
           </div>
         ))}
+      </div>
+    </section>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// I) Aseos duplicados por reserva
+// ════════════════════════════════════════════════════════════════════════════
+export function SectionDuplicateCleanings({
+  items, onReload,
+}: {
+  items: DuplicateCleaning[];
+  onReload: () => Promise<void>;
+}) {
+  const [workingGroup, setWorkingGroup] = useState<string | null>(null);
+
+  const doKeep = async (bookingId: string, keepId: string, deleteIds: string[]) => {
+    if (!confirm(`¿Eliminar los otros ${deleteIds.length} aseo(s) de esta reserva?`)) return;
+    setWorkingGroup(bookingId);
+    const res = await keepCleaningDeleteOthers(keepId, deleteIds);
+    setWorkingGroup(null);
+    if (res.error) { toast.error(res.error); return; }
+    toast.success('Aseos duplicados eliminados.');
+    await onReload();
+  };
+
+  return (
+    <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <header className="px-5 py-4 border-b border-slate-100">
+        <h2 className="text-lg font-semibold text-slate-800">
+          Aseos duplicados por reserva
+          <span className="ml-2 text-sm font-normal text-slate-500">({items.length})</span>
+        </h2>
+        <p className="text-xs text-slate-500 mt-1 max-w-2xl">
+          Reservas con 2 o más registros de aseo. Suele pasar cuando se borra
+          y se vuelve a crear el aseo sin limpiar el anterior. Elige cuál
+          conservar; los demás y sus gastos se borrarán.
+        </p>
+      </header>
+      <div className="p-5 space-y-4">
+        {items.length === 0 && <EmptySection message="Sin aseos duplicados." />}
+        {items.map(group => {
+          const isWorking = workingGroup === group.booking_id;
+          return (
+            <div key={group.booking_id} className="border border-amber-200 bg-amber-50/30 rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-3 text-sm flex-wrap">
+                <span className="font-mono font-semibold text-slate-800">{group.booking_code ?? group.booking_id.slice(0, 8)}</span>
+                {group.property_name && <span className="text-slate-600">· {group.property_name}</span>}
+                {group.guest_name && <span className="text-slate-500">· {group.guest_name}</span>}
+                <span className="ml-auto text-xs text-amber-700 bg-amber-100 border border-amber-200 rounded px-2 py-0.5">
+                  {group.cleanings.length} aseos
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-[10px] uppercase text-slate-500 bg-slate-50">
+                    <tr>
+                      <th className="text-left py-1.5 px-2">Estado</th>
+                      <th className="text-left py-1.5 px-2">Aseador</th>
+                      <th className="text-left py-1.5 px-2">Fecha aseo</th>
+                      <th className="text-left py-1.5 px-2">Pagado</th>
+                      <th className="text-right py-1.5 px-2">Tarifa</th>
+                      <th className="text-right py-1.5 px-2">Insumos</th>
+                      <th className="py-1.5 px-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {group.cleanings.map(c => {
+                      const otherIds = group.cleanings.filter(x => x.id !== c.id).map(x => x.id);
+                      return (
+                        <tr key={c.id} className="hover:bg-white">
+                          <td className="py-1.5 px-2">
+                            {c.status === 'paid' && <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-semibold">Pagado</span>}
+                            {c.status === 'done' && <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-semibold">Hecho</span>}
+                            {c.status === 'pending' && <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-semibold">Pendiente</span>}
+                          </td>
+                          <td className="py-1.5 px-2 text-slate-700">{c.cleaner_name ?? <span className="text-slate-400">—</span>}</td>
+                          <td className="py-1.5 px-2 text-slate-500 text-xs whitespace-nowrap">{c.done_date ? formatDateDisplay(c.done_date) : '—'}</td>
+                          <td className="py-1.5 px-2 text-slate-500 text-xs whitespace-nowrap">{c.paid_date ? formatDateDisplay(c.paid_date) : '—'}</td>
+                          <td className="py-1.5 px-2 text-right tabular-nums font-semibold">{formatCurrency(c.fee)}</td>
+                          <td className="py-1.5 px-2 text-right tabular-nums text-slate-500 text-xs">
+                            {c.supplies_amount > 0 ? formatCurrency(c.supplies_amount) : <span className="text-slate-300">—</span>}
+                          </td>
+                          <td className="py-1.5 px-2 text-right">
+                            <button
+                              onClick={() => doKeep(group.booking_id, c.id, otherIds)}
+                              disabled={isWorking}
+                              className="px-2.5 py-1 bg-emerald-600 text-white rounded text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50 whitespace-nowrap"
+                            >
+                              {isWorking ? '…' : 'Conservar este'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </section>
   );

@@ -30,6 +30,7 @@ import {
   listDoneCleaningsWithoutDate,
   listInvalidBookingDates,
   listDuplicateConfirmationCodes,
+  listDuplicateCleanings,
   assignBankAccountToExpenses,
   repairOrphanCleaningWithExpense,
   revertCleaningToPending,
@@ -44,6 +45,7 @@ import {
   type CleaningDoneWithoutDate,
   type InvalidBookingDates,
   type DuplicateCodeGroup,
+  type DuplicateCleaning,
 } from '@/services/dataIssues';
 import {
   SectionOverlaps,
@@ -54,6 +56,7 @@ import {
   SectionDoneCleaningsNoDate,
   SectionInvalidBookingDates,
   SectionDuplicateCodes,
+  SectionDuplicateCleanings,
 } from './SectionsV2';
 
 const BookingDetailModal = lazy(() => import('../BookingDetailModal'));
@@ -97,6 +100,7 @@ export default function DataIssuesClient() {
   const [doneCleaningsNoDate, setDoneCleaningsNoDate] = useState<CleaningDoneWithoutDate[]>([]);
   const [invalidBookingDates, setInvalidBookingDates] = useState<InvalidBookingDates[]>([]);
   const [duplicateCodes, setDuplicateCodes] = useState<DuplicateCodeGroup[]>([]);
+  const [duplicateCleanings, setDuplicateCleanings] = useState<DuplicateCleaning[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>('resumen');
 
   // Estado del modal de detalle de reserva
@@ -136,7 +140,7 @@ export default function DataIssuesClient() {
   const load = async () => {
     setLoading(true);
     setError(null);
-    const [s, b, e, c, p, ov, oi, ip, ie, pcnc, dcnd, ibd, dc] = await Promise.all([
+    const [s, b, e, c, p, ov, oi, ip, ie, pcnc, dcnd, ibd, dc, dupC] = await Promise.all([
       fetchDataIssuesSummary(),
       listBankAccounts(),
       listExpensesPaidWithoutAccount(),
@@ -150,8 +154,9 @@ export default function DataIssuesClient() {
       listDoneCleaningsWithoutDate(),
       listInvalidBookingDates(),
       listDuplicateConfirmationCodes(),
+      listDuplicateCleanings(),
     ]);
-    const firstErr = [s, b, e, c, p, ov, oi, ip, ie, pcnc, dcnd, ibd, dc].find(r => r.error)?.error;
+    const firstErr = [s, b, e, c, p, ov, oi, ip, ie, pcnc, dcnd, ibd, dc, dupC].find(r => r.error)?.error;
     if (firstErr) setError(firstErr);
     setSummary(s.data);
     setBanks((b.data ?? []).filter(x => x.is_active !== false));
@@ -167,6 +172,7 @@ export default function DataIssuesClient() {
     setDoneCleaningsNoDate(dcnd.data ?? []);
     setInvalidBookingDates(ibd.data ?? []);
     setDuplicateCodes(dc.data ?? []);
+    setDuplicateCleanings(dupC.data ?? []);
     setLoading(false);
   };
 
@@ -210,8 +216,9 @@ export default function DataIssuesClient() {
       && effectiveSummary.paid_cleanings_without_cleaner_count === 0
       && effectiveSummary.done_cleanings_without_date_count === 0
       && effectiveSummary.invalid_booking_dates_count === 0
-      && effectiveSummary.duplicate_codes_count === 0;
-  }, [effectiveSummary]);
+      && effectiveSummary.duplicate_codes_count === 0
+      && duplicateCleanings.length === 0;
+  }, [effectiveSummary, duplicateCleanings]);
 
   const counts = {
     reservas: (effectiveSummary?.overlapping_bookings_count ?? 0)
@@ -222,7 +229,8 @@ export default function DataIssuesClient() {
     aseos: (effectiveSummary?.cleanings_paid_without_expense_count ?? 0)
       + (effectiveSummary?.cleanings_paid_without_date_count ?? 0)
       + (effectiveSummary?.paid_cleanings_without_cleaner_count ?? 0)
-      + (effectiveSummary?.done_cleanings_without_date_count ?? 0),
+      + (effectiveSummary?.done_cleanings_without_date_count ?? 0)
+      + duplicateCleanings.length,
     gastos: (effectiveSummary?.expenses_paid_without_account_count ?? 0)
       + (effectiveSummary?.invalid_expenses_count ?? 0),
   };
@@ -239,7 +247,7 @@ export default function DataIssuesClient() {
         </p>
       </header>
 
-      <SummaryBanner summary={effectiveSummary} loading={loading} allClean={allClean} />
+      <SummaryBanner summary={effectiveSummary} loading={loading} allClean={allClean} duplicateCleaningsCount={duplicateCleanings.length} />
 
       {error && (
         <div className="bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-lg px-4 py-3">
@@ -254,7 +262,7 @@ export default function DataIssuesClient() {
       />
 
       {activeTab === 'resumen' && (
-        <ResumenTab summary={effectiveSummary} loading={loading} onJump={setActiveTab} />
+        <ResumenTab summary={effectiveSummary} loading={loading} onJump={setActiveTab} duplicateCleaningsCount={duplicateCleanings.length} />
       )}
 
       {activeTab === 'reservas' && (
@@ -318,6 +326,10 @@ export default function DataIssuesClient() {
             onReload={load}
             onOpenBooking={openBooking}
             openingBookingId={openingBookingId}
+          />
+          <SectionDuplicateCleanings
+            items={duplicateCleanings}
+            onReload={load}
           />
         </div>
       )}
@@ -398,11 +410,12 @@ function TabsBar({
 }
 
 function ResumenTab({
-  summary, loading, onJump,
+  summary, loading, onJump, duplicateCleaningsCount,
 }: {
   summary: DataIssuesSummary | null;
   loading: boolean;
   onJump: (t: TabKey) => void;
+  duplicateCleaningsCount: number;
 }) {
   if (loading || !summary) {
     return <div className="text-sm text-slate-500">Cargando…</div>;
@@ -427,6 +440,7 @@ function ResumenTab({
         { label: 'Pagados sin fecha', count: summary.cleanings_paid_without_date_count },
         { label: 'Pagados sin aseador', count: summary.paid_cleanings_without_cleaner_count },
         { label: 'Realizados sin fecha', count: summary.done_cleanings_without_date_count },
+        { label: 'Aseos duplicados', count: duplicateCleaningsCount },
       ],
     },
     {
@@ -477,8 +491,8 @@ function ResumenTab({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SummaryBanner({
-  summary, loading, allClean,
-}: { summary: DataIssuesSummary | null; loading: boolean; allClean: boolean }) {
+  summary, loading, allClean, duplicateCleaningsCount,
+}: { summary: DataIssuesSummary | null; loading: boolean; allClean: boolean; duplicateCleaningsCount: number }) {
   if (loading || !summary) {
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
@@ -501,7 +515,8 @@ function SummaryBanner({
   const totalAseos = summary.cleanings_paid_without_expense_count
     + summary.cleanings_paid_without_date_count
     + summary.paid_cleanings_without_cleaner_count
-    + summary.done_cleanings_without_date_count;
+    + summary.done_cleanings_without_date_count
+    + duplicateCleaningsCount;
   const totalGastos = summary.expenses_paid_without_account_count
     + summary.invalid_expenses_count;
   return (

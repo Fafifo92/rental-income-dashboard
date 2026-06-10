@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { formatCurrency } from '@/lib/utils';
 import type { DuplicateEntry, DuplicateAction, DuplicateResolutions, ParsedBooking } from '@/services/etl';
+import { buildMergedBooking } from '@/services/etl';
 import { formatDateDisplay } from '@/lib/dateUtils';
 
 interface Props {
@@ -45,10 +46,14 @@ function DuplicateCard({
   dup,
   action,
   onChange,
+  mergeFields,
+  onMergeFieldsChange,
 }: {
   dup: DuplicateEntry;
   action: DuplicateAction;
   onChange: (a: DuplicateAction) => void;
+  mergeFields: string[];
+  onMergeFieldsChange: (fields: string[]) => void;
 }) {
   const isDb = dup.type === 'with_db';
   const hasPayout = dup.existing.has_payout;
@@ -202,7 +207,59 @@ function DuplicateCard({
         >
           {action === 'keep_existing' ? '✓ ' : ''}{isDb ? 'Conservar actual' : 'Usar primera ocurrencia'}
         </button>
+        {isDb && dup.differingFields.length > 0 && (
+          <button
+            onClick={() => onChange('merge')}
+            className={`flex-1 py-2 text-xs font-semibold rounded-lg border transition-all ${
+              action === 'merge'
+                ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
+                : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300 hover:text-violet-600'
+            }`}
+          >
+            {action === 'merge' ? '✓ ' : ''}Mezclar campos
+          </button>
+        )}
       </div>
+
+      {/* Merge field selector */}
+      {action === 'merge' && dup.differingFields.length > 0 && (
+        <div className="mt-3 p-3 bg-violet-50 border border-violet-200 rounded-lg space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-violet-700">
+            Selecciona qué campos tomar del archivo (desmarca para mantener los de la BD)
+          </p>
+          <div className="space-y-1.5">
+            {dup.differingFields.map(field => {
+              const checked = mergeFields.includes(field);
+              const incomingVal = fmtValue(field, dup.incoming[field as keyof ParsedBooking] as string | number);
+              const existingVal = fmtValue(field, dup.existing[field as keyof typeof dup.existing] as string | number);
+              return (
+                <label key={field} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={e => {
+                      if (e.target.checked) {
+                        onMergeFieldsChange([...mergeFields, field]);
+                      } else {
+                        onMergeFieldsChange(mergeFields.filter(f => f !== field));
+                      }
+                    }}
+                    className="accent-violet-600"
+                  />
+                  <span className="text-xs text-slate-700 w-20 shrink-0">{FIELD_LABELS[field] ?? field}</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded ${checked ? 'bg-blue-100 text-blue-700 font-semibold' : 'text-slate-400 line-through'}`}>
+                    {incomingVal} <span className="font-normal opacity-60">(archivo)</span>
+                  </span>
+                  <span className="text-xs text-slate-400">→</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded ${!checked ? 'bg-slate-200 text-slate-700 font-semibold' : 'text-slate-400 line-through'}`}>
+                    {existingVal} <span className="font-normal opacity-60">(BD)</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -210,6 +267,9 @@ function DuplicateCard({
 export default function DuplicateResolver({ duplicates, allBookings, onResolve, onBack }: Props) {
   const [resolutions, setResolutions] = useState<DuplicateResolutions>(() =>
     Object.fromEntries(duplicates.map(d => [d.confirmation_code, getSmartDefault(d)])),
+  );
+  const [mergeFields, setMergeFields] = useState<Record<string, string[]>>(() =>
+    Object.fromEntries(duplicates.map(d => [d.id, d.differingFields])),
   );
 
   const withinFileDupes = useMemo(() => duplicates.filter(d => d.type === 'within_file'), [duplicates]);
@@ -222,12 +282,13 @@ export default function DuplicateResolver({ duplicates, allBookings, onResolve, 
   const setOne = (code: string, action: DuplicateAction) =>
     setResolutions(prev => ({ ...prev, [code]: action }));
 
-  const useIncomingCount = Object.values(resolutions).filter(v => v === 'use_incoming').length;
+  const useIncomingCount = Object.values(resolutions).filter(v => v === 'use_incoming' || v === 'merge').length;
   const keepExistingCount = duplicates.length - useIncomingCount;
 
   const handleContinue = () => {
     const objectsToRemove = new Set<ParsedBooking>();
     const codesToSkip = new Set<string>();
+    const mergedMap = new Map<string, ParsedBooking>();
 
     for (const dup of duplicates) {
       const action = resolutions[dup.confirmation_code] ?? getSmartDefault(dup);
@@ -240,11 +301,18 @@ export default function DuplicateResolver({ duplicates, allBookings, onResolve, 
           }
         }
       } else {
-        if (action === 'keep_existing') codesToSkip.add(dup.confirmation_code);
+        if (action === 'keep_existing') {
+          codesToSkip.add(dup.confirmation_code);
+        } else if (action === 'merge') {
+          const incomingFields = mergeFields[dup.id] ?? dup.differingFields;
+          mergedMap.set(dup.confirmation_code, buildMergedBooking(dup.incoming, dup.existing, incomingFields));
+        }
       }
     }
 
-    const kept = allBookings.filter(b => !objectsToRemove.has(b) && !codesToSkip.has(b.confirmation_code));
+    const kept = allBookings
+      .filter(b => !objectsToRemove.has(b) && !codesToSkip.has(b.confirmation_code))
+      .map(b => mergedMap.has(b.confirmation_code) ? mergedMap.get(b.confirmation_code)! : b);
     onResolve(kept);
   };
 
@@ -297,6 +365,8 @@ export default function DuplicateResolver({ duplicates, allBookings, onResolve, 
               dup={dup}
               action={resolutions[dup.confirmation_code] ?? 'use_incoming'}
               onChange={a => setOne(dup.confirmation_code, a)}
+              mergeFields={mergeFields[dup.id] ?? dup.differingFields}
+              onMergeFieldsChange={fields => setMergeFields(prev => ({ ...prev, [dup.id]: fields }))}
             />
           ))}
         </div>
@@ -314,6 +384,8 @@ export default function DuplicateResolver({ duplicates, allBookings, onResolve, 
               dup={dup}
               action={resolutions[dup.confirmation_code] ?? getSmartDefault(dup)}
               onChange={a => setOne(dup.confirmation_code, a)}
+              mergeFields={mergeFields[dup.id] ?? dup.differingFields}
+              onMergeFieldsChange={fields => setMergeFields(prev => ({ ...prev, [dup.id]: fields }))}
             />
           ))}
         </div>

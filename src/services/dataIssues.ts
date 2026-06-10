@@ -7,6 +7,7 @@ import type { BankAccountRow, BookingCleaningRow } from '@/types/database';
 import type { ServiceResult } from './expenses';
 import { isDemoMode } from '@/lib/demoMode';
 import { demoBlockWrite, demoWriteBlockedResult } from '@/lib/demoGuard';
+import { deleteCleaning } from './cleanings';
 
 export interface DataIssuesSummary {
   expenses_paid_without_account_count: number;
@@ -844,6 +845,124 @@ export const setCleaningDoneDate = async (
     .update({ done_date: doneDate })
     .eq('id', cleaningId);
   if (error) return { data: null, error: error.message };
+  return { data: true, error: null };
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// G) Aseos duplicados — misma reserva con 2+ booking_cleanings
+// ════════════════════════════════════════════════════════════════════════════
+
+export interface DuplicateCleaningRow {
+  id: string;
+  cleaner_id: string | null;
+  cleaner_name: string | null;
+  fee: number;
+  status: string;
+  done_date: string | null;
+  paid_date: string | null;
+  supplies_amount: number;
+}
+
+export interface DuplicateCleaning {
+  booking_id: string;
+  booking_code: string | null;
+  property_name: string | null;
+  guest_name: string | null;
+  cleanings: DuplicateCleaningRow[];
+}
+
+export const listDuplicateCleanings = async (): Promise<ServiceResult<DuplicateCleaning[]>> => {
+  if (isDemoMode()) return { data: [], error: null };
+
+  const { data: cRows, error: cErr } = await supabase
+    .from('booking_cleanings')
+    .select('id, booking_id, cleaner_id, fee, status, done_date, paid_date, supplies_amount');
+  if (cErr) return { data: null, error: cErr.message };
+
+  const grouped = new Map<string, typeof cRows>();
+  for (const c of cRows ?? []) {
+    const arr = grouped.get(c.booking_id) ?? [];
+    arr.push(c);
+    grouped.set(c.booking_id, arr);
+  }
+  const dupBookingIds = Array.from(grouped.entries())
+    .filter(([, cs]) => cs.length > 1)
+    .map(([id]) => id);
+
+  if (dupBookingIds.length === 0) return { data: [], error: null };
+
+  type BkMini = { id: string; confirmation_code: string | null; guest_name: string | null; listing_id: string };
+  const { data: bookingRows, error: bErr } = await supabase
+    .from('bookings')
+    .select('id, confirmation_code, guest_name, listing_id')
+    .in('id', dupBookingIds);
+  if (bErr) return { data: null, error: bErr.message };
+  const bookingMap = new Map((bookingRows ?? [] as BkMini[]).map((b: BkMini) => [b.id, b]));
+
+  const listingIds = Array.from(new Set((bookingRows ?? [] as BkMini[]).map((b: BkMini) => b.listing_id).filter(Boolean)));
+  type ListingMini = { id: string; property_id: string };
+  let listings: ListingMini[] = [];
+  if (listingIds.length > 0) {
+    const { data: lRows } = await supabase.from('listings').select('id, property_id').in('id', listingIds);
+    listings = (lRows ?? []) as ListingMini[];
+  }
+  const listingMap = new Map(listings.map(l => [l.id, l]));
+
+  const propertyIds = Array.from(new Set(listings.map(l => l.property_id).filter(Boolean)));
+  type PropMini = { id: string; name: string };
+  let properties: PropMini[] = [];
+  if (propertyIds.length > 0) {
+    const { data: pRows } = await supabase.from('properties').select('id, name').in('id', propertyIds);
+    properties = (pRows ?? []) as PropMini[];
+  }
+  const propertyMap = new Map(properties.map(p => [p.id, p]));
+
+  const cleanerIds = Array.from(new Set(
+    (cRows ?? []).filter(c => dupBookingIds.includes(c.booking_id) && c.cleaner_id).map(c => c.cleaner_id as string),
+  ));
+  type VendorMini = { id: string; name: string };
+  let vendors: VendorMini[] = [];
+  if (cleanerIds.length > 0) {
+    const { data: vRows } = await supabase.from('vendors').select('id, name').in('id', cleanerIds);
+    vendors = (vRows ?? []) as VendorMini[];
+  }
+  const vendorMap = new Map(vendors.map(v => [v.id, v]));
+
+  const result: DuplicateCleaning[] = dupBookingIds.map(bookingId => {
+    const booking = bookingMap.get(bookingId);
+    const listing = booking ? listingMap.get(booking.listing_id) : undefined;
+    const property = listing ? propertyMap.get(listing.property_id) : undefined;
+    const cleanings = (grouped.get(bookingId) ?? []).map(c => ({
+      id: c.id,
+      cleaner_id: c.cleaner_id,
+      cleaner_name: c.cleaner_id ? (vendorMap.get(c.cleaner_id)?.name ?? null) : null,
+      fee: Number(c.fee),
+      status: c.status as string,
+      done_date: c.done_date,
+      paid_date: c.paid_date,
+      supplies_amount: Number(c.supplies_amount),
+    }));
+    return {
+      booking_id: bookingId,
+      booking_code: booking?.confirmation_code ?? null,
+      property_name: property?.name ?? null,
+      guest_name: booking?.guest_name ?? null,
+      cleanings,
+    };
+  });
+
+  return { data: result, error: null };
+};
+
+export const keepCleaningDeleteOthers = async (
+  keepId: string,
+  deleteIds: string[],
+): Promise<ServiceResult<true>> => {
+  if (demoBlockWrite('eliminar aseos duplicados')) return demoWriteBlockedResult<true>();
+  for (const id of deleteIds) {
+    const res = await deleteCleaning(id);
+    if (res.error) return { data: null, error: res.error };
+  }
   return { data: true, error: null };
 };
 

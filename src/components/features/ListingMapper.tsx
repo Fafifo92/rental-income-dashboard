@@ -24,6 +24,11 @@ export default function ListingMapper({ uniqueNames, onConfirm, onBack }: Props)
   const isDemo = !loading && properties.length === 0;
   const anyMapped = Object.values(map).some(v => !!v);
 
+  // Una propiedad sólo puede vincularse a UN anuncio por importación:
+  // las ya elegidas en otra fila se deshabilitan en el dropdown.
+  const usedByOther = (propertyId: string, currentName: string): boolean =>
+    Object.entries(map).some(([n, v]) => n !== currentName && v === propertyId);
+
   const handleConfirm = () => {
     if (isDemo) {
       const demoMap = Object.fromEntries(uniqueNames.map(n => [n, 'demo']));
@@ -85,9 +90,14 @@ export default function ListingMapper({ uniqueNames, onConfirm, onBack }: Props)
                       className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     >
                       <option value="">— Omitir este anuncio</option>
-                      {properties.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
+                      {properties.map(p => {
+                        const taken = usedByOther(p.id, name);
+                        return (
+                          <option key={p.id} value={p.id} disabled={taken}>
+                            {p.name}{taken ? ' (ya vinculada)' : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                   )}
                 </div>
