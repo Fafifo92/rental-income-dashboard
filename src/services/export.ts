@@ -548,14 +548,13 @@ function fmtAseoDate(iso: string | null): string {
 }
 
 export function exportAseoToCsv(rows: AseoExportRow[], periodLabel: string) {
-  const header = toCsvRow(['Personal', 'Fecha aseo', 'Código reserva', 'Cliente', 'Check-in', 'Check-out', 'Valor', 'Estado', 'Fecha liquidado']);
+  const header = toCsvRow(['Personal', 'Fecha aseo', 'Código reserva', 'Cliente', 'Propiedad', 'Valor', 'Estado', 'Fecha liquidado']);
   const dataRows = rows.map(r => toCsvRow([
     r.cleaner_name,
     fmtAseoDate(r.done_date),
     r.booking_code ?? '',
     r.guest_name ?? '',
-    fmtAseoDate(r.check_in),
-    fmtAseoDate(r.check_out),
+    r.property_name ?? '',
     r.fee,
     ASEO_STATUS_LABEL[r.status] ?? r.status,
     fmtAseoDate(r.paid_date),
@@ -564,14 +563,13 @@ export function exportAseoToCsv(rows: AseoExportRow[], periodLabel: string) {
 }
 
 export function exportAseoToExcel(rows: AseoExportRow[], periodLabel: string) {
-  const headerRow = ['Personal', 'Fecha aseo', 'Código reserva', 'Cliente', 'Check-in', 'Check-out', 'Valor', 'Estado', 'Fecha liquidado'];
+  const headerRow = ['Personal', 'Fecha aseo', 'Código reserva', 'Cliente', 'Propiedad', 'Valor', 'Estado', 'Fecha liquidado'];
   const dataRows: (string | number)[][] = rows.map(r => [
     r.cleaner_name,
     fmtAseoDate(r.done_date),
     r.booking_code ?? '',
     r.guest_name ?? '',
-    fmtAseoDate(r.check_in),
-    fmtAseoDate(r.check_out),
+    r.property_name ?? '',
     r.fee,
     ASEO_STATUS_LABEL[r.status] ?? r.status,
     fmtAseoDate(r.paid_date),
@@ -587,14 +585,13 @@ export function exportAseoToPdf(rows: AseoExportRow[], periodLabel: string) {
   const tableRows = rows.map(r => `
     <tr>
       <td>${escXml(r.cleaner_name)}</td>
-      <td>${fmtAseoDate(r.done_date) || '—'}</td>
+      <td class="date">${fmtAseoDate(r.done_date) || '—'}</td>
       <td>${r.booking_code ?? '—'}</td>
       <td>${escXml(r.guest_name ?? '—')}</td>
-      <td>${fmtAseoDate(r.check_in) || '—'}</td>
-      <td>${fmtAseoDate(r.check_out) || '—'}</td>
+      <td>${escXml(r.property_name ?? '—')}</td>
       <td class="num">${formatCurrency(r.fee)}</td>
       <td>${ASEO_STATUS_LABEL[r.status] ?? r.status}</td>
-      <td>${fmtAseoDate(r.paid_date) || '—'}</td>
+      <td class="date">${fmtAseoDate(r.paid_date) || '—'}</td>
     </tr>`).join('');
 
   const html = `<!DOCTYPE html>
@@ -612,6 +609,7 @@ export function exportAseoToPdf(rows: AseoExportRow[], periodLabel: string) {
          letter-spacing: .05em; padding: 7px 6px; text-align: left; border-bottom: 2px solid #e2e8f0; }
     td { padding: 5px 6px; border-bottom: 1px solid #f1f5f9; }
     td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    td.date { white-space: nowrap; }
     tr:nth-child(even) td { background: #f8fafc; }
     tfoot td { font-weight: 700; border-top: 2px solid #e2e8f0; padding-top: 10px; }
     @media print { .no-print { display: none !important; } body { padding: 0; } }
@@ -629,14 +627,14 @@ export function exportAseoToPdf(rows: AseoExportRow[], periodLabel: string) {
     <thead>
       <tr>
         <th>Personal</th><th>Fecha aseo</th><th>Código reserva</th>
-        <th>Cliente</th><th>Check-in</th><th>Check-out</th>
+        <th>Cliente</th><th>Propiedad</th>
         <th>Valor</th><th>Estado</th><th>Fecha liquidado</th>
       </tr>
     </thead>
     <tbody>${tableRows}</tbody>
     <tfoot>
       <tr>
-        <td colspan="6">Total</td>
+        <td colspan="5">Total</td>
         <td class="num">${formatCurrency(total)}</td>
         <td colspan="2"></td>
       </tr>
@@ -652,60 +650,49 @@ export function exportAseoToPdf(rows: AseoExportRow[], periodLabel: string) {
 // ─── Bookings Standalone Export ───────────────────────────────────────────────
 
 export function exportBookingsToCsv(rows: BookingExportRow[], title: string) {
-  const hasAdj = rows.some(b => b.net_adjustment !== null);
   const header = toCsvRow([
-    'Código', 'Huésped', 'Check-in', 'Check-out', 'Noches',
-    'Ingresos', 'Fee Canal', 'Neto Pago', 'Estado', 'Canal', 'Propiedad',
-    ...(hasAdj ? ['Ajustes Neto'] : []),
+    'Código', 'Canal', 'Estado', 'Propiedad', 'Huéspedes',
+    'Check in', 'Check out', 'Noches', 'Ingresos', 'Neto',
   ]);
   const dataRows = rows.map(b => toCsvRow([
     b.confirmation_code,
+    b.channel ?? '',
+    BOOKING_STATUS_LABEL(b),
+    b.property_name ?? '',
     b.guest_name ?? '',
     formatDateDisplay(b.check_in),
     formatDateDisplay(b.check_out),
     b.nights,
     b.revenue,
-    b.channel_fees ?? '',
     b.net_payout ?? '',
-    BOOKING_STATUS_LABEL(b),
-    b.channel ?? '',
-    b.property_name ?? '',
-    ...(hasAdj ? [b.net_adjustment ?? 0] : []),
   ]));
   const active  = rows.filter(b => !isCancelledRow(b));
   const withNet = active.filter(b => b.net_payout != null);
   const totalRow = toCsvRow([
-    `TOTAL (${active.length} activas)`, '', '', '',
+    `TOTAL (${active.length} activas)`, '', '', '', '', '', '',
     active.reduce((s, b) => s + b.nights, 0),
     sumM(active.map(b => b.revenue)),
-    sumM(active.map(b => b.channel_fees ?? 0)),
     sumM(withNet.map(b => b.net_payout)),
-    '', '', '',
-    ...(hasAdj ? [sumM(active.map(b => b.net_adjustment ?? 0))] : []),
   ]);
   downloadUtf8Csv([header, ...dataRows, totalRow].join('\n'), `reservas-${title}-${today()}.csv`);
 }
 
 export function exportBookingsToExcel(rows: BookingExportRow[], title: string) {
-  const hasAdj = rows.some(b => b.net_adjustment !== null);
   const headerRow = [
-    'Código', 'Huésped', 'Check-in', 'Check-out', 'Noches',
-    'Ingresos (COP)', 'Fee Canal (COP)', 'Neto Pago (COP)', 'Estado', 'Canal', 'Propiedad',
-    ...(hasAdj ? ['Ajustes Neto (COP)'] : []),
+    'Código', 'Canal', 'Estado', 'Propiedad', 'Huéspedes',
+    'Check in', 'Check out', 'Noches', 'Ingresos (COP)', 'Neto (COP)',
   ];
   const dataRows: (string | number | null)[][] = rows.map(b => [
     b.confirmation_code,
+    b.channel ?? '',
+    BOOKING_STATUS_LABEL(b),
+    b.property_name ?? '',
     b.guest_name ?? '',
     formatDateDisplay(b.check_in),
     formatDateDisplay(b.check_out),
     b.nights,
     b.revenue,
-    b.channel_fees ?? null,
     b.net_payout ?? null,
-    BOOKING_STATUS_LABEL(b),
-    b.channel ?? '',
-    b.property_name ?? '',
-    ...(hasAdj ? [b.net_adjustment ?? 0] : []),
   ]);
   // Totales solo de reservas activas — las canceladas no aportan ingresos ni noches
   const active       = rows.filter(b => !isCancelledRow(b));
@@ -909,7 +896,6 @@ function buildOccupancyCalendarHtml(
 
 export function exportBookingsToPdf(rows: BookingExportRow[], title: string, opts: { periodFrom?: string; periodTo?: string; includeCalendar?: boolean } = {}) {
   const { includeCalendar = true } = opts;
-  const hasAdj = rows.some(b => b.net_adjustment !== null);
   // Totales solo de reservas activas — las canceladas no aportan ingresos ni noches
   const active       = rows.filter(b => !isCancelledRow(b));
   const withNet      = active.filter(b => b.net_payout != null);
@@ -921,17 +907,15 @@ export function exportBookingsToPdf(rows: BookingExportRow[], title: string, opt
   const tableRows = rows.map(b => `
     <tr>
       <td><code>${escXml(b.confirmation_code)}</code></td>
+      <td>${escXml(b.channel ?? '—')}</td>
+      <td><span class="chip">${escXml(BOOKING_STATUS_LABEL(b))}</span></td>
+      <td>${escXml(b.property_name ?? '—')}</td>
       <td>${escXml(b.guest_name ?? '—')}</td>
       <td>${formatDateDisplay(b.check_in)}</td>
       <td>${formatDateDisplay(b.check_out)}</td>
       <td class="num">${b.nights}</td>
       <td class="num">${formatCurrency(b.revenue)}</td>
-      <td class="num">${b.channel_fees != null ? formatCurrency(b.channel_fees) : '—'}</td>
       <td class="num">${b.net_payout != null ? formatCurrency(b.net_payout) : '—'}</td>
-      <td><span class="chip">${escXml(BOOKING_STATUS_LABEL(b))}</span></td>
-      <td>${escXml(b.channel ?? '—')}</td>
-      <td>${escXml(b.property_name ?? '—')}</td>
-      ${hasAdj ? `<td class="num">${b.net_adjustment != null ? formatCurrency(b.net_adjustment) : '—'}</td>` : ''}
     </tr>`).join('');
 
   const calendarSection = includeCalendar
@@ -1011,20 +995,18 @@ export function exportBookingsToPdf(rows: BookingExportRow[], title: string, opt
   <table>
     <thead>
       <tr>
-        <th>Código</th><th>Huésped</th><th>Check-in</th><th>Check-out</th><th>Noches</th>
-        <th>Ingresos</th><th>Fee canal</th><th>Neto pago</th><th>Estado</th><th>Canal</th><th>Propiedad</th>
-        ${hasAdj ? '<th>Ajustes</th>' : ''}
+        <th>Código</th><th>Canal</th><th>Estado</th><th>Propiedad</th><th>Huéspedes</th>
+        <th>Check in</th><th>Check out</th><th>Noches</th>
+        <th>Ingresos</th><th>Neto</th>
       </tr>
     </thead>
     <tbody>${tableRows}</tbody>
     <tfoot>
       <tr>
-        <td colspan="4">Total (${active.length} activas)</td>
+        <td colspan="7">Total (${active.length} activas)</td>
         <td class="num">${totalNights}</td>
         <td class="num">${formatCurrency(totalRevenue)}</td>
-        <td class="num">${formatCurrency(totalFees)}</td>
         <td class="num">${formatCurrency(totalNet)}</td>
-        <td colspan="${hasAdj ? 4 : 3}"></td>
       </tr>
     </tfoot>
   </table>
