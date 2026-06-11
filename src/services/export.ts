@@ -919,10 +919,12 @@ export function exportBookingsToPdf(rows: BookingExportRow[], title: string, opt
     </tr>`).join('');
 
   const calendarSection = includeCalendar
-    ? `<h2 style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:12px;margin-top:20px;letter-spacing:-0.01em">
+    ? `<div class="calendar-page">
+  <h2 style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:12px;margin-top:0;letter-spacing:-0.01em">
     🗓️ Calendario de Ocupación
   </h2>
-  ${buildOccupancyCalendarHtml(rows, opts.periodFrom, opts.periodTo)}`
+  ${buildOccupancyCalendarHtml(rows, opts.periodFrom, opts.periodTo)}
+  </div>`
     : '';
 
   const html = `<!DOCTYPE html>
@@ -949,6 +951,8 @@ export function exportBookingsToPdf(rows: BookingExportRow[], title: string, opt
     tr:nth-child(even) td { background: #fafafa; }
     tfoot td { font-weight: 700; border-top: 2px solid #e2e8f0; padding-top: 10px; background: #f8fafc; }
     @page { size: A4 landscape; margin: 12mm; }
+    /* Calendario de ocupación: siempre arranca en una página nueva y completa */
+    .calendar-page { page-break-before: always; break-before: page; }
     @media print {
       .no-print { display: none !important; }
       body { padding: 0; }
